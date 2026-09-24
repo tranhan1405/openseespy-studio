@@ -1221,3 +1221,212 @@ def test_node_result_animation_text_no_longer_freezes_tables():
     assert "Values frozen during playback" not in source
     assert "tables update on Pause" not in source
     assert "def _export_node_table_csv" in source
+
+
+def _two_frame_motion_result():
+    return {
+        "analysis": {"type": "Static"},
+        "history": {
+            "time": [0.5, 1.0],
+            "nodes": {
+                "1": {
+                    "disp": [
+                        [0.001, 0.0, 0.0],
+                        [0.002, 0.0, 0.0],
+                    ],
+                    "vel": [[], []],
+                    "accel": [[], []],
+                    "reaction": [[], []],
+                }
+            },
+            "element_local_forces": {
+                "10": [
+                    [
+                        10.0, 2.0, 3.0, 4.0, 5.0, 6.0,
+                        -10.0, -2.0, -3.0, -4.0, -5.0, -6.0,
+                    ],
+                    [
+                        20.0, 4.0, 6.0, 8.0, 10.0, 12.0,
+                        -20.0, -4.0, -6.0, -8.0, -10.0, -12.0,
+                    ],
+                ]
+            },
+            "shell_section_forces": {
+                "20": [
+                    [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+                    [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0],
+                ]
+            },
+            "shell_section_deformations": {
+                "20": [
+                    [0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008],
+                    [0.011, 0.012, 0.013, 0.014, 0.015, 0.016, 0.017, 0.018],
+                ]
+            },
+            "mefi_panel_strains": {
+                "30": {
+                    "1": [
+                        [5.0e-5, 0.0, 0.0],
+                        [2.0e-4, 0.0, 0.0],
+                    ]
+                }
+            },
+            "base_reactions": [[], []],
+            "base_shear": [0.0, 0.0],
+            "displacement": [
+                [0.001, 0.0, 0.0],
+                [0.002, 0.0, 0.0],
+            ],
+        },
+        "final": {
+            "node_displacements": {"1": [0.002, 0.0, 0.0]},
+            "node_reactions": {"1": [0.0, 0.0, 0.0]},
+            "element_local_forces": {
+                "10": [
+                    20.0, 4.0, 6.0, 8.0, 10.0, 12.0,
+                    -20.0, -4.0, -6.0, -8.0, -10.0, -12.0,
+                ]
+            },
+            "shell_section_forces": {
+                "20": {
+                    "average": [
+                        11.0, 12.0, 13.0, 14.0,
+                        15.0, 16.0, 17.0, 18.0,
+                    ],
+                    "gauss_points": [],
+                }
+            },
+            "shell_section_deformations": {
+                "20": {
+                    "average": [
+                        0.011, 0.012, 0.013, 0.014,
+                        0.015, 0.016, 0.017, 0.018,
+                    ],
+                    "gauss_points": [],
+                }
+            },
+            "mefi_panel_strains": {
+                "30": {"1": [2.0e-4, 0.0, 0.0]}
+            },
+        },
+        "mefi_crack_specs": {
+            "30": {
+                "panels": [
+                    {
+                        "panel": 1,
+                        "width": 1.0,
+                        "section_tag": 1,
+                        "cracking_strain": 1.0e-4,
+                    }
+                ]
+            }
+        },
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+
+
+def test_member_force_table_follows_animation_frame(qapp):
+    panel = ResultsPanel()
+    try:
+        panel.set_result(_two_frame_motion_result())
+        panel.show_solution_result(
+            "MemberForce",
+            {"component": "N", "_element_scope": [10]},
+        )
+        qapp.processEvents()
+
+        panel._set_motion_index(0)
+        qapp.processEvents()
+        first_i = panel.element_table.item(0, 1).text()
+        first_j = panel.element_table.item(0, 2).text()
+
+        panel._set_motion_index(1)
+        qapp.processEvents()
+        second_i = panel.element_table.item(0, 1).text()
+        second_j = panel.element_table.item(0, 2).text()
+
+        assert (first_i, first_j) != (second_i, second_j)
+        assert "live animation frame 2/2" in panel.element_info.text()
+        assert panel.member_animate_button.isVisible()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_shell_force_and_deformation_tables_follow_animation_frame(qapp):
+    panel = ResultsPanel()
+    try:
+        panel.set_result(_two_frame_motion_result())
+
+        panel.show_solution_result(
+            "ShellForce",
+            {"component": "Nxx", "_element_scope": [20]},
+        )
+        panel._set_motion_index(0)
+        qapp.processEvents()
+        assert panel.shell_tables["Membrane"].item(0, 1).text() == "1"
+        panel._set_motion_index(1)
+        qapp.processEvents()
+        assert panel.shell_tables["Membrane"].item(0, 1).text() == "11"
+        assert "live force summary" in panel.shell_info.text()
+
+        panel.show_solution_result(
+            "ShellDeformation",
+            {"component": "Exx", "_element_scope": [20]},
+        )
+        panel._set_motion_index(0)
+        qapp.processEvents()
+        assert (
+            panel.shell_tables["Membrane Strain"].item(0, 1).text()
+            == "0.001"
+        )
+        panel._set_motion_index(1)
+        qapp.processEvents()
+        assert (
+            panel.shell_tables["Membrane Strain"].item(0, 1).text()
+            == "0.011"
+        )
+        assert "live deformation summary" in panel.shell_info.text()
+        assert panel.shell_animate_button.isVisible()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_crack_table_follows_animation_frame_and_accumulate(qapp):
+    panel = ResultsPanel()
+    try:
+        panel.set_result(_two_frame_motion_result())
+        panel.show_solution_result(
+            "CrackPattern",
+            {
+                "accumulate": False,
+                "line_scale": 0.82,
+                "_element_scope": [30],
+            },
+        )
+
+        panel._set_motion_index(0)
+        qapp.processEvents()
+        assert panel.crack_table.item(0, 5).text() == "Below epsilon_cr"
+        assert "active frame 1/2" in panel.crack_summary.text()
+
+        panel._set_motion_index(1)
+        qapp.processEvents()
+        assert panel.crack_table.item(0, 5).text() == "Cracked"
+        assert "active frame 2/2" in panel.crack_summary.text()
+
+        panel.crack_accumulate.setChecked(True)
+        panel._set_motion_index(1)
+        qapp.processEvents()
+        assert panel.crack_table.item(0, 5).text() == "Cracked"
+        assert "accumulated frame 2/2" in panel.crack_summary.text()
+        assert "max<=frame" in panel.crack_table.horizontalHeaderItem(3).text()
+        assert panel.crack_animate_button.isVisible()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
