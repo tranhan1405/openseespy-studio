@@ -197,6 +197,8 @@ class ModelViewport(QWidget):
         self._motion_element_node_tags: list[int] = []
         self._motion_node_tags: list[int] = []
         self._motion_topology_key: object | None = None
+        self._node_probe_tag: int | None = None
+        self._node_probe_label = ""
 
         # Point-label mappers are comparatively expensive while the camera is
         # moving. Keep IDs visible at rest, but suspend only the node/element
@@ -6164,9 +6166,17 @@ class ModelViewport(QWidget):
             return "actual_section"
         return representation
 
-    def clear_node_probe_overlay(self, *, render: bool = True) -> None:
+    def clear_node_probe_overlay(
+        self,
+        *,
+        render: bool = True,
+        forget: bool = True,
+    ) -> None:
         for name in ("node-probe-point", "node-probe-label"):
             self._remove_overlay(name)
+        if forget:
+            self._node_probe_tag = None
+            self._node_probe_label = ""
         if render:
             self.plotter.render()
 
@@ -6175,15 +6185,23 @@ class ModelViewport(QWidget):
         node_tag: int,
         label: str,
         *,
+        position: tuple[float, float, float] | None = None,
         render: bool = True,
     ) -> None:
-        self.clear_node_probe_overlay(render=False)
+        self.clear_node_probe_overlay(render=False, forget=False)
         if self._model is None:
             return
         node = self._model.nodes.get(int(node_tag))
         if node is None:
             return
-        cloud = pv.PolyData(np.asarray([node.xyz], dtype=float))
+        self._node_probe_tag = int(node_tag)
+        self._node_probe_label = str(label)
+        probe_position = (
+            tuple(float(value) for value in position)
+            if position is not None
+            else tuple(float(value) for value in node.xyz)
+        )
+        cloud = pv.PolyData(np.asarray([probe_position], dtype=float))
         self.plotter.add_mesh(
             cloud,
             name="node-probe-point",
@@ -6191,10 +6209,11 @@ class ModelViewport(QWidget):
             point_size=18,
             render_points_as_spheres=True,
             pickable=False,
+            show_scalar_bar=False,
             render=False,
         )
         self._add_annotation_labels(
-            [node.xyz],
+            [probe_position],
             [str(label)],
             name="node-probe-label",
             text_color="#6a318f",
@@ -6204,7 +6223,12 @@ class ModelViewport(QWidget):
         if render:
             self.plotter.render()
 
-    def clear_result_overlay(self, *, render: bool = True) -> None:
+    def clear_result_overlay(
+        self,
+        *,
+        render: bool = True,
+        preserve_probe: bool = False,
+    ) -> None:
         for name in (
             "result-overlay",
             "result-section-surface",
@@ -6219,10 +6243,10 @@ class ModelViewport(QWidget):
             "result-hinge-points",
             "motion-overlay",
             "motion-nodes",
-            "node-probe-point",
-            "node-probe-label",
         ):
             self._remove_overlay(name)
+        if not preserve_probe:
+            self.clear_node_probe_overlay(render=False)
         self._result_overlay_active = False
         self._active_result_view_key = None
         self._motion_element_mesh = None
@@ -7647,7 +7671,12 @@ class ModelViewport(QWidget):
         )
 
         if self._motion_topology_key != topology_key:
-            self.clear_result_overlay(render=False)
+            # Probe is an independent result annotation. Rebuilding the
+            # animation mesh must not remove it or the contour scalar bar.
+            self.clear_result_overlay(
+                render=False,
+                preserve_probe=True,
+            )
 
             element_points: list[tuple[float, float, float]] = []
             element_lines: list[int] = []
@@ -7804,6 +7833,19 @@ class ModelViewport(QWidget):
                     for tag in self._motion_node_tags
                 ],
                 dtype=float,
+            )
+
+        if (
+            self._node_probe_tag is not None
+            and self._node_probe_tag in self._model.nodes
+        ):
+            # Keep the probe attached to the animated/deformed node while the
+            # motion contour and its scalar bar remain untouched.
+            self.show_node_probe(
+                self._node_probe_tag,
+                self._node_probe_label,
+                position=displaced(self._node_probe_tag),
+                render=False,
             )
 
         self._result_overlay_active = True
