@@ -888,26 +888,31 @@ def test_viewport_background_presets_and_custom_colors_are_stable():
         ModelViewport.background_style_spec("Unknown")
 
 
-def test_display_ribbon_exposes_persistent_background_controls():
+def test_display_ribbon_exposes_compact_background_menu():
     build_source = inspect.getsource(MainWindow._build_actions_and_ribbon)
-    sync_source = inspect.getsource(
-        MainWindow._sync_background_ribbon_controls
-    )
+    sync_source = inspect.getsource(MainWindow._sync_background_menu)
     save_source = inspect.getsource(
         MainWindow._save_background_preferences
     )
     reset_source = inspect.getsource(ModelViewport._reset_scene)
 
     assert '"Appearance"' in build_source
+    assert 'setText("Background")' in build_source
+    assert "QToolButton.InstantPopup" in build_source
     assert '"Publication White"' in build_source
-    assert '"Custom Solid"' in build_source
-    assert '"Custom Gradient"' in build_source
-    assert "background_bottom_button" in build_source
-    assert "background_top_button" in build_source
-    assert "background_reset_button" in build_source
+    assert '"Custom Solid..."' in build_source
+    assert '"Custom Gradient..."' in build_source
+    assert '"Reset to ANSYS Gradient"' in build_source
 
-    assert 'preset == "Custom Solid"' in sync_source
-    assert 'preset == "Custom Gradient"' in sync_source
+    # Background settings belong inside the drop-down menu rather than
+    # consuming three rows of ribbon space.
+    assert "background_combo" not in build_source
+    assert "background_bottom_button" not in build_source
+    assert "background_top_button" not in build_source
+    assert "background_reset_button" not in build_source
+
+    assert "background_preset_actions" in sync_source
+    assert "setChecked" in sync_source
     assert "set_background_style" in sync_source
 
     assert '"display/backgroundPreset"' in save_source
