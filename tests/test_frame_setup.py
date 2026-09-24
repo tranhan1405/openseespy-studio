@@ -54,6 +54,7 @@ def test_prepare_frame_grid_reuses_existing_compatible_defaults():
             "My Column PDelta",
             "PDelta",
             COLUMN_VECXZ,
+            orientation_mode="auto",
         )
     )
     project.add_transformation(
@@ -62,6 +63,7 @@ def test_prepare_frame_grid_reuses_existing_compatible_defaults():
             "My Beam Linear",
             "Linear",
             BEAM_VECXZ,
+            orientation_mode="auto",
         )
     )
     spec = FrameGridSpec(nx=1, ny=1, nz=1)
