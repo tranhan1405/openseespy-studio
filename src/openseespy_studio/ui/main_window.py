@@ -27681,7 +27681,6 @@ class MainWindow(QMainWindow):
                 self._preview_surface_meshes([t])
             )
             select_fe = menu.addAction("Select Generated FE")
-            select_fe.setEnabled(live_mesh)
             select_fe.triggered.connect(
                 lambda checked=False, t=tag:
                 self._select_generated_fe_for_surfaces([t])
