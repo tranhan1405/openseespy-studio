@@ -2165,7 +2165,11 @@ class ConnectionDialog(QDialog):
                     f"Section {section_tag} is not available."
                 )
 
-        if connection_type in {"zeroLength", "semiRigid"}:
+        if connection_type in {
+            "zeroLength",
+            "CoupledZeroLength",
+            "semiRigid",
+        }:
             bond_tags = sorted(
                 material_tag
                 for material_tag in materials_by_dof.values()
