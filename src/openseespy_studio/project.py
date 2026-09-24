@@ -548,6 +548,9 @@ ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "OrthotropicRAConcrete": (
         "conc", "ecr", "ec", "rho", "DamageCte1", "DamageCte2",
     ),
+    "SmearedSteelDoubleLayer": (
+        "mat1", "mat2", "ratio1", "ratio2", "orientation",
+    ),
 }
 
 ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
@@ -644,6 +647,13 @@ ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "rho": "density",
         "DamageCte1": "dimensionless",
         "DamageCte2": "dimensionless",
+    },
+    "SmearedSteelDoubleLayer": {
+        "mat1": "dimensionless",
+        "mat2": "dimensionless",
+        "ratio1": "dimensionless",
+        "ratio2": "dimensionless",
+        "orientation": "dimensionless",
     },
 }
 
@@ -742,6 +752,13 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "DamageCte1": 0.14,
         "DamageCte2": 0.6,
     },
+    "SmearedSteelDoubleLayer": {
+        "mat1": 1.0,
+        "mat2": 2.0,
+        "ratio1": 0.01,
+        "ratio2": 0.01,
+        "orientation": 0.0,
+    },
 }
 
 
@@ -773,6 +790,7 @@ ND_MATERIAL_FORMULATIONS: dict[str, tuple[str, ...]] = {
     "PressureDependMultiYield": ("ThreeDimensional", "PlaneStrain"),
     "ASDConcrete3D": ("ThreeDimensional",),
     "OrthotropicRAConcrete": ("Plane Stress",),
+    "SmearedSteelDoubleLayer": ("Plane Stress",),
 }
 
 
@@ -1032,6 +1050,20 @@ class NDMaterialData:
                 if self.parameters[key] < 0.0:
                     raise ValueError(
                         f"OrthotropicRAConcrete {key} cannot be negative."
+                    )
+        elif self.material_type == "SmearedSteelDoubleLayer":
+            for key in ("mat1", "mat2"):
+                tag = self.parameters[key]
+                if not tag.is_integer() or tag <= 0.0:
+                    raise ValueError(
+                        f"SmearedSteelDoubleLayer {key} must be a positive "
+                        "uniaxial material tag."
+                    )
+            for key in ("ratio1", "ratio2"):
+                if not 0.0 <= self.parameters[key] <= 1.0:
+                    raise ValueError(
+                        f"SmearedSteelDoubleLayer {key} must satisfy 0 <= "
+                        f"{key} <= 1."
                     )
         if not isinstance(self.source, dict):
             raise ValueError("nDMaterial source metadata must be an object.")
@@ -6371,6 +6403,11 @@ class ProjectDatabase:
     ) -> list[int]:
         if material.material_type == "OrthotropicRAConcrete":
             return [int(round(material.parameters["conc"]))]
+        if material.material_type == "SmearedSteelDoubleLayer":
+            return [
+                int(round(material.parameters["mat1"])),
+                int(round(material.parameters["mat2"])),
+            ]
         return []
 
     def _validate_nd_material_dependencies(
@@ -6573,12 +6610,19 @@ class ProjectDatabase:
                 ):
                     recorder.material_tag = material.tag
             for nd_material in self.nd_materials.values():
-                if (
-                    nd_material.material_type == "OrthotropicRAConcrete"
-                    and int(round(nd_material.parameters["conc"]))
-                    == original_tag
-                ):
-                    nd_material.parameters["conc"] = float(material.tag)
+                if nd_material.material_type == "OrthotropicRAConcrete":
+                    if (
+                        int(round(nd_material.parameters["conc"]))
+                        == original_tag
+                    ):
+                        nd_material.parameters["conc"] = float(material.tag)
+                elif nd_material.material_type == "SmearedSteelDoubleLayer":
+                    for key in ("mat1", "mat2"):
+                        if (
+                            int(round(nd_material.parameters[key]))
+                            == original_tag
+                        ):
+                            nd_material.parameters[key] = float(material.tag)
 
     def remove_material(self, tag: int) -> None:
         tag = _strict_int(tag, "Material tag")
