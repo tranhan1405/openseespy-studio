@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import math
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -133,6 +134,118 @@ def test_solution_result_restores_display_mode(qapp):
         panel.close()
         panel.deleteLater()
         qapp.processEvents()
+
+
+
+
+def test_crack_pattern_result_restores_controls_and_reports_panels(qapp):
+    panel = ResultsPanel()
+    result = {
+        "analysis": {"type": "Static"},
+        "mefi_crack_specs": {
+            "10": {
+                "source": "MEFI RCPanel panel_strain",
+                "panels": [
+                    {
+                        "panel": 1,
+                        "width": 0.5,
+                        "section_tag": 3,
+                        "cracking_strain": 1.0e-4,
+                    }
+                ],
+            }
+        },
+        "history": {
+            "time": [1.0, 2.0],
+            "nodes": {
+                "1": {
+                    "disp": [
+                        [0.0, 0.0, 0.0],
+                        [0.001, 0.0, 0.0],
+                    ]
+                }
+            },
+            "mefi_panel_strains": {
+                "10": {
+                    "1": [
+                        [5.0e-5, 0.0, 0.0],
+                        [2.0e-4, 0.0, 0.0],
+                    ]
+                }
+            },
+        },
+        "final": {
+            "node_displacements": {"1": [0.001, 0.0, 0.0]},
+            "mefi_panel_strains": {
+                "10": {"1": [2.0e-4, 0.0, 0.0]}
+            },
+        },
+        "convergence": {"steps": []},
+        "modes": {},
+    }
+    captured = []
+    panel.crack_frame_requested.connect(
+        lambda frame, accumulate, line_scale, scope: captured.append(
+            (int(frame), bool(accumulate), float(line_scale), list(scope))
+        )
+    )
+    try:
+        panel.set_result(result)
+        panel.show_solution_result(
+            "CrackPattern",
+            {
+                "accumulate": True,
+                "line_scale": 0.65,
+                "_element_scope": [10],
+            },
+        )
+        qapp.processEvents()
+
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Crack Pattern"
+        assert panel.crack_accumulate.isChecked()
+        assert panel.crack_line_scale.value() == pytest.approx(0.65)
+        assert panel.crack_table.rowCount() == 1
+        assert panel.crack_table.item(0, 5).text() == "Cracked"
+        assert "1 cracked at final state" in panel.crack_summary.text()
+        assert panel.motion_page.isVisible()
+
+        captured.clear()
+        panel._crack_controls_changed()
+        qapp.processEvents()
+        assert captured
+        assert captured[-1][1:] == (True, pytest.approx(0.65), [10])
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_crack_principal_strain_and_main_window_wiring():
+    epsilon_1, theta_1 = ModelViewport._principal_tensile_strain(
+        [2.0e-4, 0.0, 0.0]
+    )
+    assert epsilon_1 == pytest.approx(2.0e-4)
+    assert theta_1 == pytest.approx(0.0)
+
+    shear_epsilon, shear_theta = ModelViewport._principal_tensile_strain(
+        [0.0, 0.0, 2.0e-4]
+    )
+    assert shear_epsilon == pytest.approx(1.0e-4)
+    assert abs(shear_theta) == pytest.approx(math.pi / 4.0)
+
+    dock_source = inspect.getsource(MainWindow._build_docks)
+    render_source = inspect.getsource(MainWindow._render_result_data)
+    prereq_source = inspect.getsource(
+        MainWindow._prepare_solution_result_prerequisites
+    )
+    frame_source = inspect.getsource(MainWindow._show_crack_frame_result)
+
+    assert "crack_frame_requested.connect" in dock_source
+    assert 'result_type == "CrackPattern"' in render_source
+    assert "show_crack_pattern" in render_source
+    assert 'kind == "CrackPattern"' in prereq_source
+    assert 'element.element_type == "MEFI"' in prereq_source
+    assert "frame_index=None if frame < 0 else frame" in frame_source
 
 
 
