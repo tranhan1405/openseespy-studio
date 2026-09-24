@@ -307,8 +307,10 @@ class ConnectionDialog(QDialog):
             "<b>Rigid</b>: rigidLink beam. <b>Pinned</b>: translations tied, "
             "rotation released. <b>Semi-Rigid</b>: zeroLength spring with "
             "selected rotational/translational material DOFs. "
-            "<b>Joint2D</b> and <b>KrawinklerPanelZone</b> use the Joint / "
-            "Panel Zone tab and are currently intended for 2D frames."
+            "<b>TwoNodeLink</b>: geometry controls local X by default; enable "
+            "orientation override only when needed. <b>Joint2D</b> and "
+            "<b>KrawinklerPanelZone</b> use the Joint / Panel Zone tab and "
+            "are currently intended for 2D frames."
         )
         type_hint.setWordWrap(True)
         type_hint.setStyleSheet("color: #637487;")
@@ -410,6 +412,78 @@ class ConnectionDialog(QDialog):
             )
 
         dof_layout.addWidget(dof_group)
+
+        link_group = QGroupBox("TwoNodeLink advanced")
+        link_form = QFormLayout(link_group)
+        link_params = (
+            connection.parameters
+            if connection is not None
+            and connection.connection_type == "twoNodeLink"
+            else {}
+        )
+
+        self.link_orientation_override = QCheckBox(
+            "Override geometry-based local axes"
+        )
+        self.link_orientation_override.setChecked(
+            bool(link_params.get("orientation_override", False))
+        )
+        self.link_orientation_override.setToolTip(
+            "For a non-zero-length twoNodeLink, OpenSees normally takes local X "
+            "from Node I → Node J. Enable this only when a manual local "
+            "orientation is required."
+        )
+        link_form.addRow("Orientation:", self.link_orientation_override)
+
+        saved_p_delta = list(link_params.get("p_delta", ()))
+        self.link_pdelta_enable = QCheckBox("Use P-Delta moment distribution")
+        self.link_pdelta_enable.setChecked(bool(saved_p_delta))
+        pdelta_row = QHBoxLayout()
+        self.link_pdelta_spins: list[QDoubleSpinBox] = []
+        for index in range(4):
+            value = saved_p_delta[index] if index < len(saved_p_delta) else 0.0
+            spin = _float_spin(float(value))
+            spin.setRange(0.0, 1.0)
+            spin.setSingleStep(0.05)
+            self.link_pdelta_spins.append(spin)
+            pdelta_row.addWidget(QLabel(("i", "j", "i-z", "j-z")[index]))
+            pdelta_row.addWidget(spin)
+        pdelta_holder = QWidget()
+        pdelta_holder.setLayout(pdelta_row)
+        link_form.addRow(self.link_pdelta_enable, pdelta_holder)
+
+        saved_shear = list(link_params.get("shear_dist", ()))
+        self.link_shear_enable = QCheckBox("Use shear-center distance")
+        self.link_shear_enable.setChecked(bool(saved_shear))
+        shear_row = QHBoxLayout()
+        self.link_shear_spins: list[QDoubleSpinBox] = []
+        for index in range(2):
+            value = saved_shear[index] if index < len(saved_shear) else 0.5
+            spin = _float_spin(float(value))
+            spin.setRange(0.0, 1.0)
+            spin.setSingleStep(0.05)
+            self.link_shear_spins.append(spin)
+            shear_row.addWidget(QLabel(("dy", "dz")[index]))
+            shear_row.addWidget(spin)
+        shear_holder = QWidget()
+        shear_holder.setLayout(shear_row)
+        link_form.addRow(self.link_shear_enable, shear_holder)
+
+        self.link_mass = _float_spin(float(link_params.get("mass", 0.0)))
+        self.link_mass.setMinimum(0.0)
+        link_form.addRow("Element mass:", self.link_mass)
+
+        link_note = QLabel(
+            "2D uses 2 P-Delta ratios and 1 shear-distance ratio; "
+            "3D uses 4 and 2 respectively. End-moment ratio pairs must "
+            "sum to ≤ 1.0."
+        )
+        link_note.setWordWrap(True)
+        link_note.setStyleSheet("color: #637487;")
+        link_form.addRow(link_note)
+        dof_layout.addWidget(link_group)
+        self.link_group = link_group
+
         dof_layout.addStretch(1)
         self.dof_page = dof_page
         self.dof_tab_index = self.tabs.addTab(dof_page, "DOF Materials")
@@ -671,7 +745,10 @@ class ConnectionDialog(QDialog):
         self.orientation_status = QLabel()
         self.orientation_status.setWordWrap(True)
         orient_layout.addWidget(self.orientation_status)
-        self.tabs.addTab(orient_page, "Orientation")
+        self.orientation_tab_index = self.tabs.addTab(
+            orient_page,
+            "Orientation",
+        )
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -704,6 +781,15 @@ class ConnectionDialog(QDialog):
             lambda _value: self._update_node_status()
         )
         self.preset.currentIndexChanged.connect(self._preset_changed)
+        self.link_orientation_override.toggled.connect(
+            lambda _checked: self._sync_two_node_link_options()
+        )
+        self.link_pdelta_enable.toggled.connect(
+            lambda _checked: self._sync_two_node_link_options()
+        )
+        self.link_shear_enable.toggled.connect(
+            lambda _checked: self._sync_two_node_link_options()
+        )
 
         self._sync_ground_state(self.to_ground.isChecked())
         for index in range(6):
@@ -901,6 +987,33 @@ class ConnectionDialog(QDialog):
                 self.dof_checks[index].isChecked(),
             )
 
+    def _sync_two_node_link_options(self) -> None:
+        is_link = self.connection_type.currentText() == "twoNodeLink"
+        self.link_group.setEnabled(is_link)
+        p_count = 2 if self.ndm == 2 else 4
+        s_count = 1 if self.ndm == 2 else 2
+        for index, spin in enumerate(self.link_pdelta_spins):
+            spin.setEnabled(
+                is_link
+                and self.link_pdelta_enable.isChecked()
+                and index < p_count
+            )
+        for index, spin in enumerate(self.link_shear_spins):
+            spin.setEnabled(
+                is_link
+                and self.link_shear_enable.isChecked()
+                and index < s_count
+            )
+        self.link_mass.setEnabled(is_link)
+        if hasattr(self, "orientation_tab_index"):
+            self.tabs.setTabEnabled(
+                self.orientation_tab_index,
+                (
+                    not is_link
+                    or self.link_orientation_override.isChecked()
+                ),
+            )
+
     def _connection_type_changed(self, _text: str) -> None:
         connection_type = self.connection_type.currentText()
         section_mode = connection_type == "zeroLengthSection"
@@ -978,6 +1091,7 @@ class ConnectionDialog(QDialog):
                     if direction in allowed:
                         check.setChecked(direction == target)
 
+        self._sync_two_node_link_options()
         self._update_node_status()
 
     def _preset_changed(self, index: int) -> None:
@@ -1471,6 +1585,45 @@ class ConnectionDialog(QDialog):
                     )
 
         parameters: dict[str, object] = {}
+        if connection_type == "twoNodeLink":
+            parameters["orientation_override"] = (
+                self.link_orientation_override.isChecked()
+            )
+            if self.link_pdelta_enable.isChecked():
+                count = 2 if self.ndm == 2 else 4
+                p_delta = [
+                    float(spin.value())
+                    for spin in self.link_pdelta_spins[:count]
+                ]
+                if self.ndm == 2:
+                    if sum(p_delta) > 1.0 + 1.0e-12:
+                        raise ValueError(
+                            "TwoNodeLink P-Delta end-moment ratios must sum "
+                            "to ≤ 1.0 in 2D."
+                        )
+                else:
+                    if (
+                        p_delta[0] + p_delta[1] > 1.0 + 1.0e-12
+                        or p_delta[2] + p_delta[3] > 1.0 + 1.0e-12
+                    ):
+                        raise ValueError(
+                            "TwoNodeLink 3D P-Delta ratio pairs must each "
+                            "sum to ≤ 1.0."
+                        )
+                parameters["p_delta"] = p_delta
+            else:
+                parameters["p_delta"] = []
+
+            if self.link_shear_enable.isChecked():
+                count = 1 if self.ndm == 2 else 2
+                parameters["shear_dist"] = [
+                    float(spin.value())
+                    for spin in self.link_shear_spins[:count]
+                ]
+            else:
+                parameters["shear_dist"] = []
+            parameters["mass"] = float(self.link_mass.value())
+
         node_i = self.node_i.value()
         node_j = self.node_j.value()
         referenced_materials: dict[int, int] = dict(materials_by_dof)
