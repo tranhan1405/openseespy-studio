@@ -1,6 +1,7 @@
 import inspect
 
 from openseespy_studio.ui.main_window import MainWindow
+from openseespy_studio.ui.results_panel import ResultsPanel
 from openseespy_studio.ui.viewport import ModelViewport
 
 
@@ -54,3 +55,16 @@ def test_probe_does_not_replace_animation_contour_or_scalar_bar():
     assert 'scalar_bar_args={"title": scalar_title}' in motion_source
     assert 'preserve_probe: bool = False' in clear_source
     assert 'if not preserve_probe:' in clear_source
+
+
+def test_node_probe_time_history_exposes_shared_animation_transport():
+    build_source = inspect.getsource(ResultsPanel._build_history_tab)
+    show_source = inspect.getsource(ResultsPanel.show_solution_result)
+
+    assert 'QPushButton("▶ Animate")' in build_source
+    assert '_open_animation(source="history")' in build_source
+    assert 'self.history_animate_button.setVisible(False)' in build_source
+    assert 'kind == "TimeHistory"' in show_source
+    assert 'options.get("probe", False)' in show_source
+    assert 'self.history_animate_button.setVisible(is_probe)' in show_source
+    assert 'self.motion_page.setVisible(' in show_source
