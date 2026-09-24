@@ -163,6 +163,8 @@ def test_global_style_distinguishes_locked_property_fields():
     assert "QLineEdit:disabled" in APP_STYLE
     assert "QSpinBox:disabled" in APP_STYLE
     assert "QDoubleSpinBox:disabled" in APP_STYLE
+    assert "QComboBox:focus" in APP_STYLE
+    assert "background: #d5e9ff;" in APP_STYLE
     assert "QComboBox:disabled" in APP_STYLE
     assert "background: #e3e6ea;" in APP_STYLE
     assert "color: #7b858f;" in APP_STYLE
@@ -171,9 +173,9 @@ def test_global_style_distinguishes_locked_property_fields():
 
 def test_global_style_distinguishes_selectable_combo_fields():
     assert "QComboBox {" in APP_STYLE
-    assert "background: #f2f7fc;" in APP_STYLE
+    assert "background: #eaf4ff;" in APP_STYLE
     assert "border: 1px solid #afc2d6;" in APP_STYLE
     assert "QComboBox:hover" in APP_STYLE
-    assert "background: #e7f1fc;" in APP_STYLE
+    assert "background: #ddeeff;" in APP_STYLE
     assert "QComboBox:disabled" in APP_STYLE
     assert "background: #e3e6ea;" in APP_STYLE
