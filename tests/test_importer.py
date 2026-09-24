@@ -795,3 +795,54 @@ ops.wipe()
     assert result.project.connections[1].do_rayleigh is True
     assert len(result.project.recorders) == 1
     assert result.project.recorders[1].target_tags == [0, 1, 2, 3]
+
+
+def test_importer_recovers_numpy_eigen_two_mode_rayleigh_pattern():
+    source = """
+import openseespy.opensees as ops
+import numpy as np
+
+ops.model('basic', '-ndm', 1, '-ndf', 1)
+ops.node(0, 0)
+ops.node(1, 0, '-mass', 0.1)
+ops.node(2, 0, '-mass', 0.1)
+ops.node(3, 0, '-mass', 0.1)
+ops.fix(0, 1)
+ops.uniaxialMaterial('Steel01', 1, 0.55, 60.0, 0.01)
+ops.uniaxialMaterial('Steel01', 2, 0.45, 50.0, 0.01)
+ops.uniaxialMaterial('Steel01', 3, 0.30, 30.0, 0.01)
+ops.element('zeroLength', 1, 0, 1, '-mat', 1, '-dir', 1)
+ops.element('zeroLength', 2, 1, 2, '-mat', 2, '-dir', 1)
+ops.element('zeroLength', 3, 2, 3, '-mat', 3, '-dir', 1)
+
+h = 0.05
+w1, w2, w3 = np.array(ops.eigen('-fullGenLapack', 3))**0.5
+a0 = 2*h*w1*w2/(w1+w2)
+a1 = 2*h/(w1+w2)
+ops.rayleigh(a0, 0.0, 0.0, a1)
+
+ops.wipeAnalysis()
+ops.algorithm('Newton')
+ops.system('BandGen')
+ops.numberer('Plain')
+ops.constraints('Plain')
+ops.integrator('Newmark', 0.5, 0.25)
+ops.analysis('Transient')
+ops.test('NormUnbalance', 1.0e-12, 100)
+ops.analyze(100, 0.001)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="nonlinear_mdof_rayleigh.py",
+        units={"length": "m", "force": "kN", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    analysis = next(iter(result.project.analyses.values()))
+    assert analysis.analysis_type == "Transient"
+    assert analysis.rayleigh_model == "TwoMode"
+    assert analysis.rayleigh_damping_ratio == 0.05
+    assert analysis.rayleigh_mode_i == 1
+    assert analysis.rayleigh_mode_j == 2
+    assert analysis.eigen_solver == "-fullGenLapack"
