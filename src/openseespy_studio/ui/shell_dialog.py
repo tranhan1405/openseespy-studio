@@ -64,6 +64,8 @@ class NDMaterialDialog(QDialog):
         ("Drucker-Prager", "DruckerPrager"),
         ("Pressure-independent multi-yield", "PressureIndependMultiYield"),
         ("Pressure-dependent multi-yield", "PressureDependMultiYield"),
+        ("ASD concrete 3D", "ASDConcrete3D"),
+        ("Orthotropic rotating-angle concrete", "OrthotropicRAConcrete"),
     )
 
     PARAMETER_LABELS = {
@@ -116,6 +118,16 @@ class NDMaterialDialog(QDialog):
         "cs3": "Critical-state parameter cs3",
         "pa": "Atmospheric normalization pressure pa",
         "c": "Numerical pressure constant c",
+        "fc": "Compressive strength fc",
+        "ft": "Tensile strength ft",
+        "implex": "Use IMPL-EX (0/1)",
+        "Kc": "Triaxial failure-surface coefficient Kc",
+        "cdf": "Cross-damage factor cdf",
+        "conc": "Referenced uniaxial concrete tag",
+        "ecr": "Tension cracking strain ecr",
+        "ec": "Compression peak strain ec",
+        "DamageCte1": "Cyclic compression damage constant 1",
+        "DamageCte2": "Cyclic compression damage constant 2",
     }
 
     def __init__(
@@ -300,6 +312,24 @@ class NDMaterialDialog(QDialog):
                     "e", "cs1", "cs2", "cs3", "c",
                 }:
                     low = 0.0
+            elif material_type == "ASDConcrete3D":
+                if key == "nu":
+                    low, high, decimals = -0.999999, 0.499999, 6
+                elif key == "implex":
+                    low, high, decimals = 0.0, 1.0, 0
+                elif key == "Kc":
+                    low, high, decimals = 0.500001, 1.0, 6
+                elif key in {"fc", "ft", "cdf"}:
+                    low = 0.0
+            elif material_type == "OrthotropicRAConcrete":
+                if key == "conc":
+                    low, high, decimals = 1.0, 2_147_483_647.0, 0
+                elif key == "ecr":
+                    low = 0.0
+                elif key == "ec":
+                    high = -1.0e-12
+                elif key in {"DamageCte1", "DamageCte2"}:
+                    low = 0.0
 
             widget = _float_spin(
                 shown,
@@ -348,7 +378,7 @@ class NDMaterialDialog(QDialog):
                 "SARE currently supports positive automatic noYieldSurf only, "
                 "not explicit custom surface pairs."
             )
-        else:
+        elif material_type == "PressureDependMultiYield":
             text = (
                 "Pressure-dependent multi-yield sand/silt model with "
                 "contraction, dilation and cyclic-mobility parameters. "
@@ -357,6 +387,23 @@ class NDMaterialDialog(QDialog):
                 "requires updateMaterialStage. SARE supports the automatic "
                 "yield-surface form, including documented critical-state "
                 "optional parameters, but not explicit custom surface pairs."
+            )
+        elif material_type == "ASDConcrete3D":
+            text = (
+                "3D plastic-damage concrete/masonry continuum model. "
+                "This SARE V1 editor uses the robust scalar-strength profile "
+                "(E, nu, rho, fc, ft, optional IMPL-EX, Kc and cdf); OpenSees "
+                "can auto-generate tension/compression laws from fc and ft. "
+                "Custom backbone lists, crack planes, viscosity and automatic "
+                "regularization are intentionally left unsupported in V1."
+            )
+        else:
+            text = (
+                "Orthotropic rotating-angle plane-stress concrete layer for "
+                "RC wall/membrane formulations. 'Referenced uniaxial concrete "
+                "tag' must point to an existing concrete uniaxial material "
+                "(for example Concrete02 or Concrete06). Cyclic compression "
+                "damage constants default to the OpenSees values 0.14 and 0.6."
             )
         self.note.setText(text)
 
