@@ -1948,3 +1948,113 @@ ops.element(
         and "ignores optional height/width factors" in issue.message
         for issue in result.issues
     )
+
+
+def test_beam_column_joint_material_tag_update_propagates_to_components():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 13)
+    project.add_connection(ConnectionData(
+        tag=194,
+        name="RC dependency joint",
+        connection_type="BeamColumnJoint",
+        node_i=11,
+        node_j=12,
+        parameters={
+            "external_nodes": [11, 12, 13, 10],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+
+    project.update_material(13, elastic_material(130))
+
+    assert project.connections[194].parameters["component_materials"][-1] == 130
+    assert project.connections_using_material(130) == [194]
+    assert project.connections_using_material(13) == []
+
+
+def test_beam_column_joint_blocks_deleting_component_material():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 13)
+    project.add_connection(ConnectionData(
+        tag=195,
+        name="RC delete guard",
+        connection_type="BeamColumnJoint",
+        node_i=11,
+        node_j=12,
+        parameters={
+            "external_nodes": [11, 12, 13, 10],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+
+    try:
+        project.remove_material(13)
+    except ValueError as exc:
+        assert "connections 195" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected BeamColumnJoint component material deletion to be blocked"
+        )
+
+
+def test_beam_column_joint_result_component_range_is_validated():
+    project = frame2d_project()
+    add_elastic_materials(project, 2, 13)
+    project.add_connection(ConnectionData(
+        tag=196,
+        name="RC result component guard",
+        connection_type="BeamColumnJoint",
+        node_i=11,
+        node_j=12,
+        parameters={
+            "external_nodes": [11, 12, 13, 10],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    ))
+    project.add_analysis(AnalysisSettingsData(
+        tag=1,
+        name="Static",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+        steps=1,
+        load_increment=1.0,
+    ))
+
+    project.add_solution_result(SolutionResultData(
+        tag=1,
+        analysis_tag=1,
+        name="Total deformation",
+        result_type="JointResponse",
+        element_scope=[196],
+        settings={
+            "response": "deformation",
+            "component": 4,
+        },
+    ))
+    assert project.solution_results[1].settings["component"] == 4
+
+    bad = SolutionResultData(
+        tag=2,
+        analysis_tag=1,
+        name="Bad deformation component",
+        result_type="JointResponse",
+        element_scope=[196],
+        settings={
+            "response": "deformation",
+            "component": 5,
+        },
+    )
+    try:
+        project.add_solution_result(bad)
+    except ValueError as exc:
+        assert "outside 1..4" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected BeamColumnJoint deformation component 5 to fail"
+        )
