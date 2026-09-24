@@ -53,6 +53,7 @@ class RecorderDialog(QDialog):
         initial_node_tags: set[int] | None = None,
         initial_element_tags: set[int] | None = None,
         target_creator: Callable[[str], list[int]] | None = None,
+        element_response_options: list[str] | tuple[str, ...] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -62,6 +63,11 @@ class RecorderDialog(QDialog):
         self.setMinimumWidth(470)
         self._recorder = recorder
         self._target_creator = target_creator
+        self._element_response_options = (
+            [str(value) for value in element_response_options]
+            if element_response_options
+            else None
+        )
 
         root = QVBoxLayout(self)
         form = QFormLayout()
@@ -226,9 +232,17 @@ class RecorderDialog(QDialog):
     def _update_type_controls(self) -> None:
         recorder_type = self.recorder_type.currentText()
         current_response = self.response.currentText()
+        response_options = (
+            self._element_response_options
+            if (
+                recorder_type == "Element"
+                and self._element_response_options is not None
+            )
+            else RECORDER_RESPONSES[recorder_type]
+        )
         self.response.clear()
-        self.response.addItems(RECORDER_RESPONSES[recorder_type])
-        if current_response in RECORDER_RESPONSES[recorder_type]:
+        self.response.addItems(response_options)
+        if current_response in response_options:
             self.response.setCurrentText(current_response)
 
         is_node = recorder_type == "Node"
