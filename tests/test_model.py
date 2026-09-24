@@ -236,11 +236,11 @@ def test_element_rejects_nonfinite_numeric_values():
         )
 
 
-def test_model_rejects_invalid_spatial_dimension():
-    with pytest.raises(ValueError, match=r"ndm must be 2 or 3"):
-        StructuralModel(ndm=1, ndf=3)
+def test_model_supports_one_to_three_spatial_dimensions():
+    one_d = StructuralModel(ndm=1, ndf=1)
+    assert (one_d.ndm, one_d.ndf) == (1, 1)
 
-    with pytest.raises(ValueError, match=r"ndm must be 2 or 3"):
+    with pytest.raises(ValueError, match=r"ndm must be 1, 2, or 3"):
         StructuralModel(ndm=4, ndf=6)
 
 
@@ -252,13 +252,16 @@ def test_model_rejects_invalid_dof_count():
         StructuralModel(ndm=3, ndf=7)
 
 
-def test_model_rejects_nonpositive_node_tags():
+def test_model_accepts_zero_and_rejects_negative_node_tags():
     model = StructuralModel(ndm=2, ndf=3)
 
-    with pytest.raises(ValueError, match=r"Node tag must be a positive integer"):
-        model.add_node(0, 0.0, 0.0)
+    node = model.add_node(0, 0.0, 0.0)
+    assert node.tag == 0
 
-    with pytest.raises(ValueError, match=r"Node tag must be a positive integer"):
+    with pytest.raises(
+        ValueError,
+        match=r"Node tag must be a non-negative integer",
+    ):
         model.add_node(-1, 0.0, 0.0)
 
 

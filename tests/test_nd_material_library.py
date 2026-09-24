@@ -176,7 +176,8 @@ def test_nd_library_facets_and_combined_filters():
         query="OpenSees Documentation orthotropic",
     )
     assert [record.model for record in source_search] == [
-        "ElasticOrthotropic"
+        "ElasticOrthotropic",
+        "OrthotropicRAConcrete",
     ]
 
     elastic_behavior = filter_verified_nd_material_library(
@@ -490,7 +491,10 @@ def test_pressure_independ_multi_yield_editor_and_validation():
 
 def test_nd_library_rejects_core_compatibility_drift(monkeypatch):
     raw = asdict(_record("PressureIndependMultiYield"))
-    raw["compatibility"].append("PlateFiber")
+    raw["compatibility"] = (
+        *raw["compatibility"],
+        "PlateFiber",
+    )
     payload = {
         "schema_version": 1,
         "records": [raw],
@@ -782,17 +786,11 @@ def test_drucker_prager_editor_uses_frictional_rho_label():
         dialog.material_type.setCurrentIndex(index)
         _APP.processEvents()
 
-        labels = [
-            dialog.parameter_form.itemAt(
-                row,
-                dialog.parameter_form.LabelRole,
-            ).widget().text()
-            for row in range(dialog.parameter_form.rowCount())
-        ]
-        assert any(
-            "Frictional strength parameter" in label
-            for label in labels
+        rho_label = dialog.parameter_form.labelForField(
+            dialog._parameter_widgets["rho"]
         )
+        assert rho_label is not None
+        assert "Frictional strength parameter" in rho_label.text()
     finally:
         dialog.close()
         dialog.deleteLater()

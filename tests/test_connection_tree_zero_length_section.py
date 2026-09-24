@@ -113,7 +113,7 @@ def test_model_tree_refresh_handles_zero_length_section_connection():
     )
     assert group is not None
     assert group.parent() is connections_root
-    assert group.text(0) == "zeroLengthSection (1)"
+    assert group.text(0) == "ZeroLength Section (1)"
     assert group.childCount() == 1
-    assert group.child(0).text(0).startswith("zeroLengthSection [1]")
+    assert group.child(0).text(0).startswith("ZeroLength Section [1]")
     assert group.child(0).data(0, Qt.UserRole) == ("connection", 1)
