@@ -7617,6 +7617,8 @@ class ProjectDatabase:
             }
             if connection.connection_type in {
                 "Joint2D",
+                "BeamColumnJoint",
+                "LehighJoint2D",
                 "KrawinklerPanelZone",
             }:
                 referenced_connection_nodes.update(
@@ -7817,7 +7819,12 @@ class ProjectDatabase:
                 connection.node_i,
                 connection.node_j,
             }
-            if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+            if connection.connection_type in {
+                "Joint2D",
+                "BeamColumnJoint",
+                "LehighJoint2D",
+                "KrawinklerPanelZone",
+            }:
                 referenced_nodes.update(
                     int(node_tag)
                     for node_tag in connection.parameters.get(
@@ -7844,6 +7851,8 @@ class ProjectDatabase:
             }
             if connection.connection_type in {
                 "Joint2D",
+                "BeamColumnJoint",
+                "LehighJoint2D",
                 "KrawinklerPanelZone",
             }:
                 referenced_connection_nodes.update(
