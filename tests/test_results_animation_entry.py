@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import os
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -150,3 +151,54 @@ def test_force_displacement_curve_tracks_animation_frame():
     assert '"ForceDisplacement"' in show_source
     assert 'self.motion_page.setVisible(' in show_source
     assert 'self.force_disp_plot.set_marker(index)' in sync_source
+
+
+def test_high_animation_speed_skips_rendered_frames_by_wall_time():
+    panel = ResultsPanel()
+    try:
+        panel.set_result(_transient_result(1000), cache_key=("job", 3))
+        panel.show_solution_result("NodalDisplacement", {"component": "UX"})
+
+        panel.motion_frame_rate.setValue(30)
+        speed_index = panel.motion_speed.findData(8.0)
+        assert speed_index >= 0
+        panel.motion_speed.setCurrentIndex(speed_index)
+
+        panel._motion_frame_index = 0
+        panel._motion_play_anchor_index = 0
+        panel._motion_play_anchor_time = 100.0
+
+        with patch(
+            "openseespy_studio.ui.results_panel.time.monotonic",
+            return_value=100.05,
+        ):
+            panel._advance_motion()
+
+        # 30 fps × 8x × 0.05 s = 12 frames of playback progress.
+        assert panel._motion_frame_index == 12
+        assert panel._motion_display_frame_count == 1000
+        assert panel.motion_slider.maximum() == 999
+    finally:
+        panel.close()
+        panel.deleteLater()
+        _APP.processEvents()
+
+
+def test_animation_timer_caps_render_heartbeat_at_high_speed():
+    panel = ResultsPanel()
+    try:
+        panel.motion_frame_rate.setValue(30)
+        panel.motion_speed.setCurrentIndex(
+            panel.motion_speed.findData(1.0)
+        )
+        assert panel._motion_timer_interval_ms() == 33
+
+        panel.motion_speed.setCurrentIndex(
+            panel.motion_speed.findData(8.0)
+        )
+        assert panel._motion_timer_interval_ms() == 16
+        assert panel._motion_effective_fps() == 240.0
+    finally:
+        panel.close()
+        panel.deleteLater()
+        _APP.processEvents()
