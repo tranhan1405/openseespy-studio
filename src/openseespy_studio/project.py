@@ -3381,6 +3381,7 @@ SOLUTION_RESULT_TYPES = {
     "SpecimenResponse",
     "MomentCurvature",
     "SectionResponse",
+    "JointResponse",
     "ResponseSpectrum",
 }
 
@@ -9533,6 +9534,32 @@ class ProjectDatabase:
                 "Solution result references missing element tag(s): "
                 + ", ".join(map(str, missing_elements))
             )
+
+        if result.result_type == "JointResponse":
+            if len(result.element_scope) != 1:
+                raise ValueError(
+                    "JointResponse requires exactly one Connection/Joint target."
+                )
+            connection_tag = int(result.element_scope[0])
+            connection = self.connections.get(connection_tag)
+            if connection is None:
+                raise ValueError(
+                    "JointResponse target must be a Connection/Joint object."
+                )
+            allowed_responses = CONNECTION_RECORDER_RESPONSES.get(
+                connection.connection_type,
+                set(),
+            )
+            response = str(
+                result.settings.get("response", "deformation")
+            )
+            if response not in allowed_responses:
+                raise ValueError(
+                    f"Joint response {response!r} is not supported by "
+                    f"{connection.connection_type} {connection_tag}. "
+                    "Allowed: "
+                    + ", ".join(sorted(allowed_responses))
+                )
 
         def setting_int(name: str) -> int | None:
             if name not in result.settings:
