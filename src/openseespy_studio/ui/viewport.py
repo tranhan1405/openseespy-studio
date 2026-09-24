@@ -6243,6 +6243,10 @@ class ModelViewport(QWidget):
             "result-hinge-points",
             "motion-overlay",
             "motion-nodes",
+            "motion-max-point",
+            "motion-min-point",
+            "motion-max-label",
+            "motion-min-label",
         ):
             self._remove_overlay(name)
         if not preserve_probe:
@@ -7648,6 +7652,93 @@ class ModelViewport(QWidget):
         self._result_overlay_active = True
         self.plotter.render()
 
+    def _update_motion_extrema(
+        self,
+        *,
+        node_tags: tuple[int, ...],
+        displaced,
+        displacement_magnitude,
+        render: bool = False,
+    ) -> None:
+        """Show frame-local displacement extrema without changing contour range."""
+        for name in (
+            "motion-max-point",
+            "motion-min-point",
+            "motion-max-label",
+            "motion-min-label",
+        ):
+            self._remove_overlay(name)
+
+        if self._model is None:
+            return
+        candidates = [
+            int(tag)
+            for tag in node_tags
+            if int(tag) in self._model.nodes
+        ]
+        if not candidates:
+            return
+
+        values = {
+            tag: float(displacement_magnitude(tag))
+            for tag in candidates
+        }
+        min_tag = min(candidates, key=lambda tag: values[tag])
+        max_tag = max(candidates, key=lambda tag: values[tag])
+        min_value = values[min_tag]
+        max_value = values[max_tag]
+        min_point = displaced(min_tag)
+        max_point = displaced(max_tag)
+        unit = str(self._units.get("length", "")).strip()
+        suffix = f" {unit}" if unit else ""
+
+        max_cloud = pv.PolyData(
+            np.asarray([max_point], dtype=float)
+        )
+        self.plotter.add_mesh(
+            max_cloud,
+            name="motion-max-point",
+            color="#c62828",
+            point_size=15,
+            render_points_as_spheres=True,
+            pickable=False,
+            show_scalar_bar=False,
+            render=False,
+        )
+        self._add_annotation_labels(
+            [max_point],
+            [f"MAX {max_value:.4g}{suffix} · Node {max_tag}"],
+            name="motion-max-label",
+            text_color="#c62828",
+            font_size=12,
+            always_visible=True,
+        )
+
+        min_cloud = pv.PolyData(
+            np.asarray([min_point], dtype=float)
+        )
+        self.plotter.add_mesh(
+            min_cloud,
+            name="motion-min-point",
+            color="#1565c0",
+            point_size=13,
+            render_points_as_spheres=True,
+            pickable=False,
+            show_scalar_bar=False,
+            render=False,
+        )
+        self._add_annotation_labels(
+            [min_point],
+            [f"MIN {min_value:.4g}{suffix} · Node {min_tag}"],
+            name="motion-min-label",
+            text_color="#1565c0",
+            font_size=12,
+            always_visible=True,
+        )
+
+        if render:
+            self.plotter.render()
+
     def show_motion_frame(
         self,
         vectors: dict[str, object],
@@ -7834,6 +7925,13 @@ class ModelViewport(QWidget):
                 ],
                 dtype=float,
             )
+
+        self._update_motion_extrema(
+            node_tags=visible_nodes,
+            displaced=displaced,
+            displacement_magnitude=displacement_magnitude,
+            render=False,
+        )
 
         if (
             self._node_probe_tag is not None
