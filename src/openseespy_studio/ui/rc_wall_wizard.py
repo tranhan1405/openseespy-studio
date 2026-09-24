@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QLabel,
+    QLineEdit,
+    QMessageBox,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
     QWizard,
     QWizardPage,
 )
@@ -28,6 +33,112 @@ def _double(
     widget.setValue(float(value))
     widget.setKeyboardTracking(False)
     return widget
+
+
+class RCWallPreview(QWidget):
+    """Compact schematic preview of the MEFI wall discretization."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.width_value = 1.0
+        self.height_value = 2.0
+        self.boundary_value = 0.2
+        self.rows = 1
+        self.fibers = 3
+        self.setMinimumHeight(190)
+
+    def set_wall(
+        self,
+        *,
+        width: float,
+        height: float,
+        boundary: float,
+        rows: int,
+        fibers: int,
+    ) -> None:
+        self.width_value = max(float(width), 1.0e-12)
+        self.height_value = max(float(height), 1.0e-12)
+        self.boundary_value = max(float(boundary), 0.0)
+        self.rows = max(int(rows), 1)
+        self.fibers = max(int(fibers), 3)
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        margin = 18.0
+        available_w = max(float(self.width()) - 2.0 * margin, 20.0)
+        available_h = max(float(self.height()) - 2.0 * margin, 20.0)
+        scale = min(
+            available_w / self.width_value,
+            available_h / self.height_value,
+        )
+        wall_w = self.width_value * scale
+        wall_h = self.height_value * scale
+        left = (float(self.width()) - wall_w) / 2.0
+        top = (float(self.height()) - wall_h) / 2.0
+
+        painter.fillRect(self.rect(), QColor("#f8fafc"))
+        painter.fillRect(
+            int(left), int(top), int(wall_w), int(wall_h),
+            QColor("#ffffff"),
+        )
+
+        boundary_px = min(
+            wall_w / 2.0,
+            self.boundary_value * scale,
+        )
+        painter.fillRect(
+            int(left), int(top), int(boundary_px), int(wall_h),
+            QColor("#e7eef7"),
+        )
+        painter.fillRect(
+            int(left + wall_w - boundary_px),
+            int(top),
+            int(boundary_px),
+            int(wall_h),
+            QColor("#e7eef7"),
+        )
+
+        painter.setPen(QPen(QColor("#49657f"), 1.2))
+        painter.drawRect(
+            int(left), int(top), int(wall_w), int(wall_h)
+        )
+
+        for row in range(1, self.rows):
+            y = top + wall_h * row / self.rows
+            painter.drawLine(
+                int(left), int(y), int(left + wall_w), int(y)
+            )
+
+        web_count = max(self.fibers - 2, 1)
+        web_width = max(
+            self.width_value - 2.0 * self.boundary_value,
+            0.0,
+        ) / web_count
+        cumulative = [self.boundary_value]
+        for _index in range(1, web_count):
+            cumulative.append(cumulative[-1] + web_width)
+        cumulative.append(
+            self.width_value - self.boundary_value
+        )
+
+        painter.setPen(QPen(QColor("#9aaabd"), 1.0))
+        for value in cumulative:
+            x = left + value * scale
+            painter.drawLine(
+                int(x), int(top), int(x), int(top + wall_h)
+            )
+
+        painter.setPen(QPen(QColor("#26394c"), 2.2))
+        painter.drawLine(
+            int(left),
+            int(top + wall_h),
+            int(left + wall_w),
+            int(top + wall_h),
+        )
+        painter.end()
 
 
 class RCWallWizard(QWizard):
