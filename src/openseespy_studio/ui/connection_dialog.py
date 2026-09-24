@@ -314,7 +314,8 @@ class ConnectionDialog(QDialog):
             "orientation override only when needed. <b>Joint2D</b>, "
             "<b>BeamColumnJoint</b>, <b>LehighJoint2D</b>, and "
             "<b>KrawinklerPanelZone</b> use the Joint / Panel Zone tab. "
-            "The SARE wrappers are currently restricted to 2D frames."
+            "<b>BeamColumnJoint</b> supports 2D/3DOF and 3D/6DOF; the "
+            "other dedicated joint wrappers remain 2D."
         )
         type_hint.setWordWrap(True)
         type_hint.setStyleSheet("color: #637487;")
@@ -549,31 +550,74 @@ class ConnectionDialog(QDialog):
             and len(saved_external) == 4
             and all(tag in self.node_positions for tag in saved_external)
         ):
-            center_x = sum(
-                float(self.node_positions[tag][0])
-                for tag in saved_external
-            ) / 4.0
-            center_y = sum(
-                float(self.node_positions[tag][1])
-                for tag in saved_external
-            ) / 4.0
-            saved_external.sort(
-                key=lambda tag: math.atan2(
-                    float(self.node_positions[tag][1]) - center_y,
-                    float(self.node_positions[tag][0]) - center_x,
-                ),
-                reverse=True,
-            )
-            left_index = min(
-                range(4),
-                key=lambda index: float(
-                    self.node_positions[saved_external[index]][0]
-                ),
-            )
-            saved_external = (
-                saved_external[left_index:]
-                + saved_external[:left_index]
-            )
+            if self.ndm == 2:
+                center_x = sum(
+                    float(self.node_positions[tag][0])
+                    for tag in saved_external
+                ) / 4.0
+                center_y = sum(
+                    float(self.node_positions[tag][1])
+                    for tag in saved_external
+                ) / 4.0
+                saved_external.sort(
+                    key=lambda tag: math.atan2(
+                        float(self.node_positions[tag][1]) - center_y,
+                        float(self.node_positions[tag][0]) - center_x,
+                    ),
+                    reverse=True,
+                )
+                left_index = min(
+                    range(4),
+                    key=lambda index: float(
+                        self.node_positions[saved_external[index]][0]
+                    ),
+                )
+                saved_external = (
+                    saved_external[left_index:]
+                    + saved_external[:left_index]
+                )
+            else:
+                center = tuple(
+                    sum(
+                        float(self.node_positions[tag][axis])
+                        for tag in saved_external
+                    ) / 4.0
+                    for axis in range(3)
+                )
+                vectors = {
+                    tag: tuple(
+                        float(self.node_positions[tag][axis]) - center[axis]
+                        for axis in range(3)
+                    )
+                    for tag in saved_external
+                }
+                first = max(
+                    saved_external,
+                    key=lambda tag: _norm(vectors[tag]),
+                )
+                e1 = _unit(vectors[first])
+                candidates = [
+                    (
+                        _norm(_cross(e1, vectors[tag])),
+                        tag,
+                    )
+                    for tag in saved_external
+                    if tag != first
+                ]
+                _cross_norm, second = max(candidates)
+                normal = _unit(_cross(e1, vectors[second]))
+                e2 = _unit(_cross(normal, e1))
+                saved_external.sort(
+                    key=lambda tag: math.atan2(
+                        _dot(vectors[tag], e2),
+                        _dot(vectors[tag], e1),
+                    )
+                )
+                start = saved_external.index(min(saved_external))
+                saved_external = (
+                    saved_external[start:]
+                    + saved_external[:start]
+                )
         candidate_nodes = sorted(self.node_positions)
         while len(saved_external) < 4:
             index = len(saved_external)
