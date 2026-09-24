@@ -107,6 +107,14 @@ class AnalysisDialog(QDialog):
         self.num_threads.setValue(
             analysis.num_threads if analysis else detected_threads
         )
+        self._last_multi_threads = max(
+            2,
+            int(
+                analysis.num_threads
+                if analysis is not None and analysis.num_threads > 1
+                else detected_threads
+            ),
+        )
         self.num_threads.setToolTip(
             f"OpenSees setNumThreads(). This computer reports "
             f"{detected_threads} logical CPU(s). Auto leaves the OpenSees "
@@ -657,13 +665,19 @@ class AnalysisDialog(QDialog):
     def _sync_execution_mode(self) -> None:
         mode = self.execution_mode.currentText()
         if mode == "Single Thread":
+            if self.num_threads.value() > 1:
+                self._last_multi_threads = self.num_threads.value()
             self.num_threads.setValue(1)
             self.num_threads.setEnabled(False)
         elif mode == "Multi-thread":
+            if self.num_threads.value() <= 1:
+                self.num_threads.setValue(self._last_multi_threads)
             self.num_threads.setEnabled(True)
         else:
             # Auto intentionally leaves the runtime/default OpenSees thread
-            # count untouched. Keep the remembered value visible but inactive.
+            # count untouched. Keep the candidate value visible but inactive.
+            if self.num_threads.value() > 1:
+                self._last_multi_threads = self.num_threads.value()
             self.num_threads.setEnabled(False)
 
     def _refresh_driver_pattern_choices(
