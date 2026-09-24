@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import math
 import os
 
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 from openseespy_studio.generator import build_mefi_crack_specs, to_openseespy
 from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
 from openseespy_studio.rc_wall import RCWallSpec, build_rc_wall
+from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.rc_wall_wizard import RCWallWizard
 from openseespy_studio.ui.rclms_section_dialog import RCLMSSectionDialog
 from openseespy_studio.validation import validate_project
@@ -372,6 +374,16 @@ def test_rclms_section_from_wizard_is_editable():
         dialog.close()
         dialog.deleteLater()
         _APP.processEvents()
+
+
+def test_rc_wall_finish_reveals_generated_mefi_model():
+    source = inspect.getsource(MainWindow._show_rc_wall_wizard)
+
+    assert 'self.viewport.set_display_domain("fe")' in source
+    assert "self._reset_sketch_plane_context()" in source
+    assert "elements=set(result.element_tags)" in source
+    assert 'self.viewport.set_view("xy", render=False)' in source
+    assert "self.viewport.fit_view()" in source
 
 
 def test_rc_wall_wizard_custom_mode_and_origin_roundtrip():
