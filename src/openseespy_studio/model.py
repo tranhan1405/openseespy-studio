@@ -581,6 +581,8 @@ class StructuralModel:
         shell_no_eas: bool = False,
         shell_drilling_stab: float | None = None,
         shell_drilling_nl: bool = False,
+        mefi_widths: tuple[float, ...] | list[float] = (),
+        mefi_section_tags: tuple[int, ...] | list[int] = (),
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -593,8 +595,9 @@ class StructuralModel:
         if element_type not in SUPPORTED_ELEMENT_TYPES:
             raise ValueError(f"Unsupported element type: {element_type}")
         is_shell = element_type in SHELL_ELEMENT_TYPES
+        is_quad = element_type in QUAD_ELEMENT_TYPES
         raw_nodes = [i, j]
-        if is_shell:
+        if is_quad:
             if k is None or l is None:
                 raise ValueError(
                     f"{element_type} element {tag} requires four nodes."
@@ -603,7 +606,7 @@ class StructuralModel:
             l = _strict_int(l, "Element L-node tag")
             raw_nodes.extend([k, l])
         if len(set(raw_nodes)) != len(raw_nodes):
-            if is_shell:
+            if is_quad:
                 raise ValueError(
                     f"{element_type} element {tag} requires four distinct "
                     "node tags."
@@ -622,6 +625,29 @@ class StructuralModel:
                 f"{element_type} requires a 3D/6DOF model; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
+        if element_type == "MEFI" and (self.ndm, self.ndf) not in {
+            (2, 3), (3, 6),
+        }:
+            raise ValueError(
+                "MEFI requires ndm=2/ndf=3 or ndm=3/ndf=6; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if element_type == "MEFI":
+            widths = tuple(float(value) for value in mefi_widths)
+            if widths:
+                ni = self.nodes[i].xyz
+                nj = self.nodes[j].xyz
+                edge_width = math.sqrt(sum(
+                    (float(nj[index]) - float(ni[index])) ** 2
+                    for index in range(3)
+                ))
+                if edge_width > 0.0 and abs(sum(widths) - edge_width) > max(
+                    1.0e-9, 1.0e-6 * edge_width
+                ):
+                    raise ValueError(
+                        "MEFI macro-fiber widths must sum to the element "
+                        f"width ({edge_width:g}); got {sum(widths):g}."
+                    )
         ele = Element(
             tag,
             i,
@@ -651,6 +677,8 @@ class StructuralModel:
             shell_no_eas,
             shell_drilling_stab,
             shell_drilling_nl,
+            tuple(mefi_widths),
+            tuple(mefi_section_tags),
         )
         self.elements[tag] = ele
         return ele
