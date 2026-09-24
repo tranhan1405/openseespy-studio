@@ -1015,6 +1015,19 @@ ops.nDMaterial(
     3, 1800.0, 150.0e6, 750.0e6, 75.0e3, 0.10,
     0.0, 80.0e3, 0.0, 30
 )
+ops.nDMaterial(
+    'PressureDependMultiYield', 27,
+    2, 1900.0, 75.0e6, 200.0e6,
+    33.0, 0.10, 80.0e3, 0.5, 27.0,
+    0.07, 0.4, 2.0, 10.0e3, 0.01, 1.0
+)
+ops.nDMaterial(
+    'PressureDependMultiYield', 28,
+    3, 2000.0, 100.0e6, 300.0e6,
+    37.0, 0.10, 80.0e3, 0.5, 27.0,
+    0.05, 0.6, 3.0, 5.0e3, 0.003, 1.0,
+    30, 0.55, 0.95, 0.03, 0.65, 101.0e3, 0.5e3
+)
 """
 
     result = import_openseespy_source(
@@ -1075,6 +1088,33 @@ ops.nDMaterial(
         for issue in result.issues
     )
 
+    pdmy_default = result.project.nd_materials[27]
+    assert pdmy_default.material_type == "PressureDependMultiYield"
+    assert pdmy_default.parameters["nd"] == 2.0
+    assert pdmy_default.parameters["rho"] == 1900.0
+    assert pdmy_default.parameters["refShearModul"] == 75.0e6
+    assert pdmy_default.parameters["liquefac1"] == 10.0e3
+    assert pdmy_default.parameters["noYieldSurf"] == 20.0
+    assert pdmy_default.parameters["e"] == 0.6
+    assert pdmy_default.parameters["cs1"] == 0.9
+    assert pdmy_default.parameters["cs2"] == 0.02
+    assert pdmy_default.parameters["cs3"] == 0.7
+    assert pdmy_default.parameters["pa"] == 101.0e3
+    assert pdmy_default.parameters["c"] == 300.0
+
+    pdmy_full = result.project.nd_materials[28]
+    assert pdmy_full.parameters["nd"] == 3.0
+    assert pdmy_full.parameters["rho"] == 2000.0
+    assert pdmy_full.parameters["noYieldSurf"] == 30.0
+    assert pdmy_full.parameters["e"] == 0.55
+    assert pdmy_full.parameters["cs1"] == 0.95
+    assert pdmy_full.parameters["pa"] == 101.0e3
+    assert pdmy_full.parameters["c"] == 500.0
+    assert any(
+        issue.construct == "PressureDependMultiYield material stage"
+        for issue in result.issues
+    )
+
 
 def test_importer_rejects_custom_pressure_independ_surfaces():
     source = """
@@ -1102,6 +1142,64 @@ ops.nDMaterial(
         if "custom yield surfaces" in item.construct
     )
     assert "automatic-surface form only" in issue.message
+
+
+def test_importer_rejects_custom_pressure_depend_surfaces():
+    source = """
+import openseespy.opensees as ops
+
+ops.nDMaterial(
+    'PressureDependMultiYield', 62,
+    2, 1900.0, 75.0e6, 200.0e6,
+    33.0, 0.10, 80.0e3, 0.5, 27.0,
+    0.07, 0.4, 2.0, 10.0e3, 0.01, 1.0,
+    -3, 0.001, 0.9, 0.01, 0.5, 0.10, 0.1
+)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="custom_pdmy.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert 62 not in result.project.nd_materials
+    assert result.unsupported_count == 1
+    issue = next(
+        item
+        for item in result.issues
+        if "PressureDependMultiYield custom yield surfaces"
+        in item.construct
+    )
+    assert "automatic-surface form only" in issue.message
+
+
+def test_importer_rejects_pressure_depend_extra_arguments():
+    source = """
+import openseespy.opensees as ops
+
+ops.nDMaterial(
+    'PressureDependMultiYield', 63,
+    2, 1900.0, 75.0e6, 200.0e6,
+    33.0, 0.10, 80.0e3, 0.5, 27.0,
+    0.07, 0.4, 2.0, 10.0e3, 0.01, 1.0,
+    20, 0.7, 0.9, 0.02, 0.7, 101.0e3, 0.3e3,
+    999.0
+)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="extra_pdmy.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert 63 not in result.project.nd_materials
+    assert result.unsupported_count == 1
+    assert any(
+        issue.construct == "PressureDependMultiYield extra arguments"
+        for issue in result.issues
+    )
 
 
 def test_importer_recovers_set_num_threads():
