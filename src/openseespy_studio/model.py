@@ -1170,6 +1170,8 @@ class StructuralModel:
                     shell_no_eas=source.shell_no_eas,
                     shell_drilling_stab=source.shell_drilling_stab,
                     shell_drilling_nl=source.shell_drilling_nl,
+                    mefi_widths=source.mefi_widths,
+                    mefi_section_tags=source.mefi_section_tags,
                 )
                 created_elements.add(new_tag)
 
@@ -1223,6 +1225,8 @@ class StructuralModel:
                     "shell_no_eas": element.shell_no_eas,
                     "shell_drilling_stab": element.shell_drilling_stab,
                     "shell_drilling_nl": element.shell_drilling_nl,
+                    "mefi_widths": list(element.mefi_widths),
+                    "mefi_section_tags": list(element.mefi_section_tags),
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -1328,6 +1332,8 @@ class StructuralModel:
                 item.get("shell_no_eas", False),
                 item.get("shell_drilling_stab"),
                 item.get("shell_drilling_nl", False),
+                tuple(item.get("mefi_widths", ())),
+                tuple(item.get("mefi_section_tags", ())),
             )
 
         return model
