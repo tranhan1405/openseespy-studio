@@ -20,7 +20,10 @@ from openseespy_studio.nd_material_library import (
     nd_material_from_library_record,
     nd_material_library_facets,
 )
-from openseespy_studio.project import NDMaterialData
+from openseespy_studio.project import (
+    NDMaterialData,
+    nd_material_supports_plate_fiber,
+)
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.nd_material_library_dialog import (
     NDMaterialLibraryDialog,
@@ -39,14 +42,15 @@ def _record(model: str):
     )
 
 
-def test_verified_nd_library_baseline_has_three_supported_models():
+def test_verified_nd_library_baseline_has_four_supported_models():
     records = load_verified_nd_material_library()
 
-    assert len(records) == 3
+    assert len(records) == 4
     assert {record.model for record in records} == {
         "ElasticIsotropic",
         "ElasticOrthotropic",
         "J2Plasticity",
+        "DruckerPrager",
     }
     assert all(record.is_verified for record in records)
     assert all(record.is_starter_template for record in records)
@@ -56,13 +60,25 @@ def test_verified_nd_library_baseline_has_three_supported_models():
     assert all(record.citation_text for record in records)
 
 
-def test_verified_nd_library_declares_plate_fiber_compatibility():
+def test_verified_nd_library_declares_formulation_compatibility():
     records = load_verified_nd_material_library()
-
-    assert all(
-        "PlateFiber" in record.compatibility
+    plate_fiber = {
+        record.model
         for record in records
+        if "PlateFiber" in record.compatibility
+    }
+    assert plate_fiber == {
+        "ElasticIsotropic",
+        "ElasticOrthotropic",
+        "J2Plasticity",
+    }
+
+    drucker = _record("DruckerPrager")
+    assert drucker.compatibility == (
+        "ThreeDimensional",
+        "PlaneStrain",
     )
+    assert not nd_material_supports_plate_fiber("DruckerPrager")
 
 
 def test_nd_library_facets_and_combined_filters():
@@ -72,6 +88,7 @@ def test_nd_library_facets_and_combined_filters():
     assert facets["family"] == (
         "Elastic continuum",
         "Plastic continuum",
+        "Pressure-sensitive plasticity",
     )
     assert "PlateFiber" in facets["compatibility"]
     assert "BeamFiber" in facets["compatibility"]
@@ -226,7 +243,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert dialog.add_button.isEnabled()
         assert dialog.material_data().tag == 11
         assert dialog.material_data().source["status"] == "verified"
-        assert dialog.result_count.text() == "3 / 3 shown"
+        assert dialog.result_count.text() == "4 / 4 shown"
         assert dialog.copy_command.isEnabled()
         assert dialog.command_preview.text() == (
             "ops.nDMaterial('ElasticIsotropic', "
@@ -292,7 +309,7 @@ def test_nd_library_dialog_browses_and_filters_records():
 
         dialog.clear_filters.click()
         _APP.processEvents()
-        assert dialog.result_count.text() == "3 / 3 shown"
+        assert dialog.result_count.text() == "4 / 4 shown"
         assert "Verified against source: 2026-09-24" in dialog.source.text()
 
         dialog.copy_citation.click()
@@ -313,6 +330,64 @@ def test_nd_library_dialog_browses_and_filters_records():
         dialog.close()
         dialog.deleteLater()
         _APP.processEvents()
+
+
+def test_drucker_prager_library_generates_unit_safe_command():
+    material = nd_material_from_library_record(
+        _record("DruckerPrager"),
+        tag=31,
+    )
+
+    command = nd_material_to_openseespy(
+        material,
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert command == (
+        "ops.nDMaterial('DruckerPrager', 31, "
+        "100, 50, 0.1, 0.1, 0.1, 0, 0, 0, 0, 0, "
+        "1, 0, 0.101325)"
+    )
+
+
+def test_drucker_prager_editor_is_exposed_and_not_plate_fiber():
+    dialog = NDMaterialDialog(
+        next_tag=32,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        index = dialog.material_type.findData("DruckerPrager")
+        assert index >= 0
+        dialog.material_type.setCurrentIndex(index)
+        _APP.processEvents()
+
+        material = dialog.material_data()
+        assert material.material_type == "DruckerPrager"
+        assert "not available for PlateFiber" in dialog.note.text()
+        assert material.parameters["theta"] == 1.0
+        assert material.parameters["atmPressure"] == 101325.0
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_drucker_prager_parameter_validation():
+    record = _record("DruckerPrager")
+    bad = dict(record.parameters_si)
+    bad["rhoBar"] = bad["rho"] + 0.01
+
+    try:
+        NDMaterialData(
+            tag=33,
+            name="Invalid Drucker-Prager",
+            material_type="DruckerPrager",
+            parameters=bad,
+        )
+    except ValueError as exc:
+        assert "rhoBar" in str(exc)
+    else:
+        raise AssertionError("rhoBar > rho should be rejected.")
 
 
 def test_nd_material_editor_preserves_library_provenance():
