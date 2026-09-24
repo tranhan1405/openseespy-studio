@@ -8973,6 +8973,19 @@ class ProjectDatabase:
                     + ", ".join(incompatible_responses)
                     + "."
                 )
+            if (
+                int(self.model.ndm) == 3
+                and recorder.response == "externalDisplacement"
+                and any(
+                    connection.connection_type == "BeamColumnJoint"
+                    for connection in connection_targets
+                )
+            ):
+                raise ValueError(
+                    "BeamColumnJoint3d externalDisplacement is disabled in "
+                    "SARE because the current OpenSees source allocates a "
+                    "12-value response buffer but writes 24 external DOFs."
+                )
 
             structural_targets = [
                 tag for tag in recorder.target_tags
@@ -9674,6 +9687,15 @@ class ProjectDatabase:
                     + ", ".join(sorted(allowed_responses))
                 )
             if connection.connection_type == "BeamColumnJoint":
+                if (
+                    int(self.model.ndm) == 3
+                    and response == "externalDisplacement"
+                ):
+                    raise ValueError(
+                        "BeamColumnJoint3d externalDisplacement is disabled "
+                        "in SARE because the current OpenSees source allocates "
+                        "12 response values but writes 24 external DOFs."
+                    )
                 component = _strict_int(
                     result.settings.get("component", 1),
                     "BeamColumnJoint result component",
