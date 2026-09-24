@@ -4869,6 +4869,16 @@ class MainWindow(QMainWindow):
                 return
 
         before = self.project.to_dict()
+        existing_error_keys = {
+            (
+                issue.category,
+                issue.message,
+                issue.object_kind,
+                issue.object_tag,
+            )
+            for issue in validate_project(self.project)
+            if issue.severity == "ERROR"
+        }
         try:
             self.selection.clear()
             self._reset_runtime_results()
@@ -4879,7 +4889,18 @@ class MainWindow(QMainWindow):
             generated_errors = [
                 issue
                 for issue in validate_project(self.project)
-                if issue.severity == "ERROR"
+                if (
+                    issue.severity == "ERROR"
+                    and (
+                        spec.replace_geometry
+                        or (
+                            issue.category,
+                            issue.message,
+                            issue.object_kind,
+                            issue.object_tag,
+                        ) not in existing_error_keys
+                    )
+                )
             ]
             if generated_errors:
                 preview = "\n".join(
