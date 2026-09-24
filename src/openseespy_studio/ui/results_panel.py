@@ -996,6 +996,7 @@ class ResultsPanel(QWidget):
         self._build_fiber_tab()
         self._build_hinge_tab()
         self._build_force_displacement_tab()
+        self._build_joint_response_tab()
         self._build_section_response_tab()
         self._build_moment_curvature_tab()
         self._build_pushover_tab()
@@ -1258,6 +1259,36 @@ class ResultsPanel(QWidget):
                     self._motion_display_frame_count > 0
                 )
             self._select_tab("Force–Displacement")
+            return
+        if kind == "JointResponse":
+            element_scope = options.get("_element_scope", [])
+            if isinstance(element_scope, (list, tuple)) and element_scope:
+                try:
+                    target_tag = int(element_scope[0])
+                except (TypeError, ValueError):
+                    target_tag = None
+                if target_tag is not None:
+                    index = self.joint_response_target.findData(target_tag)
+                    if index >= 0:
+                        self.joint_response_target.setCurrentIndex(index)
+            response = str(options.get("response", "deformation"))
+            index = self.joint_response_quantity.findData(response)
+            if index >= 0:
+                self.joint_response_quantity.setCurrentIndex(index)
+            component = options.get("component", 1)
+            try:
+                component_index = max(0, int(component) - 1)
+            except (TypeError, ValueError):
+                component_index = 0
+            index = self.joint_response_component.findData(component_index)
+            if index >= 0:
+                self.joint_response_component.setCurrentIndex(index)
+            curve_mode = str(options.get("curve_mode", "history"))
+            index = self.joint_response_view.findData(curve_mode)
+            if index >= 0:
+                self.joint_response_view.setCurrentIndex(index)
+            self._update_joint_response_plot()
+            self._select_tab("Joint Response")
             return
         if kind == "SectionResponse":
             self._select_section_response(options)
@@ -4482,6 +4513,368 @@ class ResultsPanel(QWidget):
             f"to {path}"
         )
 
+    def _build_joint_response_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Joint:"))
+        self.joint_response_target = QComboBox()
+        self.joint_response_target.currentIndexChanged.connect(
+            self._update_joint_response_controls
+        )
+        controls.addWidget(self.joint_response_target, 1)
+
+        controls.addWidget(QLabel("Response:"))
+        self.joint_response_quantity = QComboBox()
+        self.joint_response_quantity.currentIndexChanged.connect(
+            self._update_joint_response_components
+        )
+        controls.addWidget(self.joint_response_quantity, 1)
+
+        controls.addWidget(QLabel("Component:"))
+        self.joint_response_component = QComboBox()
+        self.joint_response_component.currentIndexChanged.connect(
+            self._update_joint_response_plot
+        )
+        controls.addWidget(self.joint_response_component)
+
+        controls.addWidget(QLabel("View:"))
+        self.joint_response_view = QComboBox()
+        self.joint_response_view.addItem("History", "history")
+        self.joint_response_view.addItem(
+            "Force–Deformation",
+            "force_deformation",
+        )
+        self.joint_response_view.currentIndexChanged.connect(
+            self._update_joint_response_plot
+        )
+        controls.addWidget(self.joint_response_view)
+        layout.addLayout(controls)
+
+        self.joint_response_info = QLabel(
+            "Run an analysis with a Connection / Joint to inspect its "
+            "component response history."
+        )
+        self.joint_response_info.setWordWrap(True)
+        layout.addWidget(self.joint_response_info)
+
+        self.joint_response_metrics = QLabel(
+            "Points: -   Peak |Y|: -   Peak |X|: -"
+        )
+        self.joint_response_metrics.setWordWrap(True)
+        layout.addWidget(self.joint_response_metrics)
+
+        self.joint_response_plot = TimeHistoryPlot(
+            empty_message="No joint response data"
+        )
+        layout.addWidget(self.joint_response_plot, 1)
+        self.tabs.addTab(page, "Joint Response")
+
+    def _joint_response_catalog(self) -> dict[str, Any]:
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        if not isinstance(history, dict):
+            return {}
+        joints = history.get("joints", {})
+        return joints if isinstance(joints, dict) else {}
+
+    def _populate_joint_response_targets(self) -> None:
+        if not hasattr(self, "joint_response_target"):
+            return
+        previous = self.joint_response_target.currentData()
+        self.joint_response_target.blockSignals(True)
+        self.joint_response_target.clear()
+        joints = self._joint_response_catalog()
+        for key in sorted(
+            joints,
+            key=lambda value: int(value)
+            if str(value).lstrip("-").isdigit()
+            else str(value),
+        ):
+            entry = joints.get(key, {})
+            connection_type = (
+                str(entry.get("connection_type", "Connection"))
+                if isinstance(entry, dict)
+                else "Connection"
+            )
+            try:
+                tag = int(key)
+            except (TypeError, ValueError):
+                continue
+            self.joint_response_target.addItem(
+                f"{connection_type} [{tag}]",
+                tag,
+            )
+        if previous is not None:
+            index = self.joint_response_target.findData(previous)
+            if index >= 0:
+                self.joint_response_target.setCurrentIndex(index)
+        self.joint_response_target.blockSignals(False)
+        self._update_joint_response_controls()
+
+    def _joint_response_entry(self) -> tuple[int | None, dict[str, Any]]:
+        tag = self.joint_response_target.currentData()
+        if tag is None:
+            return None, {}
+        joints = self._joint_response_catalog()
+        entry = joints.get(str(int(tag)), {})
+        return (
+            int(tag),
+            entry if isinstance(entry, dict) else {},
+        )
+
+    def _update_joint_response_controls(self) -> None:
+        if not hasattr(self, "joint_response_quantity"):
+            return
+        _tag, entry = self._joint_response_entry()
+        responses = entry.get("responses", {})
+        responses = responses if isinstance(responses, dict) else {}
+        previous = self.joint_response_quantity.currentData()
+        self.joint_response_quantity.blockSignals(True)
+        self.joint_response_quantity.clear()
+        for response in responses:
+            self.joint_response_quantity.addItem(
+                str(response),
+                str(response),
+            )
+        if previous is not None:
+            index = self.joint_response_quantity.findData(previous)
+            if index >= 0:
+                self.joint_response_quantity.setCurrentIndex(index)
+        self.joint_response_quantity.blockSignals(False)
+        self._update_joint_response_components()
+
+    @staticmethod
+    def _joint_component_labels(
+        connection_type: str,
+        response: str,
+        count: int,
+    ) -> list[str]:
+        if connection_type == "BeamColumnJoint" and response == "deformation":
+            labels = [
+                "Bar-slip contribution",
+                "Interface shear contribution",
+                "Shear-panel contribution",
+                "Total joint deformation",
+            ]
+            return labels[:count] + [
+                f"C{index + 1}"
+                for index in range(len(labels), count)
+            ]
+        if connection_type == "BeamColumnJoint" and response in {
+            "shearPanel",
+            "node1BarSlipL",
+            "node1BarSlipR",
+            "node1InterfaceShear",
+            "node2BarSlipB",
+            "node2BarSlipT",
+            "node2InterfaceShear",
+            "node3BarSlipL",
+            "node3BarSlipR",
+            "node3InterfaceShear",
+            "node4BarSlipB",
+            "node4BarSlipT",
+            "node4InterfaceShear",
+        } and count >= 2:
+            return ["Force", "Deformation"] + [
+                f"C{index + 1}" for index in range(2, count)
+            ]
+        return [f"C{index + 1}" for index in range(count)]
+
+    def _update_joint_response_components(self) -> None:
+        if not hasattr(self, "joint_response_component"):
+            return
+        _tag, entry = self._joint_response_entry()
+        response = str(
+            self.joint_response_quantity.currentData() or ""
+        )
+        responses = entry.get("responses", {})
+        rows = (
+            responses.get(response, [])
+            if isinstance(responses, dict)
+            else []
+        )
+        count = max(
+            (
+                len(row)
+                for row in rows
+                if isinstance(row, (list, tuple))
+            ),
+            default=1,
+        )
+        connection_type = str(entry.get("connection_type", ""))
+        labels = self._joint_component_labels(
+            connection_type,
+            response,
+            count,
+        )
+        previous = self.joint_response_component.currentData()
+        self.joint_response_component.blockSignals(True)
+        self.joint_response_component.clear()
+        for index, label in enumerate(labels):
+            self.joint_response_component.addItem(label, index)
+        if previous is not None:
+            combo_index = self.joint_response_component.findData(previous)
+            if combo_index >= 0:
+                self.joint_response_component.setCurrentIndex(combo_index)
+        self.joint_response_component.blockSignals(False)
+        self._update_joint_response_plot()
+
+    @staticmethod
+    def _joint_series_component(
+        rows: object,
+        component: int,
+    ) -> list[float]:
+        output: list[float] = []
+        if not isinstance(rows, list):
+            return output
+        for row in rows:
+            if not isinstance(row, (list, tuple)):
+                continue
+            if component < len(row):
+                try:
+                    output.append(float(row[component]))
+                except (TypeError, ValueError):
+                    output.append(float("nan"))
+        return output
+
+    def _update_joint_response_plot(self) -> None:
+        if not hasattr(self, "joint_response_plot"):
+            return
+        tag, entry = self._joint_response_entry()
+        response = str(
+            self.joint_response_quantity.currentData() or ""
+        )
+        component = int(
+            self.joint_response_component.currentData() or 0
+        )
+        responses = entry.get("responses", {})
+        responses = responses if isinstance(responses, dict) else {}
+        rows = responses.get(response, [])
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        times = (
+            list(history.get("time", []))
+            if isinstance(history, dict)
+            and isinstance(history.get("time", []), list)
+            else []
+        )
+        connection_type = str(entry.get("connection_type", ""))
+        view = str(
+            self.joint_response_view.currentData() or "history"
+        )
+
+        x_values: list[float] = []
+        y_values: list[float] = []
+        x_label = "Time"
+        y_label = response or "Response"
+
+        component_response = (
+            connection_type == "BeamColumnJoint"
+            and response in {
+                "shearPanel",
+                "node1BarSlipL",
+                "node1BarSlipR",
+                "node1InterfaceShear",
+                "node2BarSlipB",
+                "node2BarSlipT",
+                "node2InterfaceShear",
+                "node3BarSlipL",
+                "node3BarSlipR",
+                "node3InterfaceShear",
+                "node4BarSlipB",
+                "node4BarSlipT",
+                "node4InterfaceShear",
+            }
+        )
+        if view == "force_deformation" and component_response:
+            valid_rows = [
+                row for row in rows
+                if isinstance(row, (list, tuple)) and len(row) >= 2
+            ]
+            x_values = [float(row[1]) for row in valid_rows]
+            y_values = [float(row[0]) for row in valid_rows]
+            x_label = "Deformation"
+            y_label = "Force"
+        elif view == "force_deformation":
+            pair_map = {
+                "force": "deformation",
+                "deformation": "force",
+                "basicForce": "basicDisplacement",
+                "basicDisplacement": "basicForce",
+                "localForce": "localDisplacement",
+                "localDisplacement": "localForce",
+            }
+            paired_response = pair_map.get(response)
+            paired_rows = (
+                responses.get(paired_response, [])
+                if paired_response is not None
+                else []
+            )
+            if paired_response is not None:
+                if "Force" in response or response == "force":
+                    force_rows, deformation_rows = rows, paired_rows
+                else:
+                    force_rows, deformation_rows = paired_rows, rows
+                force_values = self._joint_series_component(
+                    force_rows,
+                    component,
+                )
+                deformation_values = self._joint_series_component(
+                    deformation_rows,
+                    component,
+                )
+                count = min(
+                    len(force_values),
+                    len(deformation_values),
+                )
+                x_values = deformation_values[:count]
+                y_values = force_values[:count]
+                x_label = "Deformation"
+                y_label = "Force"
+
+        if not x_values or not y_values:
+            y_values = self._joint_series_component(rows, component)
+            count = min(len(times), len(y_values))
+            x_values = [
+                float(value) for value in times[:count]
+            ]
+            y_values = y_values[:count]
+            view = "history"
+            x_label = "Time"
+            y_label = response or "Response"
+
+        self.joint_response_plot.set_series(x_values, y_values)
+        points = min(len(x_values), len(y_values))
+        if points:
+            peak_x = max(abs(value) for value in x_values)
+            peak_y = max(abs(value) for value in y_values)
+            self.joint_response_metrics.setText(
+                f"Points: {points}   Peak |Y|: {peak_y:.6g}   "
+                f"Peak |X|: {peak_x:.6g}"
+            )
+        else:
+            self.joint_response_metrics.setText(
+                "Points: -   Peak |Y|: -   Peak |X|: -"
+            )
+        self.joint_response_info.setText(
+            (
+                f"{connection_type} [{tag}] · {response} · "
+                f"{x_label} → {y_label}"
+            )
+            if tag is not None and response
+            else "No connection/joint response history is available."
+        )
+
     def _build_history_tab(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -4650,6 +5043,17 @@ class ResultsPanel(QWidget):
             "Points: -   Peak |F|: -   Peak |u|: -"
         )
         self.force_disp_plot.set_series([], [])
+        self.joint_response_target.clear()
+        self.joint_response_quantity.clear()
+        self.joint_response_component.clear()
+        self.joint_response_info.setText(
+            "Run an analysis with a Connection / Joint to inspect its "
+            "component response history."
+        )
+        self.joint_response_metrics.setText(
+            "Points: -   Peak |Y|: -   Peak |X|: -"
+        )
+        self.joint_response_plot.set_series([], [])
         self.section_response_source.clear()
         self.section_response_info.setText(
             "Create a Section Response result request for a "
@@ -5332,6 +5736,7 @@ class ResultsPanel(QWidget):
         self._populate_history_nodes()
         self._populate_force_displacement_nodes()
         self._update_force_displacement_plot()
+        self._populate_joint_response_targets()
         self._populate_section_response_sources()
         self._update_moment_curvature_plot()
         self._update_pushover_plot()
