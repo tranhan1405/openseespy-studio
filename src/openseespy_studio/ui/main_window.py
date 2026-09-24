@@ -1220,6 +1220,19 @@ class PropertiesPanel(QWidget):
         self.result_fiber_section = QSpinBox()
         self.result_fiber_section.setRange(1, 100000)
 
+        self.result_joint_response = QLineEdit()
+        self.result_joint_response.setPlaceholderText(
+            "e.g. deformation, shearPanel, basicForce"
+        )
+        self.result_joint_component = QSpinBox()
+        self.result_joint_component.setRange(1, 1000)
+        self.result_joint_curve = QComboBox()
+        self.result_joint_curve.addItem("History", "history")
+        self.result_joint_curve.addItem(
+            "Force–Deformation",
+            "force_deformation",
+        )
+
         rows = (
             ("Name", self.result_name),
             ("Analysis", self.result_analysis),
@@ -1239,6 +1252,9 @@ class PropertiesPanel(QWidget):
             ("History Quantity", self.result_history_quantity),
             ("History DOF", self.result_history_dof),
             ("Section / IP", self.result_fiber_section),
+            ("Joint Response", self.result_joint_response),
+            ("Joint Component", self.result_joint_component),
+            ("Joint View", self.result_joint_curve),
         )
         for label, widget in rows:
             self.result_form.addRow(label + ":", widget)
@@ -1298,6 +1314,9 @@ class PropertiesPanel(QWidget):
             self.result_history_quantity,
             self.result_history_dof,
             self.result_fiber_section,
+            self.result_joint_response,
+            self.result_joint_component,
+            self.result_joint_curve,
         )
 
     def _set_form_row_visible(self, widget: QWidget, visible: bool) -> None:
@@ -1635,6 +1654,25 @@ class PropertiesPanel(QWidget):
                 max(1, int(options.get("section", 1)))
             )
 
+        if kind == "JointResponse":
+            for widget in (
+                self.result_joint_response,
+                self.result_joint_component,
+                self.result_joint_curve,
+            ):
+                self._set_form_row_visible(widget, True)
+            self.result_joint_response.setText(
+                str(options.get("response", "deformation"))
+            )
+            self.result_joint_component.setValue(
+                max(1, int(options.get("component", 1)))
+            )
+            curve_mode = str(options.get("curve_mode", "history"))
+            index = self.result_joint_curve.findData(curve_mode)
+            self.result_joint_curve.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+
     def set_solution_scope(
         self,
         nodes: set[int],
@@ -1692,6 +1730,12 @@ class PropertiesPanel(QWidget):
             })
         if kind in {"FiberStress", "FiberStrain"}:
             settings["section"] = self.result_fiber_section.value()
+        if kind == "JointResponse":
+            settings.update({
+                "response": self.result_joint_response.text().strip(),
+                "component": self.result_joint_component.value(),
+                "curve_mode": str(self.result_joint_curve.currentData()),
+            })
             settings["quantity"] = (
                 "Stress" if kind == "FiberStress" else "Strain"
             )
@@ -21793,6 +21837,7 @@ class MainWindow(QMainWindow):
                 return
             result_settings["response"] = requested
             result_settings.setdefault("component", 1)
+            result_settings.setdefault("curve_mode", "history")
             result_settings["connection_type"] = connection.connection_type
 
         before = self.project.to_dict()
@@ -23227,6 +23272,22 @@ class MainWindow(QMainWindow):
                 "response": str(response),
                 "component": 1,
                 "connection_type": connection.connection_type,
+                "curve_mode": (
+                    "force_deformation"
+                    if (
+                        connection.connection_type
+                        in {
+                            "semiRigid",
+                            "zeroLength",
+                            "zeroLengthSection",
+                            "KrawinklerPanelZone",
+                        }
+                        or response == "shearPanel"
+                        or "BarSlip" in response
+                        or "InterfaceShear" in response
+                    )
+                    else "history"
+                ),
             },
         )
 
