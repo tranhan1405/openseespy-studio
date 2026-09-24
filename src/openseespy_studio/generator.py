@@ -10,7 +10,7 @@ from .beam_loads import (
 )
 from .units import UnitSystem
 from .model import SHELL_ELEMENT_TYPES, StructuralModel
-from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, resolve_transformation_vecxz
+from .project import MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 from .response_spectrum import build_period_grid
 
@@ -504,14 +504,47 @@ def nd_material_to_openseespy(
 ) -> str:
     unit_system = UnitSystem.from_mapping(units)
     p = material.parameters
+
+    def value(key: str) -> float:
+        raw = float(p[key])
+        kind = nd_material_parameter_kind(
+            material.material_type,
+            key,
+        )
+        if kind == "stress":
+            return unit_system.stress_from_pa(raw)
+        if kind == "density":
+            return unit_system.density_from_kg_per_m3(raw)
+        return raw
+
     if material.material_type == "ElasticIsotropic":
-        elastic_modulus = unit_system.stress_from_pa(float(p["E"]))
-        density = unit_system.density_from_kg_per_m3(float(p["rho"]))
         return (
             "ops.nDMaterial('ElasticIsotropic', "
-            f"{material.tag}, {elastic_modulus:g}, {p['nu']:g}, "
-            f"{density:g})"
+            f"{material.tag}, {value('E'):g}, {value('nu'):g}, "
+            f"{value('rho'):g})"
         )
+
+    if material.material_type == "ElasticOrthotropic":
+        keys = (
+            "Ex", "Ey", "Ez",
+            "nu_xy", "nu_yz", "nu_zx",
+            "Gxy", "Gyz", "Gzx",
+            "rho",
+        )
+        args = ", ".join(f"{value(key):g}" for key in keys)
+        return (
+            "ops.nDMaterial('ElasticOrthotropic', "
+            f"{material.tag}, {args})"
+        )
+
+    if material.material_type == "J2Plasticity":
+        keys = ("K", "G", "sig0", "sigInf", "delta", "H")
+        args = ", ".join(f"{value(key):g}" for key in keys)
+        return (
+            "ops.nDMaterial('J2Plasticity', "
+            f"{material.tag}, {args})"
+        )
+
     raise ValueError(
         f"Unsupported nDMaterial type: {material.material_type}"
     )
