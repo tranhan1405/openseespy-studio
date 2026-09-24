@@ -23279,6 +23279,7 @@ class MainWindow(QMainWindow):
             "basicDisplacement": "Basic Displacement",
             "centralNode": "Central Node Response",
             "size": "Joint Size",
+            "stiff": "Element Stiffness",
             "stiffness": "Joint Stiffness",
             "defoANDforce": "Deformation + Force",
         }
@@ -23293,6 +23294,7 @@ class MainWindow(QMainWindow):
             "localForce",
             "basicDisplacement",
             "localDisplacement",
+            "stiff",
             "centralNode",
             "size",
             "stiffness",
@@ -23349,6 +23351,10 @@ class MainWindow(QMainWindow):
                         or response == "shearPanel"
                         or "BarSlip" in response
                         or "InterfaceShear" in response
+                        or (
+                            connection.connection_type == "LehighJoint2D"
+                            and response in {"basicForces", "Deformation"}
+                        )
                     )
                     else "history"
                 ),
