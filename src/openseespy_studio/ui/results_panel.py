@@ -4505,6 +4505,7 @@ class ResultsPanel(QWidget):
         self.history_animate_button.clicked.connect(
             lambda: self._open_animation(source="history")
         )
+        self.history_animate_button.setVisible(False)
         row.addWidget(self.history_animate_button)
 
         export = QPushButton("Export CSV")
