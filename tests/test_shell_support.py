@@ -494,7 +494,7 @@ def test_shell_deformation_ui_routes_and_tables_exist():
 def test_shell_deformed_and_mode_shape_use_four_node_surface_topology():
     source = inspect.getsource(ModelViewport._show_vector_overlay)
     assert "element.node_tags()" in source
-    assert "element.element_type in SHELL_ELEMENT_TYPES" in source
+    assert "element.element_type in QUAD_ELEMENT_TYPES" in source
     assert "shell_points" in source
     assert "faces=np.asarray" in source
     assert "scoped_nodes.update(element.node_tags())" in source
@@ -1159,7 +1159,7 @@ def test_shell_axis_viewport_and_reverse_normal_ui_routes_exist():
     viewport_source = inspect.getsource(
         MainWindow._show_viewport_context_menu
     )
-    assert "Reverse Shell Normal" in tree_source
+    assert "Flip Surface Normal" in tree_source
     assert "Reverse Shell Normal" in viewport_source
 
 
