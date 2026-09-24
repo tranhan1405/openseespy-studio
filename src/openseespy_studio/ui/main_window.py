@@ -2539,7 +2539,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "rc_wall_wizard",
             "RC Wall",
-            "column-1d",
+            "model-shell-section",
             self._show_rc_wall_wizard,
             "Build a planar reinforced-concrete wall with RCLMS and MEFI",
         )
@@ -3528,7 +3528,7 @@ class MainWindow(QMainWindow):
             home,
             "FE Model",
             large=("node",),
-            small=("shell_input",),
+            small=("shell_input", "rc_wall_wizard"),
             widgets=(frame_button, truss_button),
         )
         add_group(
