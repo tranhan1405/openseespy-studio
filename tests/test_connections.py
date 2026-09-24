@@ -221,6 +221,7 @@ def test_semi_rigid_2d_connection_exports_zero_length_rz_spring():
 
     line = connection_to_openseespy(connection, ndm=2, ndf=3)
 
+    assert "ops.equalDOF(1, 2, 1, 2)" in line
     assert "ops.element('zeroLength', 22, 1, 2" in line
     assert "'-mat', 1, '-dir', 3" in line
 
@@ -295,6 +296,7 @@ def test_krawinkler_panel_zone_generator_builds_expected_macro():
         in script
     )
     assert "ops.geomTransf('Linear', _sare_pz_40_tr)" in script
+    assert "_sare_pz_40_ebase = max(" in script
 
 
 def test_joint_models_are_restricted_to_2d_three_dof_frame_for_now():
@@ -341,3 +343,29 @@ def test_joint_panel_material_is_tracked_as_connection_dependency():
     project.add_connection(connection)
 
     assert project.connections_using_material(1) == [32]
+
+
+def test_krawinkler_internal_element_tags_reserve_future_connection_tags():
+    connection = ConnectionData(
+        tag=40,
+        name="Panel zone tag reservation",
+        connection_type="KrawinklerPanelZone",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "rigid_A": 1000.0,
+            "rigid_E": 2.0e11,
+            "rigid_I": 1000.0,
+        },
+    )
+
+    script = connection_to_openseespy(
+        connection,
+        ndm=2,
+        ndf=3,
+        reserved_element_tag_max=75,
+    )
+
+    assert "+ [75]) + 1" in script
