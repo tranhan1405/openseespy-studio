@@ -767,6 +767,11 @@ ops.uniaxialMaterial('Steel01', 3, 0.30, 30.0, 0.01)
 ops.element('zeroLength', 1, 0, 1, '-mat', 1, '-dir', 1, '-doRayleigh', 1)
 ops.element('zeroLength', 2, 1, 2, '-mat', 2, '-dir', 1, '-doRayleigh', 1)
 ops.element('zeroLength', 3, 2, 3, '-mat', 3, '-dir', 1, '-doRayleigh', 1)
+ops.recorder(
+    'Node', '-file', './Absolute_accel.out',
+    '-timeSeries', 1, '-time', '-dT', 0.001,
+    '-node', 0, 1, 2, 3, '-dof', 1, 'accel'
+)
 ops.wipe()
 """
 
@@ -788,3 +793,5 @@ ops.wipe()
     assert result.project.connections[1].node_i == 0
     assert result.project.connections[1].materials_by_dof == {1: 1}
     assert result.project.connections[1].do_rayleigh is True
+    assert len(result.project.recorders) == 1
+    assert result.project.recorders[1].target_tags == [0, 1, 2, 3]
