@@ -206,7 +206,8 @@ def test_crack_pattern_result_restores_controls_and_reports_panels(qapp):
         assert panel.crack_line_scale.value() == pytest.approx(0.65)
         assert panel.crack_table.rowCount() == 1
         assert panel.crack_table.item(0, 5).text() == "Cracked"
-        assert "1 cracked at final state" in panel.crack_summary.text()
+        assert "1 cracked" in panel.crack_summary.text()
+        assert "max ε1/εcr = 2.000" in panel.crack_summary.text()
         assert not panel.motion_page.isHidden()
         assert panel._motion_frame_index == 1
         assert panel.motion_slider.value() == 1
@@ -1067,12 +1068,11 @@ def test_animation_preserves_quad_shell_topology():
 def test_crack_pattern_renderer_is_high_contrast_and_diagnostic():
     source = inspect.getsource(ModelViewport.show_crack_pattern)
 
-    assert '"valid_panels": 0' in source
-    assert '"cracked": 0' in source
-    assert '"max_ratio": 0.0' in source
-    assert '"color": "#c62828"' in source
-    assert '"line_width": 7' in source
-    assert '"lighting": False' in source
+    assert "mefi_crack_panel_states" in source
+    assert "mefi_crack_summary" in source
+    assert 'color="#c62828"' in source
+    assert "line_width=9" in source
+    assert "lighting=False" in source
     assert "return stats" in source
 
 
@@ -1106,8 +1106,9 @@ def test_crack_summary_reports_max_cracking_ratio(qapp):
     }
     try:
         panel.set_result(result)
-        assert "1 cracked at final state" in panel.crack_summary.text()
-        assert "max epsilon1/epsilon_cr = 2.000" in panel.crack_summary.text()
+        assert "1 cracked" in panel.crack_summary.text()
+        assert "max ε1/εcr = 2.000" in panel.crack_summary.text()
+        assert "max ε1/εcr = 2.000" in panel.crack_summary.text()
     finally:
         panel.close()
         panel.deleteLater()
@@ -1411,7 +1412,7 @@ def test_crack_table_follows_animation_frame_and_accumulate(qapp):
 
         panel._set_motion_index(0)
         qapp.processEvents()
-        assert panel.crack_table.item(0, 5).text() == "Below epsilon_cr"
+        assert panel.crack_table.item(0, 5).text() == "Below εcr"
         assert "active frame 1/2" in panel.crack_summary.text()
 
         panel._set_motion_index(1)
@@ -1424,8 +1425,82 @@ def test_crack_table_follows_animation_frame_and_accumulate(qapp):
         qapp.processEvents()
         assert panel.crack_table.item(0, 5).text() == "Cracked"
         assert "accumulated frame 2/2" in panel.crack_summary.text()
-        assert "max<=frame" in panel.crack_table.horizontalHeaderItem(3).text()
+        assert "max≤frame" in panel.crack_table.horizontalHeaderItem(3).text()
         assert not panel.crack_animate_button.isHidden()
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_crack_result_viewer_uses_compact_subtabs_and_data_health(qapp):
+    panel = ResultsPanel()
+    try:
+        panel.set_result(_two_frame_motion_result())
+        panel.show_solution_result(
+            "CrackPattern",
+            {
+                "accumulate": False,
+                "line_scale": 0.82,
+                "_element_scope": [30],
+            },
+        )
+        qapp.processEvents()
+
+        assert panel.crack_detail_tabs.count() == 3
+        assert [
+            panel.crack_detail_tabs.tabText(index)
+            for index in range(panel.crack_detail_tabs.count())
+        ] == ["Overview", "Panels", "Evolution"]
+        assert "Data health: READY" in panel.crack_health.text()
+        assert "εcr=1/1" in panel.crack_health.text()
+        assert "panel strain=1/1" in panel.crack_health.text()
+        assert panel.crack_evolution_table.rowCount() == 2
+        assert panel.crack_evolution_table.item(0, 4).text() == "Below εcr"
+        assert panel.crack_evolution_table.item(1, 4).text() == "Cracked"
+
+        panel._crack_evolution_row_clicked(0, 0)
+        qapp.processEvents()
+        assert panel._motion_frame_index == 0
+        assert panel.crack_table.item(0, 5).text() == "Below εcr"
+
+        panel._crack_evolution_row_clicked(1, 0)
+        qapp.processEvents()
+        assert panel._motion_frame_index == 1
+        assert panel.crack_table.item(0, 5).text() == "Cracked"
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_crack_display_button_emits_current_frame(qapp):
+    panel = ResultsPanel()
+    captured = []
+    panel.crack_frame_requested.connect(
+        lambda frame, accumulate, line_scale, scope: captured.append(
+            (int(frame), bool(accumulate), float(line_scale), list(scope))
+        )
+    )
+    try:
+        panel.set_result(_two_frame_motion_result())
+        panel.show_solution_result(
+            "CrackPattern",
+            {
+                "accumulate": False,
+                "line_scale": 0.7,
+                "_element_scope": [30],
+            },
+        )
+        panel._set_motion_index(1)
+        panel._display_current_crack_frame()
+        qapp.processEvents()
+
+        assert captured
+        assert captured[-1][0] == 1
+        assert captured[-1][1] is False
+        assert captured[-1][2] == pytest.approx(0.7)
+        assert captured[-1][3] == [30]
     finally:
         panel.close()
         panel.deleteLater()
