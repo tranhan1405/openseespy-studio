@@ -228,7 +228,8 @@ def test_surface_geometry_is_primary_shell_preprocessing_route():
     assert "Legacy:" not in context_source
     assert "New Shell / Surface..." not in context_source
     assert "Mesh Shell Surface..." not in context_source
-    assert "New Direct Shell Element..." in context_source
+    assert "New Direct Shell Element..." not in context_source
+    assert '"Direct Shell Element..."' in build_source
     assert "New Surface by Picking..." in context_source
     assert "New Surface by Input..." in context_source
 
