@@ -243,3 +243,108 @@ def test_mass_source_includes_nonlinear_shell_density(section, expected_mass):
     )
     assert summary.self_mass == pytest.approx(expected_mass)
     assert sum(summary.nodal_mass.values()) == pytest.approx(expected_mass)
+
+
+@pytest.mark.parametrize(
+    ("material", "expected"),
+    [
+        (
+            NDMaterialData(
+                11,
+                "Orthotropic plate",
+                "ElasticOrthotropic",
+                parameters={
+                    "Ex": 40.0e9,
+                    "Ey": 12.0e9,
+                    "Ez": 8.0e9,
+                    "nu_xy": 0.25,
+                    "nu_yz": 0.30,
+                    "nu_zx": 0.20,
+                    "Gxy": 5.0e9,
+                    "Gyz": 3.0e9,
+                    "Gzx": 4.0e9,
+                    "rho": 600.0,
+                },
+            ),
+            (
+                "ops.nDMaterial('ElasticOrthotropic', 11, "
+                "4e+10, 1.2e+10, 8e+09, 0.25, 0.3, 0.2, "
+                "5e+09, 3e+09, 4e+09, 600)"
+            ),
+        ),
+        (
+            NDMaterialData(
+                12,
+                "J2 steel plate",
+                "J2Plasticity",
+                parameters={
+                    "K": 166.67e9,
+                    "G": 76.923e9,
+                    "sig0": 250.0e6,
+                    "sigInf": 350.0e6,
+                    "delta": 16.0,
+                    "H": 1.0e9,
+                },
+            ),
+            (
+                "ops.nDMaterial('J2Plasticity', 12, "
+                "1.6667e+11, 7.6923e+10, 2.5e+08, "
+                "3.5e+08, 16, 1e+09)"
+            ),
+        ),
+    ],
+)
+def test_additional_nd_materials_generate_native_opensees_commands(
+    material,
+    expected,
+):
+    assert nd_material_to_openseespy(
+        material,
+        {"length": "m", "force": "N", "time": "s"},
+    ) == expected
+
+
+def test_additional_nd_materials_round_trip_project_data():
+    project = ProjectDatabase()
+    project.add_nd_material(
+        NDMaterialData(
+            1,
+            "Orthotropic",
+            "ElasticOrthotropic",
+            parameters={
+                "Ex": 30.0e9,
+                "Ey": 12.0e9,
+                "Ez": 10.0e9,
+                "nu_xy": 0.22,
+                "nu_yz": 0.28,
+                "nu_zx": 0.18,
+                "Gxy": 4.5e9,
+                "Gyz": 3.0e9,
+                "Gzx": 3.5e9,
+                "rho": 550.0,
+            },
+        )
+    )
+    project.add_nd_material(
+        NDMaterialData(
+            2,
+            "J2",
+            "J2Plasticity",
+            parameters={
+                "K": 160.0e9,
+                "G": 75.0e9,
+                "sig0": 240.0e6,
+                "sigInf": 330.0e6,
+                "delta": 12.0,
+                "H": 0.8e9,
+            },
+        )
+    )
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    assert restored.nd_materials[1].material_type == "ElasticOrthotropic"
+    assert restored.nd_materials[1].parameters["Gxy"] == pytest.approx(4.5e9)
+    assert restored.nd_materials[1].parameters["rho"] == pytest.approx(550.0)
+    assert restored.nd_materials[2].material_type == "J2Plasticity"
+    assert restored.nd_materials[2].parameters["sig0"] == pytest.approx(240.0e6)
+    assert restored.nd_materials[2].parameters["delta"] == pytest.approx(12.0)
