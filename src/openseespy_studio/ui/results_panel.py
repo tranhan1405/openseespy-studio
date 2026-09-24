@@ -3100,6 +3100,14 @@ class ResultsPanel(QWidget):
         self.motion_counter = QLabel("/ 0")
         transport.addWidget(self.motion_counter)
 
+        self.motion_coordinate_label = QLabel("Time: -")
+        self.motion_coordinate_label.setMinimumWidth(110)
+        self.motion_coordinate_label.setToolTip(
+            "Current physical time or analysis coordinate for the displayed "
+            "animation frame."
+        )
+        transport.addWidget(self.motion_coordinate_label)
+
         transport.addWidget(QLabel("Speed:"))
         self.motion_speed = QComboBox()
         for label, speed in (
@@ -3566,6 +3574,28 @@ class ResultsPanel(QWidget):
         self.pushover_plot.set_marker(index)
         self.cyclic_plot.set_marker(index)
 
+    def _motion_coordinate_text(self, frame) -> str:
+        if self._motion_info is None:
+            return "Time: -"
+        coordinate = frame.coordinate
+        name = str(self._motion_info.coordinate_name or "Value")
+        if coordinate is None:
+            if name == "Frame":
+                return f"Step: {self._motion_frame_index + 1}"
+            return f"{name}: -"
+
+        value = float(coordinate)
+        if name == "Time":
+            unit = str(self._project_units.get("time", "s") or "s").strip()
+            return f"Time: {value:.6g} {unit}"
+        if name == "Phase":
+            return f"Phase: {value:.1f}°"
+        if name == "Interpolation":
+            return f"Value: {100.0 * value:.1f}%"
+        if name == "Analysis coordinate":
+            return f"Coordinate: {value:.6g}"
+        return f"{name}: {value:.6g}"
+
     def _emit_current_motion_frame(self, *_args) -> None:
         if not hasattr(self, "motion_info_label"):
             return
@@ -3584,6 +3614,8 @@ class ResultsPanel(QWidget):
         count = int(self._motion_display_frame_count)
         if count <= 0:
             self.motion_counter.setText("/ 0")
+            if hasattr(self, "motion_coordinate_label"):
+                self.motion_coordinate_label.setText("Time: -")
             self.motion_info_label.setText(
                 "No deformation history or modal vectors are available "
                 "for motion playback."
@@ -3607,6 +3639,9 @@ class ResultsPanel(QWidget):
             info=self._motion_info,
         )
         self.motion_counter.setText(f"/ {count}")
+        self.motion_coordinate_label.setText(
+            self._motion_coordinate_text(frame)
+        )
         self.motion_info_label.setText(
             f"Frame {self._motion_frame_index + 1}/{count} · {frame.label}"
         )
