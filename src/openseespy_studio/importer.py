@@ -615,6 +615,7 @@ class _Importer:
             "ElasticIsotropic": 2,
             "ElasticOrthotropic": 9,
             "J2Plasticity": 6,
+            "DruckerPrager": 12,
         }[kind]
         values = list(args[2:])
         if len(values) < required_count:
