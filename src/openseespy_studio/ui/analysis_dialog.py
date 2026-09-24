@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -83,6 +84,41 @@ class AnalysisDialog(QDialog):
         )
         self.system.currentTextChanged.connect(
             lambda _text: self._sync(self.kind.currentText())
+        )
+        self.execution_mode=QComboBox()
+        self.execution_mode.addItems([
+            "Auto",
+            "Single Thread",
+            "Multi-thread",
+        ])
+        self.execution_mode.setCurrentText(
+            analysis.execution_mode if analysis else "Auto"
+        )
+        detected_threads=max(1, int(os.cpu_count() or 1))
+        self.num_threads=QSpinBox()
+        self.num_threads.setRange(
+            1,
+            max(
+                256,
+                detected_threads,
+                int(analysis.num_threads) if analysis else 1,
+            ),
+        )
+        self.num_threads.setValue(
+            analysis.num_threads if analysis else detected_threads
+        )
+        self.num_threads.setToolTip(
+            f"OpenSees setNumThreads(). This computer reports "
+            f"{detected_threads} logical CPU(s). Auto leaves the OpenSees "
+            "runtime default unchanged."
+        )
+        self.execution_mode.setToolTip(
+            "Auto: leave OpenSees thread count unchanged. Single Thread: "
+            "force one thread. Multi-thread: call ops.setNumThreads(N). "
+            "Thread scaling depends on the OpenSees build and solver."
+        )
+        self.execution_mode.currentTextChanged.connect(
+            lambda _text: self._sync_execution_mode()
         )
         self.test=QComboBox(); self.test.addItems(["NormDispIncr","NormUnbalance","EnergyIncr"]); self.test.setCurrentText(analysis.test if analysis else "NormDispIncr")
         self.tol=fs(analysis.tolerance if analysis else 1e-8,1e-16,1e10)
@@ -510,6 +546,8 @@ class AnalysisDialog(QDialog):
                 "System option",
                 self.system_pivoting,
             ),
+            ("execution_mode","CPU execution",self.execution_mode),
+            ("num_threads","Number of threads",self.num_threads),
             ("test","Test",self.test),
             ("tol","Tolerance",self.tol),
             ("max_iter","Max iterations",self.max_iter),
@@ -613,7 +651,20 @@ class AnalysisDialog(QDialog):
         self.spectrum_mode.currentTextChanged.connect(
             lambda _text: self._sync(self.kind.currentText())
         )
+        self._sync_execution_mode()
         self._sync(self.kind.currentText())
+
+    def _sync_execution_mode(self) -> None:
+        mode = self.execution_mode.currentText()
+        if mode == "Single Thread":
+            self.num_threads.setValue(1)
+            self.num_threads.setEnabled(False)
+        elif mode == "Multi-thread":
+            self.num_threads.setEnabled(True)
+        else:
+            # Auto intentionally leaves the runtime/default OpenSees thread
+            # count untouched. Keep the remembered value visible but inactive.
+            self.num_threads.setEnabled(False)
 
     def _refresh_driver_pattern_choices(
         self,
@@ -970,6 +1021,8 @@ class AnalysisDialog(QDialog):
             tag=self.tag.value(),name=self.name.text().strip() or f"Analysis {self.tag.value()}",
             analysis_type=self.kind.currentText(),constraints_handler=self.constraints.currentText(),
             numberer=self.numberer.currentText(),system=self.system.currentText(),
+            execution_mode=self.execution_mode.currentText(),
+            num_threads=self.num_threads.value(),
             system_pivoting=(
                 self.system_pivoting.isChecked()
                 and self.system.currentText() == "SparseGeneral"
