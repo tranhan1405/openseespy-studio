@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 import math
+from datetime import date
 from importlib import resources
 from typing import Any
 
@@ -63,7 +64,13 @@ class NDMaterialLibraryRecord:
         )
 
     @property
+    def verification_date(self) -> str:
+        return str(self.verification.get("checked_on", "")).strip()
+
+    @property
     def searchable_text(self) -> str:
+        reference = self.primary_reference
+        evidence = self.parameter_evidence
         parts = (
             self.id,
             self.family,
@@ -74,8 +81,29 @@ class NDMaterialLibraryRecord:
             *self.compatibility,
             *self.applicability,
             *self.limitations,
+            reference.get("title", ""),
+            reference.get("authors", ""),
+            reference.get("doi", ""),
+            reference.get("url", ""),
+            evidence.get("location", ""),
+            evidence.get("note", ""),
         )
         return " ".join(str(value) for value in parts).lower()
+
+    @property
+    def citation_text(self) -> str:
+        reference = self.primary_reference
+        title = str(reference.get("title", "")).strip()
+        authors = str(reference.get("authors", "")).strip()
+        doi = str(reference.get("doi", "")).strip()
+        url = self.source_url
+        parts = [value for value in (authors, title) if value]
+        citation = ". ".join(parts)
+        if doi:
+            citation += (". " if citation else "") + "DOI: " + doi
+        elif url:
+            citation += (". " if citation else "") + url
+        return citation
 
     def source_metadata(self) -> dict[str, Any]:
         return {
@@ -218,6 +246,19 @@ def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
                 f"Official nD material record {record_id!r} is missing "
                 f"verification flag {flag!r}."
             )
+    checked_on = str(verification.get("checked_on", "")).strip()
+    if not checked_on:
+        raise ValueError(
+            f"Official nD material record {record_id!r} has no "
+            "verification checked_on date."
+        )
+    try:
+        date.fromisoformat(checked_on)
+    except ValueError as exc:
+        raise ValueError(
+            f"Official nD material record {record_id!r} has invalid "
+            "verification checked_on date."
+        ) from exc
 
     parameters = {
         str(key): float(value)
@@ -272,6 +313,43 @@ def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
             "compatibility metadata."
         )
 
+    applicability = tuple(
+        str(value).strip()
+        for value in raw.get("applicability", [])
+        if str(value).strip()
+    )
+    if not applicability:
+        raise ValueError(
+            f"Official nD material record {record_id!r} has no "
+            "applicability metadata."
+        )
+
+    limitations = tuple(
+        str(value).strip()
+        for value in raw.get("limitations", [])
+        if str(value).strip()
+    )
+    if not limitations:
+        raise ValueError(
+            f"Official nD material record {record_id!r} has no "
+            "limitations metadata."
+        )
+
+    source_units = {
+        str(key): str(value).strip()
+        for key, value in dict(raw.get("source_units", {})).items()
+    }
+    if set(source_units) != expected_set:
+        raise ValueError(
+            f"Official nD material record {record_id!r} source_units "
+            "must exactly match active model parameters."
+        )
+    if any(not value for value in source_units.values()):
+        raise ValueError(
+            f"Official nD material record {record_id!r} contains an "
+            "empty source unit."
+        )
+
     return NDMaterialLibraryRecord(
         id=record_id,
         family=family,
@@ -282,19 +360,12 @@ def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
         verified_parameters=verified_parameters,
         behavior=behavior,
         compatibility=compatibility,
-        applicability=tuple(
-            str(value) for value in raw.get("applicability", [])
-        ),
-        limitations=tuple(
-            str(value) for value in raw.get("limitations", [])
-        ),
+        applicability=applicability,
+        limitations=limitations,
         primary_reference=reference,
         parameter_evidence=dict(raw.get("parameter_evidence", {})),
         verification=verification,
-        source_units={
-            str(key): str(value)
-            for key, value in dict(raw.get("source_units", {})).items()
-        },
+        source_units=source_units,
     )
 
 
@@ -353,7 +424,11 @@ def filter_verified_nd_material_library(
         if records is None
         else records
     )
-    query_text = str(query).strip().lower()
+    query_tokens = tuple(
+        token
+        for token in str(query).strip().lower().split()
+        if token
+    )
     family_text = str(family).strip()
     model_text = str(model).strip()
     behavior_text = str(behavior).strip()
@@ -362,7 +437,13 @@ def filter_verified_nd_material_library(
     return tuple(
         record
         for record in source
-        if (not query_text or query_text in record.searchable_text)
+        if (
+            not query_tokens
+            or all(
+                token in record.searchable_text
+                for token in query_tokens
+            )
+        )
         and (not family_text or record.family == family_text)
         and (not model_text or record.model == model_text)
         and (
