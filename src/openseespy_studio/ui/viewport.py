@@ -197,6 +197,11 @@ class ModelViewport(QWidget):
         self._motion_element_node_tags: list[int] = []
         self._motion_node_tags: list[int] = []
         self._motion_topology_key: object | None = None
+        self._motion_extrema_visible = False
+        self._motion_extrema_snapshot: tuple[
+            tuple[int, float, tuple[float, float, float]],
+            tuple[int, float, tuple[float, float, float]],
+        ] | None = None
         self._node_probe_tag: int | None = None
         self._node_probe_label = ""
 
@@ -6258,6 +6263,7 @@ class ModelViewport(QWidget):
         self._motion_element_node_tags = []
         self._motion_node_tags = []
         self._motion_topology_key = None
+        self._motion_extrema_snapshot = None
         self.set_undeformed_model_visible(True, render=False)
         if render:
             self.plotter.render()
@@ -7652,49 +7658,46 @@ class ModelViewport(QWidget):
         self._result_overlay_active = True
         self.plotter.render()
 
-    def _update_motion_extrema(
+    def set_motion_extrema_visible(
         self,
+        visible: bool,
         *,
-        node_tags: tuple[int, ...],
-        displaced,
-        displacement_magnitude,
+        render: bool = True,
+    ) -> None:
+        """Toggle frame-local Min/Max annotations for result animation."""
+        self._motion_extrema_visible = bool(visible)
+        if not self._motion_extrema_visible:
+            for name in (
+                "motion-max-point",
+                "motion-min-point",
+                "motion-max-label",
+                "motion-min-label",
+            ):
+                self._remove_overlay(name)
+        elif self._motion_extrema_snapshot is not None:
+            self._draw_motion_extrema_snapshot(
+                self._motion_extrema_snapshot,
+                render=False,
+            )
+        if render:
+            self.plotter.render()
+
+    def _draw_motion_extrema_snapshot(
+        self,
+        snapshot: tuple[
+            tuple[int, float, tuple[float, float, float]],
+            tuple[int, float, tuple[float, float, float]],
+        ],
+        *,
         render: bool = False,
     ) -> None:
-        """Show frame-local displacement extrema without changing contour range."""
-        for name in (
-            "motion-max-point",
-            "motion-min-point",
-            "motion-max-label",
-            "motion-min-label",
-        ):
-            self._remove_overlay(name)
-
-        if self._model is None:
-            return
-        candidates = [
-            int(tag)
-            for tag in node_tags
-            if int(tag) in self._model.nodes
-        ]
-        if not candidates:
-            return
-
-        values = {
-            tag: float(displacement_magnitude(tag))
-            for tag in candidates
-        }
-        min_tag = min(candidates, key=lambda tag: values[tag])
-        max_tag = max(candidates, key=lambda tag: values[tag])
-        min_value = values[min_tag]
-        max_value = values[max_tag]
-        min_point = displaced(min_tag)
-        max_point = displaced(max_tag)
+        min_data, max_data = snapshot
+        min_tag, min_value, min_point = min_data
+        max_tag, max_value, max_point = max_data
         unit = str(self._units.get("length", "")).strip()
         suffix = f" {unit}" if unit else ""
 
-        max_cloud = pv.PolyData(
-            np.asarray([max_point], dtype=float)
-        )
+        max_cloud = pv.PolyData(np.asarray([max_point], dtype=float))
         self.plotter.add_mesh(
             max_cloud,
             name="motion-max-point",
@@ -7714,9 +7717,7 @@ class ModelViewport(QWidget):
             always_visible=True,
         )
 
-        min_cloud = pv.PolyData(
-            np.asarray([min_point], dtype=float)
-        )
+        min_cloud = pv.PolyData(np.asarray([min_point], dtype=float))
         self.plotter.add_mesh(
             min_cloud,
             name="motion-min-point",
@@ -7736,6 +7737,54 @@ class ModelViewport(QWidget):
             always_visible=True,
         )
 
+        if render:
+            self.plotter.render()
+
+    def _update_motion_extrema(
+        self,
+        *,
+        node_tags: tuple[int, ...],
+        displaced,
+        displacement_magnitude,
+        render: bool = False,
+    ) -> None:
+        """Cache frame extrema and draw them only when the ribbon toggle is on."""
+        for name in (
+            "motion-max-point",
+            "motion-min-point",
+            "motion-max-label",
+            "motion-min-label",
+        ):
+            self._remove_overlay(name)
+
+        if self._model is None:
+            self._motion_extrema_snapshot = None
+            return
+        candidates = [
+            int(tag)
+            for tag in node_tags
+            if int(tag) in self._model.nodes
+        ]
+        if not candidates:
+            self._motion_extrema_snapshot = None
+            return
+
+        values = {
+            tag: float(displacement_magnitude(tag))
+            for tag in candidates
+        }
+        min_tag = min(candidates, key=lambda tag: values[tag])
+        max_tag = max(candidates, key=lambda tag: values[tag])
+        self._motion_extrema_snapshot = (
+            (min_tag, values[min_tag], displaced(min_tag)),
+            (max_tag, values[max_tag], displaced(max_tag)),
+        )
+
+        if self._motion_extrema_visible:
+            self._draw_motion_extrema_snapshot(
+                self._motion_extrema_snapshot,
+                render=False,
+            )
         if render:
             self.plotter.render()
 
