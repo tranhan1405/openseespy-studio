@@ -23,6 +23,8 @@ class RCWallSpec:
     height: float = 2.2098
     thickness: float = 0.1524
     boundary_width: float = 0.2286
+    origin_x: float = 0.0
+    origin_y: float = 0.0
     vertical_elements: int = 7
     macro_fibers: int = 8
 
@@ -394,11 +396,16 @@ def build_rc_wall(
     node_tags: list[int] = []
     rows = int(spec.vertical_elements)
     for row in range(rows + 1):
-        y = float(spec.height) * row / rows
+        y = float(spec.origin_y) + float(spec.height) * row / rows
         left = first_node + 2 * row
         right = left + 1
-        model.add_node(left, 0.0, y, 0.0)
-        model.add_node(right, float(spec.width), y, 0.0)
+        model.add_node(left, float(spec.origin_x), y, 0.0)
+        model.add_node(
+            right,
+            float(spec.origin_x) + float(spec.width),
+            y,
+            0.0,
+        )
         node_tags.extend([left, right])
 
     model.nodes[node_tags[0]].fixity = (1, 1, 1)
