@@ -1329,10 +1329,10 @@ def test_beam_column_joint_exports_13_material_components_and_factors():
         tag=90,
         name="RC beam-column joint",
         connection_type="BeamColumnJoint",
-        node_i=10,
-        node_j=11,
+        node_i=11,
+        node_j=12,
         parameters={
-            "external_nodes": [10, 11, 12, 13],
+            "external_nodes": [11, 12, 13, 10],
             "component_materials": list(range(1, 14)),
             "height_factor": 0.85,
             "width_factor": 0.9,
@@ -1343,7 +1343,7 @@ def test_beam_column_joint_exports_13_material_components_and_factors():
     script = connection_to_openseespy(connection, ndm=2, ndf=3)
 
     assert (
-        "ops.element('beamColumnJoint', 90, 10, 11, 12, 13, "
+        "ops.element('beamColumnJoint', 90, 11, 12, 13, 10, "
         + ", ".join(str(tag) for tag in range(1, 14))
         + ", 0.85, 0.9)"
         in script
@@ -1356,10 +1356,10 @@ def test_beam_column_joint_omits_default_geometry_factors():
         tag=91,
         name="Default factors",
         connection_type="BeamColumnJoint",
-        node_i=10,
-        node_j=11,
+        node_i=11,
+        node_j=12,
         parameters={
-            "external_nodes": [10, 11, 12, 13],
+            "external_nodes": [11, 12, 13, 10],
             "component_materials": list(range(1, 14)),
             "height_factor": 1.0,
             "width_factor": 1.0,
@@ -1386,7 +1386,7 @@ ops.node(12, 2.0, 0.0)
 ops.node(13, 1.0, -1.0)
 {material_lines}
 ops.element(
-    'beamColumnJoint', 90, 10, 11, 12, 13,
+    'beamColumnJoint', 90, 11, 12, 13, 10,
     {", ".join(str(tag) for tag in range(1, 14))},
     0.8, 0.9,
 )
@@ -1508,10 +1508,10 @@ def test_joint_response_validates_target_and_response_query():
         tag=94,
         name="RC response joint",
         connection_type="BeamColumnJoint",
-        node_i=10,
-        node_j=11,
+        node_i=11,
+        node_j=12,
         parameters={
-            "external_nodes": [10, 11, 12, 13],
+            "external_nodes": [11, 12, 13, 10],
             "component_materials": list(range(1, 14)),
             "height_factor": 1.0,
             "width_factor": 1.0,
@@ -1569,10 +1569,10 @@ def test_generated_analysis_captures_requested_joint_histories_only():
         tag=95,
         name="Captured joint",
         connection_type="BeamColumnJoint",
-        node_i=10,
-        node_j=11,
+        node_i=11,
+        node_j=12,
         parameters={
-            "external_nodes": [10, 11, 12, 13],
+            "external_nodes": [11, 12, 13, 10],
             "component_materials": list(range(1, 14)),
             "height_factor": 1.0,
             "width_factor": 1.0,
@@ -1626,10 +1626,10 @@ def test_joint_history_capture_is_absent_without_joint_result_request():
         tag=96,
         name="Unrequested joint",
         connection_type="BeamColumnJoint",
-        node_i=10,
-        node_j=11,
+        node_i=11,
+        node_j=12,
         parameters={
-            "external_nodes": [10, 11, 12, 13],
+            "external_nodes": [11, 12, 13, 10],
             "component_materials": list(range(1, 14)),
             "height_factor": 1.0,
             "width_factor": 1.0,
@@ -1876,3 +1876,41 @@ def test_beam_column_joint_deformation_vector_has_four_named_components():
 
     assert result.settings["response"] == "deformation"
     assert result.settings["component"] == 4
+
+
+def test_beam_column_joint_2d_requires_global_y_height_and_x_width():
+    model = StructuralModel(name="Rotated BCJ", ndm=2, ndf=3)
+    # A geometrically valid square rotated 45 degrees. BeamColumnJoint2d
+    # uses global UX/UY directly, so this orientation is not supported by
+    # the native element without a transformation.
+    model.add_node(201, 1.0, 1.0, 0.0)
+    model.add_node(202, 1.0, -1.0, 0.0)
+    model.add_node(203, -1.0, -1.0, 0.0)
+    model.add_node(204, -1.0, 1.0, 0.0)
+    project = ProjectDatabase(model=model)
+    for tag in range(1, 14):
+        project.add_material(elastic_material(tag))
+
+    connection = ConnectionData(
+        tag=193,
+        name="Rotated 2D RC joint",
+        connection_type="BeamColumnJoint",
+        node_i=201,
+        node_j=202,
+        parameters={
+            "external_nodes": [201, 202, 203, 204],
+            "component_materials": list(range(1, 14)),
+            "height_factor": 1.0,
+            "width_factor": 1.0,
+        },
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "global Y" in str(exc)
+        assert "global X" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected rotated BeamColumnJoint2d geometry to be rejected"
+        )
