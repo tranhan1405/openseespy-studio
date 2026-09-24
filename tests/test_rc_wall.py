@@ -193,9 +193,8 @@ def test_rc_wall_wizard_converts_benchmark_geometry_to_project_units():
         assert spec.macro_fibers == 8
         assert math.isclose(spec.rho_x_web, 0.0027)
         assert math.isclose(spec.rho_y_boundary, 0.0323)
-        assert "7 MEFI rows" in dialog.review.parentWidget().findChildren(
-            type(dialog.review)
-        )[-1].text() or True
+        assert dialog.vertical_elements.value() == 7
+        assert "7 MEFI rows" in dialog.review.text()
     finally:
         dialog.close()
         dialog.deleteLater()
