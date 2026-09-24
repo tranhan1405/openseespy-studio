@@ -205,6 +205,55 @@ def material_source_comments(material: MaterialData) -> list[str]:
     return comments
 
 
+def nd_material_source_comments(
+    material: NDMaterialData,
+) -> list[str]:
+    """Return provenance comments for a sourced nD material."""
+    source = material.source if isinstance(material.source, dict) else {}
+    if not source:
+        return []
+
+    reference = source.get("primary_reference", {})
+    if not isinstance(reference, dict):
+        reference = {}
+    evidence = source.get("parameter_evidence", {})
+    if not isinstance(evidence, dict):
+        evidence = {}
+
+    comments = [
+        f"# Source status: {source.get('status', 'unknown')}",
+    ]
+    title = str(reference.get("title", "")).strip()
+    if title:
+        comments.append("# Source: " + title)
+    url = str(reference.get("url", "")).strip()
+    if url:
+        comments.append("# Source URL: " + url)
+    doi = str(reference.get("doi", "")).strip()
+    if doi:
+        comments.append("# DOI: " + doi)
+    location = str(evidence.get("location", "")).strip()
+    if location:
+        comments.append("# Parameter evidence: " + location)
+    record_id = str(source.get("record_id", "")).strip()
+    if record_id:
+        comments.append("# SARE nD library record: " + record_id)
+    compatibility = source.get("compatibility", [])
+    if isinstance(compatibility, (list, tuple)) and compatibility:
+        comments.append(
+            "# Compatible formulations: "
+            + ", ".join(str(value) for value in compatibility)
+        )
+    parameter_status = str(
+        source.get("verification", {}).get("parameter_status", "")
+        if isinstance(source.get("verification", {}), dict)
+        else ""
+    ).strip()
+    if parameter_status:
+        comments.append("# Parameter status: " + parameter_status)
+    return comments
+
+
 def material_to_openseespy(
     material: MaterialData,
     units: dict[str, str] | None = None,
@@ -4802,9 +4851,11 @@ def to_openseespy(
     if nd_materials:
         lines.extend(["", "# nD Materials"])
         for tag in sorted(nd_materials):
+            material = nd_materials[tag]
+            lines.extend(nd_material_source_comments(material))
             lines.append(
                 nd_material_to_openseespy(
-                    nd_materials[tag],
+                    material,
                     units,
                 )
             )
