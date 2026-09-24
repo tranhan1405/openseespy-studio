@@ -992,6 +992,20 @@ ops.nDMaterial(
     250.0e6, 350.0e6,
     16.0, 1.0e9
 )
+ops.nDMaterial(
+    'DruckerPrager', 23,
+    100.0e6, 50.0e6, 0.10e6,
+    0.10, 0.08,
+    0.0, 0.0, 0.0, 0.0, 0.0,
+    1.0, 1800.0, 101.325e3
+)
+ops.nDMaterial(
+    'DruckerPrager', 24,
+    120.0e6, 60.0e6, 0.12e6,
+    0.12, 0.10,
+    0.0, 0.0, 0.0, 0.0, 0.0,
+    0.5, 1900.0
+)
 """
 
     result = import_openseespy_source(
@@ -1017,6 +1031,20 @@ ops.nDMaterial(
     assert j2.parameters["sigInf"] == 350.0e6
     assert j2.parameters["delta"] == 16.0
     assert j2.parameters["H"] == 1.0e9
+
+    drucker = result.project.nd_materials[23]
+    assert drucker.material_type == "DruckerPrager"
+    assert drucker.parameters["K"] == 100.0e6
+    assert drucker.parameters["rho"] == 0.10
+    assert drucker.parameters["rhoBar"] == 0.08
+    assert drucker.parameters["density"] == 1800.0
+    assert drucker.parameters["atmPressure"] == 101.325e3
+
+    drucker_default_atm = result.project.nd_materials[24]
+    assert drucker_default_atm.material_type == "DruckerPrager"
+    assert drucker_default_atm.parameters["theta"] == 0.5
+    assert drucker_default_atm.parameters["density"] == 1900.0
+    assert drucker_default_atm.parameters["atmPressure"] == 101325.0
 
 
 def test_importer_recovers_set_num_threads():
