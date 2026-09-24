@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QScrollArea, QTreeWidget
 
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
-from openseespy_studio.ui.main_window import MainWindow, PropertiesPanel
+from openseespy_studio.ui.main_window import APP_STYLE, MainWindow, PropertiesPanel
 
 
 _APP = QApplication.instance() or QApplication([])
@@ -156,3 +156,14 @@ def test_result_properties_editor_has_vertical_scroll_with_fixed_actions():
         panel.close()
         panel.deleteLater()
         _APP.processEvents()
+
+
+def test_global_style_distinguishes_locked_property_fields():
+    assert "QLineEdit:read-only" in APP_STYLE
+    assert "QLineEdit:disabled" in APP_STYLE
+    assert "QSpinBox:disabled" in APP_STYLE
+    assert "QDoubleSpinBox:disabled" in APP_STYLE
+    assert "QComboBox:disabled" in APP_STYLE
+    assert "background: #e3e6ea;" in APP_STYLE
+    assert "color: #7b858f;" in APP_STYLE
+    assert "QCheckBox:disabled" in APP_STYLE
