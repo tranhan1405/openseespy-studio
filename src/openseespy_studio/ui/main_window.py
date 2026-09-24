@@ -4918,6 +4918,61 @@ class MainWindow(QMainWindow):
                     "Generated RC wall failed SARE Model Check:\n"
                     + preview
                 )
+
+            # Do not accept a nominal builder result unless the generated
+            # entities are really present in the live Project model.  This
+            # turns any silent/partial RC-wall generation into a visible
+            # error before the wizard workflow continues.
+            expected_node_count = 2 * (int(spec.vertical_elements) + 1)
+            expected_element_count = int(spec.vertical_elements)
+            if len(result.node_tags) != expected_node_count:
+                raise ValueError(
+                    "RC Wall builder returned an unexpected node count: "
+                    f"{len(result.node_tags)} (expected {expected_node_count})."
+                )
+            if len(result.element_tags) != expected_element_count:
+                raise ValueError(
+                    "RC Wall builder returned an unexpected MEFI count: "
+                    f"{len(result.element_tags)} "
+                    f"(expected {expected_element_count})."
+                )
+            missing_nodes = [
+                tag for tag in result.node_tags
+                if int(tag) not in self.project.model.nodes
+            ]
+            missing_elements = [
+                tag for tag in result.element_tags
+                if int(tag) not in self.project.model.elements
+            ]
+            wrong_elements = [
+                tag for tag in result.element_tags
+                if (
+                    int(tag) in self.project.model.elements
+                    and self.project.model.elements[int(tag)].element_type
+                    != "MEFI"
+                )
+            ]
+            if missing_nodes or missing_elements or wrong_elements:
+                details = []
+                if missing_nodes:
+                    details.append(
+                        "missing node(s): "
+                        + ", ".join(map(str, missing_nodes))
+                    )
+                if missing_elements:
+                    details.append(
+                        "missing element(s): "
+                        + ", ".join(map(str, missing_elements))
+                    )
+                if wrong_elements:
+                    details.append(
+                        "non-MEFI generated element(s): "
+                        + ", ".join(map(str, wrong_elements))
+                    )
+                raise ValueError(
+                    "RC Wall generation did not persist correctly in the "
+                    "Project model; " + "; ".join(details) + "."
+                )
         except (KeyError, TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
@@ -4944,21 +4999,72 @@ class MainWindow(QMainWindow):
         self.viewport.set_display_domain("fe")
 
         named = ", ".join(result.selection_set_names)
-        self._refresh_all(
+        message = (
             f"Created {spec.name} · {len(result.node_tags)} nodes · "
             f"{len(result.element_tags)} MEFI elements · "
             f"{len(result.section_tags)} RCLMS sections · "
             f"named selections: {named}"
         )
+
+        # Update the Model Tree before touching VTK/PyVista.  If a graphics
+        # backend problem occurs, the generated wall must still be visible in
+        # FE Model instead of looking as if Generate Wall did nothing.
+        self._refresh_tree()
         self.selection.set_selection(
             elements=set(result.element_tags)
         )
+
+        try:
+            self._refresh_all(message)
+            self.viewport.set_view("xy", render=False)
+            self.viewport.fit_view()
+
+            visible_tags = self.viewport._visible_element_tags()
+            generated_tags = set(result.element_tags)
+            if not generated_tags.issubset(visible_tags):
+                self.viewport.show_all()
+                visible_tags = self.viewport._visible_element_tags()
+            if not generated_tags.issubset(visible_tags):
+                raise RuntimeError(
+                    "generated MEFI elements are not in the FE viewport "
+                    "visibility set"
+                )
+            self.viewport.plotter.render()
+        except Exception as exc:
+            # Keep the successfully generated Project model.  A viewport
+            # failure is a display problem, not a reason to erase the wall.
+            self._refresh_tree()
+            self._log(
+                "RC Wall generated, but viewport refresh failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            self.status_message.setText(
+                f"Created {spec.name} · {len(result.node_tags)} nodes · "
+                f"{len(result.element_tags)} MEFI · viewport refresh failed"
+            )
+            self.status_counts.setText(
+                f"Nodes: {len(self.model.nodes)}   "
+                f"Elements: {len(self.model.elements)}   "
+                f"Connections: {len(self.project.connections)}   "
+                f"Constraints: {len(self.project.constraints)}"
+            )
+            QMessageBox.warning(
+                self,
+                "RC Wall Created · Viewport Error",
+                (
+                    f"{spec.name} was created in the FE model "
+                    f"({len(result.node_tags)} nodes, "
+                    f"{len(result.element_tags)} MEFI elements), but the "
+                    "viewport could not redraw it.\n\n"
+                    f"{type(exc).__name__}: {exc}\n\n"
+                    "The wall remains available under FE Model > Elements."
+                ),
+            )
+
         self._record_project_change(
             f"Create RC wall {spec.name} with MEFI/RCLMS",
             before,
         )
-        self.viewport.set_view("xy", render=False)
-        self.viewport.fit_view()
 
     def _show_test_column_wizard(self) -> None:
         dialog = TestColumnWizard(
