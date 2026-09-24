@@ -41,3 +41,16 @@ def test_viewport_has_dedicated_probe_marker():
     assert '"node-probe-point"' in show_source
     assert '"node-probe-label"' in show_source
     assert '"node-probe-point"' in clear_source
+
+
+def test_probe_does_not_replace_animation_contour_or_scalar_bar():
+    probe_source = inspect.getsource(ModelViewport.show_node_probe)
+    motion_source = inspect.getsource(ModelViewport.show_motion_frame)
+    clear_source = inspect.getsource(ModelViewport.clear_result_overlay)
+
+    assert 'show_scalar_bar=False' in probe_source
+    assert 'preserve_probe=True' in motion_source
+    assert 'position=displaced(self._node_probe_tag)' in motion_source
+    assert 'scalar_bar_args={"title": scalar_title}' in motion_source
+    assert 'preserve_probe: bool = False' in clear_source
+    assert 'if not preserve_probe:' in clear_source
