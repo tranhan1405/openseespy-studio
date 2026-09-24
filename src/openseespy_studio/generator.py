@@ -896,6 +896,49 @@ def connection_to_openseespy(
         lines.append("".join(command_args))
         return "\n".join(lines)
 
+    if connection_type == "BeamColumnJoint":
+        nodes = [
+            int(tag)
+            for tag in connection.parameters["external_nodes"]
+        ]
+        materials = [
+            int(tag)
+            for tag in connection.parameters["component_materials"]
+        ]
+        height_factor = float(
+            connection.parameters.get("height_factor", 1.0)
+        )
+        width_factor = float(
+            connection.parameters.get("width_factor", 1.0)
+        )
+        node_text = ", ".join(str(tag) for tag in nodes)
+        material_text = ", ".join(str(tag) for tag in materials)
+        command = (
+            f"ops.element('beamColumnJoint', {connection.tag}, "
+            f"{node_text}, {material_text}"
+        )
+        if (
+            abs(height_factor - 1.0) > 1.0e-12
+            or abs(width_factor - 1.0) > 1.0e-12
+        ):
+            command += f", {height_factor:g}, {width_factor:g}"
+        return command + ")"
+
+    if connection_type == "LehighJoint2D":
+        nodes = [
+            int(tag)
+            for tag in connection.parameters["external_nodes"]
+        ]
+        materials = [
+            int(tag)
+            for tag in connection.parameters["mode_materials"]
+        ]
+        return (
+            f"ops.element('LehighJoint2D', {connection.tag}, "
+            + ", ".join(str(tag) for tag in nodes + materials)
+            + ")"
+        )
+
     if connection_type == "KrawinklerPanelZone":
         nodes = [
             int(tag)
