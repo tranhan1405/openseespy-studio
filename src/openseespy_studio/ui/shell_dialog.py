@@ -55,7 +55,7 @@ def _float_spin(
 
 
 class NDMaterialDialog(QDialog):
-    """Editor for shell-compatible OpenSees nDMaterial definitions."""
+    """Editor for OpenSees nDMaterial definitions supported by SARE."""
 
     MATERIAL_TYPES = (
         ("Elastic isotropic", "ElasticIsotropic"),
@@ -606,6 +606,15 @@ class ShellSectionDialog(QDialog):
         if not dialog.exec():
             return
         material = dialog.material_data()
+        if not nd_material_supports_plate_fiber(material.material_type):
+            QMessageBox.warning(
+                self,
+                "nD Material",
+                f"{material.material_type} is not compatible with "
+                "PlateFiber shell sections. Create it from the Model "
+                "nD Materials workflow for continuum use instead.",
+            )
+            return
         if material.tag in self._all_nd_materials():
             QMessageBox.warning(
                 self,
