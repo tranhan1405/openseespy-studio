@@ -793,6 +793,7 @@ BEAM_COLUMN_JOINT_COMPONENT_RESPONSES: frozenset[str] = frozenset({
 CONNECTION_HISTORY_RESPONSES: dict[str, tuple[str, ...]] = {
     "semiRigid": ("force", "deformation"),
     "zeroLength": ("force", "deformation"),
+    "CoupledZeroLength": ("force",),
     "zeroLengthSection": ("force", "deformation", "stiff"),
     "twoNodeLink": (
         "force",
@@ -874,6 +875,18 @@ def connection_to_openseespy(
             f"{connection.section_tag}, '-orient', {ox}, {oy}, "
             f"'-doRayleigh', {1 if connection.do_rayleigh else 0})"
         )
+
+    if connection_type == "CoupledZeroLength":
+        directions = sorted(connection.materials_by_dof)
+        material_tag = int(connection.materials_by_dof[directions[0]])
+        command = (
+            f"ops.element('CoupledZeroLength', {connection.tag}, "
+            f"{connection.node_i}, {connection.node_j}, "
+            f"{directions[0]}, {directions[1]}, {material_tag}"
+        )
+        if connection.do_rayleigh:
+            command += ", 1"
+        return command + ")"
 
     if connection_type == "twoNodeLink":
         directions = sorted(connection.materials_by_dof)
