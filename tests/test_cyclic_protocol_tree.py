@@ -167,3 +167,13 @@ def test_global_style_distinguishes_locked_property_fields():
     assert "background: #e3e6ea;" in APP_STYLE
     assert "color: #7b858f;" in APP_STYLE
     assert "QCheckBox:disabled" in APP_STYLE
+
+
+def test_global_style_distinguishes_selectable_combo_fields():
+    assert "QComboBox {" in APP_STYLE
+    assert "background: #f2f7fc;" in APP_STYLE
+    assert "border: 1px solid #afc2d6;" in APP_STYLE
+    assert "QComboBox:hover" in APP_STYLE
+    assert "background: #e7f1fc;" in APP_STYLE
+    assert "QComboBox:disabled" in APP_STYLE
+    assert "background: #e3e6ea;" in APP_STYLE
