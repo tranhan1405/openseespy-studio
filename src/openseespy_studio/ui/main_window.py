@@ -20587,6 +20587,37 @@ class MainWindow(QMainWindow):
             ("Local Y", connection.orient_y),
         ]
 
+        if connection.connection_type == "twoNodeLink":
+            orientation_override = bool(
+                connection.parameters.get("orientation_override", True)
+            )
+            p_delta = connection.parameters.get("p_delta", ())
+            shear_dist = connection.parameters.get("shear_dist", ())
+            rows.extend([
+                (
+                    "Orientation mode",
+                    (
+                        "Manual local-axis override"
+                        if orientation_override
+                        else "Geometry · local X = Node I → Node J"
+                    ),
+                ),
+                (
+                    "P-Delta ratios",
+                    " / ".join(f"{float(value):g}" for value in p_delta)
+                    if p_delta else "Disabled",
+                ),
+                (
+                    "Shear distance",
+                    " / ".join(f"{float(value):g}" for value in shear_dist)
+                    if shear_dist else "OpenSees default · 0.5",
+                ),
+                (
+                    "Element mass",
+                    f"{float(connection.parameters.get('mass', 0.0)):g}",
+                ),
+            ])
+
         if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
             external_nodes = connection.parameters.get("external_nodes", [])
             panel_tag = connection.parameters.get("panel_material")
@@ -20612,6 +20643,15 @@ class MainWindow(QMainWindow):
         if connection.connection_type == "Joint2D":
             rows.extend([
                 (
+                    "Center node",
+                    (
+                        str(connection.parameters["imported_center_node_tag"])
+                        if connection.parameters.get("imported_center_node_tag")
+                        is not None
+                        else "Auto-generated at OpenSees build"
+                    ),
+                ),
+                (
                     "Interface materials",
                     " / ".join(
                         str(tag)
@@ -20628,6 +20668,14 @@ class MainWindow(QMainWindow):
             ])
         elif connection.connection_type == "KrawinklerPanelZone":
             rows.extend([
+                (
+                    "Public response element",
+                    f"Panel spring · element {connection.tag}",
+                ),
+                (
+                    "Internal assembly",
+                    "8 stiff elasticBeamColumn members + 4 translational ties",
+                ),
                 ("Rigid-link A", connection.parameters.get("rigid_A", "-")),
                 ("Rigid-link E", connection.parameters.get("rigid_E", "-")),
                 ("Rigid-link Iz", connection.parameters.get("rigid_I", "-")),
