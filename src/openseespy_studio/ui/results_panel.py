@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import math
+import time
 from typing import Any
 
 from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
@@ -956,6 +957,8 @@ class ResultsPanel(QWidget):
         self._motion_timer.timeout.connect(self._advance_motion)
         self._motion_info = None
         self._motion_frame_index = 0
+        self._motion_play_anchor_time = 0.0
+        self._motion_play_anchor_index = 0
         self._motion_source_frame_count = 0
         self._motion_display_frame_count = 0
         self._calibration_rows: list[dict[str, Any]] = []
@@ -3314,6 +3317,8 @@ class ResultsPanel(QWidget):
 
     def _motion_frame_spin_changed(self, value: int) -> None:
         self._set_motion_index(int(value) - 1)
+        if self._motion_timer.isActive():
+            self._restart_motion_playback_clock()
 
     def _motion_effective_dt(self) -> float | None:
         if (
@@ -3402,6 +3407,8 @@ class ResultsPanel(QWidget):
     def _motion_source_changed(self, *_args) -> None:
         self._configure_motion_frames(reset=True)
         self._emit_current_motion_frame()
+        if self._motion_timer.isActive():
+            self._restart_motion_playback_clock()
 
     def _motion_slider_changed(self, value: int) -> None:
         self._motion_frame_index = int(value)
@@ -3409,6 +3416,8 @@ class ResultsPanel(QWidget):
         self.motion_frame_spin.setValue(self._motion_frame_index + 1)
         self.motion_frame_spin.blockSignals(False)
         self._emit_current_motion_frame()
+        if self._motion_timer.isActive():
+            self._restart_motion_playback_clock()
 
     def _set_motion_index(self, index: int) -> None:
         if self._motion_info is None:
@@ -3421,10 +3430,10 @@ class ResultsPanel(QWidget):
         self.motion_frame_spin.blockSignals(True)
         self.motion_frame_spin.setValue(target + 1)
         self.motion_frame_spin.blockSignals(False)
-        if self.motion_slider.value() != target:
-            self.motion_slider.setValue(target)
-        else:
-            self._emit_current_motion_frame()
+        self.motion_slider.blockSignals(True)
+        self.motion_slider.setValue(target)
+        self.motion_slider.blockSignals(False)
+        self._emit_current_motion_frame()
 
     def _step_motion(self, delta: int) -> None:
         if self._motion_info is None:
@@ -3445,15 +3454,26 @@ class ResultsPanel(QWidget):
         except (TypeError, ValueError):
             return 1.0
 
-    def _motion_timer_interval_ms(self) -> int:
+    def _motion_effective_fps(self) -> float:
         fps = float(self._motion_frame_rate_value())
         speed = max(0.01, self._motion_speed_value())
-        effective_fps = max(0.1, fps * speed)
-        return max(1, int(round(1000.0 / effective_fps)))
+        return max(0.1, fps * speed)
+
+    def _motion_timer_interval_ms(self) -> int:
+        # The timer is now only a render heartbeat. Playback position is
+        # derived from elapsed wall time, so high speeds may skip rendered
+        # frames while retaining every result frame for pause/scrubbing.
+        desired = int(round(1000.0 / self._motion_effective_fps()))
+        return max(16, min(50, desired))
+
+    def _restart_motion_playback_clock(self) -> None:
+        self._motion_play_anchor_time = time.monotonic()
+        self._motion_play_anchor_index = int(self._motion_frame_index)
 
     def _update_motion_timer(self, *_args) -> None:
         if not self._motion_timer.isActive():
             return
+        self._restart_motion_playback_clock()
         self._motion_timer.setInterval(
             self._motion_timer_interval_ms()
         )
@@ -3478,6 +3498,7 @@ class ResultsPanel(QWidget):
                 self.motion_play.blockSignals(False)
                 return
             self.motion_play.setText("❚❚ Pause")
+            self._restart_motion_playback_clock()
             self._motion_timer.setInterval(
                 self._motion_timer_interval_ms()
             )
@@ -3499,16 +3520,30 @@ class ResultsPanel(QWidget):
         if count <= 0:
             return
 
-        # Playback rate controls time between frames, never how many
-        # result frames exist or how many indices are skipped.
-        target = self._motion_frame_index + 1
+        # Advance according to elapsed wall time, not one frame per timer
+        # callback. If viewport rendering cannot keep up at 4x/8x/16x, the
+        # display skips ahead to the frame that should be visible now.
+        elapsed = max(
+            0.0,
+            time.monotonic() - float(self._motion_play_anchor_time),
+        )
+        elapsed_frames = int(elapsed * self._motion_effective_fps())
+        if elapsed_frames <= 0:
+            return
+
+        target = int(self._motion_play_anchor_index) + elapsed_frames
         if target >= count:
             if self.motion_loop.isChecked():
                 target %= count
             else:
                 target = count - 1
+                if target != self._motion_frame_index:
+                    self._set_motion_index(target)
                 self.motion_play.setChecked(False)
-        self._set_motion_index(target)
+                return
+
+        if target != self._motion_frame_index:
+            self._set_motion_index(target)
 
     def _sync_paused_motion_values(self) -> None:
         if (
