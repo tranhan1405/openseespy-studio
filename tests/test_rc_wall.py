@@ -572,3 +572,37 @@ def test_rc_wall_mainwindow_handler_builds_live_project(monkeypatch):
     assert viewport.domain == "fe"
     assert viewport.view == "xy"
     assert selected["elements"] == set(project.model.elements)
+
+
+def test_rc_wall_qaction_trigger_generates_wall_in_real_mainwindow(monkeypatch):
+    class _FakeWizard:
+        def __init__(self, project, parent=None):
+            self.project = project
+
+        def exec(self):
+            return int(QDialog.DialogCode.Accepted)
+
+        def data(self):
+            return RCWallSpec()
+
+    monkeypatch.setattr(main_window_module, "RCWallWizard", _FakeWizard)
+
+    window = MainWindow()
+    try:
+        assert not window.project.model.nodes
+        assert not window.project.model.elements
+
+        window.actions["rc_wall_wizard"].trigger()
+        _APP.processEvents()
+
+        assert len(window.project.model.nodes) == 16
+        assert len(window.project.model.elements) == 7
+        assert {
+            element.element_type
+            for element in window.project.model.elements.values()
+        } == {"MEFI"}
+        assert window.viewport._display_domain == "fe"
+    finally:
+        window.close()
+        window.deleteLater()
+        _APP.processEvents()
