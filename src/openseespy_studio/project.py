@@ -1558,7 +1558,20 @@ class SectionData:
                 raise ValueError(
                     "PlateFiber requires a valid nDMaterial tag."
                 )
-        elif self.section_type != "PlateFiber":
+        elif self.section_type == "RCLMS":
+            self.nd_material_tag = (
+                None
+                if self.nd_material_tag is None
+                else _strict_int(
+                    self.nd_material_tag,
+                    "RCLMS reinforcing-steel nDMaterial tag",
+                )
+            )
+            if self.nd_material_tag is None or self.nd_material_tag <= 0:
+                raise ValueError(
+                    "RCLMS requires a SmearedSteelDoubleLayer nDMaterial tag."
+                )
+        else:
             self.nd_material_tag = None
 
         self.shell_layers = [
@@ -1572,6 +1585,11 @@ class SectionData:
                 raise ValueError(
                     "LayeredShell requires at least three material layers "
                     "for the OpenSees LayeredShell section."
+                )
+        elif self.section_type == "RCLMS":
+            if not self.shell_layers:
+                raise ValueError(
+                    "RCLMS requires at least one concrete nDMaterial layer."
                 )
         else:
             self.shell_layers = []
