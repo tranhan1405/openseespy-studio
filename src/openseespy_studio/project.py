@@ -1664,9 +1664,13 @@ CONNECTION_RECORDER_RESPONSES: dict[str, set[str]] = {
         "node4InterfaceShear",
         "shearPanel",
     },
-    # LehighJoint2D does not currently document element-specific recorder
-    # queries in the public manual; keep generic force/deformation available.
-    "LehighJoint2D": {"force", "deformation"},
+    # Verified against OpenSees LehighJoint2d::setResponse.
+    "LehighJoint2D": {
+        "globalForce",
+        "localForce",
+        "basicForces",
+        "Deformation",
+    },
     # The public Krawinkler object exposes its zeroLength panel spring tag.
     "KrawinklerPanelZone": {"force", "deformation"},
 }
@@ -3294,6 +3298,8 @@ class RecorderData:
                 "force",
                 "deformation",
                 "basicForce",
+                "basicForces",
+                "Deformation",
                 "localDisplacement",
                 "basicDisplacement",
                 "stiff",
