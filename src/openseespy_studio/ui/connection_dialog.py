@@ -179,6 +179,7 @@ class ConnectionDialog(QDialog):
         next_tag: int = 1,
         initial_node_i: int = 1,
         initial_node_j: int = 2,
+        initial_joint_nodes: list[int] | tuple[int, ...] | None = None,
         default_to_ground: bool = False,
         node_positions: dict[int, tuple[float, float, float]] | None = None,
         units=None,
@@ -472,7 +473,7 @@ class ConnectionDialog(QDialog):
         saved_external = (
             list(connection.parameters.get("external_nodes", ()))
             if connection is not None
-            else []
+            else [int(tag) for tag in (initial_joint_nodes or ())[:4]]
         )
         candidate_nodes = sorted(self.node_positions)
         while len(saved_external) < 4:
