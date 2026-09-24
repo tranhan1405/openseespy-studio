@@ -1604,6 +1604,7 @@ SUPPORTED_CONNECTION_TYPES: tuple[str, ...] = (
     "pinned",
     "semiRigid",
     "zeroLength",
+    "CoupledZeroLength",
     "zeroLengthSection",
     "twoNodeLink",
     "Joint2D",
@@ -1618,6 +1619,7 @@ SUPPORTED_CONNECTION_TYPES: tuple[str, ...] = (
 ELEMENT_BACKED_CONNECTION_TYPES: tuple[str, ...] = (
     "semiRigid",
     "zeroLength",
+    "CoupledZeroLength",
     "zeroLengthSection",
     "twoNodeLink",
     "Joint2D",
@@ -1630,6 +1632,9 @@ CONNECTION_RECORDER_RESPONSES: dict[str, set[str]] = {
     # semiRigid is exported as a zeroLength element.
     "semiRigid": {"force", "deformation"},
     "zeroLength": {"force", "deformation"},
+    # OpenSees documents force and material ...; SARE exposes force here
+    # because RecorderData does not yet model response arguments.
+    "CoupledZeroLength": {"force"},
     "zeroLengthSection": {"force", "deformation", "stiff"},
     "twoNodeLink": {
         "force",
@@ -1792,6 +1797,20 @@ class ConnectionData:
                 raise ValueError(
                     "zeroLengthSection uses one Section object, not "
                     "materials_by_dof."
+                )
+        elif self.connection_type == "CoupledZeroLength":
+            if len(self.materials_by_dof) != 2:
+                raise ValueError(
+                    "CoupledZeroLength requires exactly two coupled directions."
+                )
+            if any(dof < 1 or dof > 6 for dof in self.materials_by_dof):
+                raise ValueError(
+                    "CoupledZeroLength directions must be in the range 1..6."
+                )
+            if len(set(self.materials_by_dof.values())) != 1:
+                raise ValueError(
+                    "CoupledZeroLength uses one UniaxialMaterial shared by "
+                    "both coupled directions."
                 )
         elif self.connection_type in {
             "rigid",
@@ -7299,6 +7318,12 @@ class ProjectDatabase:
                     for direction in (1, 2, 3)
                     if direction <= int(self.model.ndf)
                 }
+        elif connection.connection_type == "CoupledZeroLength":
+            # CoupledZeroLength directions are nodal DOF indices, documented
+            # as 1..ndf (unlike zeroLength's physical dir 6 for planar RZ).
+            allowed_directions = set(
+                range(1, min(int(self.model.ndf), 6) + 1)
+            )
         elif connection.connection_type == "twoNodeLink":
             # twoNodeLink uses element basic directions. In a 2D/3-DOF
             # frame its rotational direction is 3, unlike zeroLength where
@@ -7393,6 +7418,7 @@ class ProjectDatabase:
 
         if connection.connection_type in {
             "zeroLength",
+            "CoupledZeroLength",
             "zeroLengthSection",
             "semiRigid",
             "pinned",
