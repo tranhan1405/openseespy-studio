@@ -1830,11 +1830,11 @@ def test_beam_column_joint_3d_rejects_nonorthogonal_opposite_chords():
         )
 
 
-def test_beam_column_joint_3d_blocks_ignored_geometry_factors():
+def test_beam_column_joint_3d_preserves_nondefault_geometry_factors():
     project = beam_column_joint_3d_project()
     connection = ConnectionData(
         tag=192,
-        name="3D ignored factor guard",
+        name="3D preserved factors",
         connection_type="BeamColumnJoint",
         node_i=101,
         node_j=102,
@@ -1842,19 +1842,20 @@ def test_beam_column_joint_3d_blocks_ignored_geometry_factors():
             "external_nodes": [101, 102, 103, 104],
             "component_materials": list(range(1, 14)),
             "height_factor": 0.8,
-            "width_factor": 1.0,
+            "width_factor": 0.9,
         },
     )
 
-    try:
-        project.add_connection(connection)
-    except ValueError as exc:
-        assert "ignores height/width factors" in str(exc)
-        assert "1.0" in str(exc)
-    else:
-        raise AssertionError(
-            "Expected non-default 3D BeamColumnJoint factors to be rejected"
-        )
+    project.add_connection(connection)
+    script = connection_to_openseespy(
+        connection,
+        ndm=3,
+        ndf=6,
+    )
+
+    assert project.connections[192].parameters["height_factor"] == 0.8
+    assert project.connections[192].parameters["width_factor"] == 0.9
+    assert script.endswith(", 0.8, 0.9)")
 
 
 def test_beam_column_joint_deformation_vector_has_four_named_components():
@@ -1916,7 +1917,7 @@ def test_beam_column_joint_2d_requires_global_y_height_and_x_width():
         )
 
 
-def test_importer_warns_and_normalizes_beam_column_joint_3d_factors():
+def test_importer_warns_and_preserves_beam_column_joint_3d_factors():
     material_lines = "\n".join(
         f"ops.uniaxialMaterial('Elastic', {tag}, {1000.0 + tag})"
         for tag in range(1, 14)
@@ -1941,11 +1942,12 @@ ops.element(
     )
 
     connection = result.project.connections[190]
-    assert connection.parameters["height_factor"] == 1.0
-    assert connection.parameters["width_factor"] == 1.0
+    assert connection.parameters["height_factor"] == 0.8
+    assert connection.parameters["width_factor"] == 0.9
     assert any(
         issue.severity == "WARNING"
-        and "ignores optional height/width factors" in issue.message
+        and "factors were preserved" in issue.message
+        and "elemHeight/elemWidth" in issue.message
         for issue in result.issues
     )
 
