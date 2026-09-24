@@ -16767,6 +16767,37 @@ class MainWindow(QMainWindow):
                 ))
             else:
                 rows.append((label, f"{value:g}"))
+        source = material.source if isinstance(material.source, dict) else {}
+        if source:
+            reference = source.get("primary_reference", {})
+            if not isinstance(reference, dict):
+                reference = {}
+            verification = source.get("verification", {})
+            if not isinstance(verification, dict):
+                verification = {}
+            rows.extend([
+                ("Source status", source.get("status", "unknown")),
+                (
+                    "Library record",
+                    source.get("record_id", "-"),
+                ),
+                (
+                    "Official source",
+                    reference.get("title", "-"),
+                ),
+                (
+                    "Compatibility",
+                    ", ".join(
+                        str(value)
+                        for value in source.get("compatibility", [])
+                    )
+                    or "-",
+                ),
+                (
+                    "Parameter status",
+                    verification.get("parameter_status", "-"),
+                ),
+            ])
         rows.append((
             "Used by Shell sections",
             ", ".join(
