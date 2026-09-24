@@ -180,6 +180,8 @@ def _validate_parameter_values(
         "PressureDependMultiYield": (
             "refShearModul", "refBulkModul", "refPress", "pa",
         ),
+        "ASDConcrete3D": ("E", "fc"),
+        "OrthotropicRAConcrete": ("ecr",),
     }.get(model, ())
     for key in positive:
         if parameters[key] <= 0.0:
@@ -305,6 +307,49 @@ def _validate_parameter_values(
                 f"Official nD material record {record_id!r} requires "
                 "automatic noYieldSurf to be an integer from 1 to 39."
             )
+
+    if model == "ASDConcrete3D":
+        if not -1.0 < parameters["nu"] < 0.5:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "-1 < nu < 0.5."
+            )
+        if parameters["ft"] < 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires ft >= 0."
+            )
+        if parameters["implex"] not in {0.0, 1.0}:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "implex to be 0 or 1."
+            )
+        if not 0.5 < parameters["Kc"] <= 1.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "0.5 < Kc <= 1."
+            )
+        if parameters["cdf"] < 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires cdf >= 0."
+            )
+
+    if model == "OrthotropicRAConcrete":
+        conc = parameters["conc"]
+        if not conc.is_integer() or conc <= 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires "
+                "a positive integer conc tag."
+            )
+        if parameters["ec"] >= 0.0:
+            raise ValueError(
+                f"Official nD material record {record_id!r} requires ec < 0."
+            )
+        for key in ("DamageCte1", "DamageCte2"):
+            if parameters[key] < 0.0:
+                raise ValueError(
+                    f"Official nD material record {record_id!r} requires "
+                    f"{key} >= 0."
+                )
 
 
 def _record_from_dict(raw: dict[str, Any]) -> NDMaterialLibraryRecord:
