@@ -626,6 +626,20 @@ class ConnectionDialog(QDialog):
         joint_order_hint.setStyleSheet("color: #637487;")
         joint_layout.addWidget(joint_order_hint)
 
+        joint_dependency_row = QHBoxLayout()
+        self.new_joint_material_button = QPushButton(
+            "New Uniaxial Material..."
+        )
+        self.new_joint_material_button.setToolTip(
+            "Create a material without leaving the Connection / Joint Builder"
+        )
+        self.new_joint_material_button.clicked.connect(
+            self._create_joint_material
+        )
+        joint_dependency_row.addWidget(self.new_joint_material_button)
+        joint_dependency_row.addStretch(1)
+        joint_layout.addLayout(joint_dependency_row)
+
         joint_material_group = QGroupBox("Joint materials")
         joint_material_form = QFormLayout(joint_material_group)
         self.panel_material_combo = QComboBox()
@@ -1222,6 +1236,7 @@ class ConnectionDialog(QDialog):
         bcj_mode = connection_type == "BeamColumnJoint"
         lehigh_mode = connection_type == "LehighJoint2D"
         kraw_mode = connection_type == "KrawinklerPanelZone"
+        self.new_joint_material_button.setEnabled(joint_mode)
         self.joint2d_material_group.setEnabled(joint2d_mode)
         self.bcj_group.setEnabled(bcj_mode)
         self.bcj_factor_group.setEnabled(bcj_mode)
@@ -1394,6 +1409,107 @@ class ConnectionDialog(QDialog):
                 combo.setCurrentIndex(index)
             combo.blockSignals(False)
             self._sync_material_type(row)
+
+        pending_tags = {
+            material.tag for material in self.pending_materials
+        }
+        joint_combo_specs: list[tuple[QComboBox, str, object]] = []
+        if hasattr(self, "panel_material_combo"):
+            joint_combo_specs.append(
+                (
+                    self.panel_material_combo,
+                    "Select panel material...",
+                    None,
+                )
+            )
+        for combo in getattr(self, "interface_material_combos", []):
+            joint_combo_specs.append(
+                (combo, "Rigid interface (0)", 0)
+            )
+        for combo in getattr(self, "bcj_material_combos", []):
+            joint_combo_specs.append(
+                (combo, "Select material...", None)
+            )
+        for combo in getattr(self, "lehigh_material_combos", []):
+            joint_combo_specs.append(
+                (combo, "Select material...", None)
+            )
+
+        for combo, first_label, first_data in joint_combo_specs:
+            previous = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem(first_label, first_data)
+            for tag in sorted(self.materials):
+                material = self.materials[tag]
+                suffix = " · pending" if tag in pending_tags else ""
+                combo.addItem(
+                    f"{tag} - {material.name}{suffix}",
+                    int(tag),
+                )
+            index = combo.findData(previous)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+
+    def _create_joint_material(self) -> None:
+        next_tag = max(self.materials, default=0) + 1
+        dialog = MaterialDialog(
+            next_tag=next_tag,
+            units=self.units,
+            materials=self.materials,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        try:
+            dependencies = dialog.pending_materials()
+            material = dialog.material_data()
+            candidates = list(dependencies) + [material]
+            used = set(self.materials)
+            for candidate in candidates:
+                if candidate.tag in used:
+                    raise ValueError(
+                        f"Material tag {candidate.tag} already exists."
+                    )
+                used.add(candidate.tag)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Joint Material",
+                str(exc),
+            )
+            return
+
+        for candidate in candidates:
+            copied = MaterialData.from_dict(candidate.to_dict())
+            self.materials[copied.tag] = copied
+            self.pending_materials.append(copied)
+
+        new_tag = int(material.tag)
+        self._refresh_material_combos()
+        connection_type = self.connection_type.currentText()
+        target_combos: list[QComboBox] = []
+        if connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+            target_combos = [self.panel_material_combo]
+        elif connection_type == "BeamColumnJoint":
+            target_combos = list(self.bcj_material_combos)
+        elif connection_type == "LehighJoint2D":
+            target_combos = list(self.lehigh_material_combos)
+
+        target = next(
+            (
+                combo
+                for combo in target_combos
+                if combo.currentData() in {None, 0}
+            ),
+            target_combos[0] if target_combos else None,
+        )
+        if target is not None:
+            index = target.findData(new_tag)
+            if index >= 0:
+                target.setCurrentIndex(index)
 
     def _create_dof_material(self, index: int) -> None:
         next_tag = max(self.materials, default=0) + 1
