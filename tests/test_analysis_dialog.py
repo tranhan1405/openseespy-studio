@@ -324,5 +324,10 @@ def test_cpu_execution_controls_enable_thread_count_only_for_multithread():
         data = dialog.data()
         assert data.execution_mode == "Single Thread"
         assert data.num_threads == 1
+
+        dialog.execution_mode.setCurrentText("Multi-thread")
+        _APP.processEvents()
+        assert dialog.num_threads.isEnabled()
+        assert dialog.num_threads.value() == 4
     finally:
         _close(dialog)
