@@ -1607,6 +1607,8 @@ SUPPORTED_CONNECTION_TYPES: tuple[str, ...] = (
     "zeroLengthSection",
     "twoNodeLink",
     "Joint2D",
+    "BeamColumnJoint",
+    "LehighJoint2D",
     "KrawinklerPanelZone",
 )
 
@@ -1619,6 +1621,8 @@ ELEMENT_BACKED_CONNECTION_TYPES: tuple[str, ...] = (
     "zeroLengthSection",
     "twoNodeLink",
     "Joint2D",
+    "BeamColumnJoint",
+    "LehighJoint2D",
     "KrawinklerPanelZone",
 )
 
@@ -1642,6 +1646,27 @@ CONNECTION_RECORDER_RESPONSES: dict[str, set[str]] = {
         "stiffness",
         "defoANDforce",
     },
+    "BeamColumnJoint": {
+        "internalDisplacement",
+        "externalDisplacement",
+        "deformation",
+        "node1BarSlipL",
+        "node1BarSlipR",
+        "node1InterfaceShear",
+        "node2BarSlipB",
+        "node2BarSlipT",
+        "node2InterfaceShear",
+        "node3BarSlipL",
+        "node3BarSlipR",
+        "node3InterfaceShear",
+        "node4BarSlipB",
+        "node4BarSlipT",
+        "node4InterfaceShear",
+        "shearPanel",
+    },
+    # LehighJoint2D does not currently document element-specific recorder
+    # queries in the public manual; keep generic force/deformation available.
+    "LehighJoint2D": {"force", "deformation"},
     # The public Krawinkler object exposes its zeroLength panel spring tag.
     "KrawinklerPanelZone": {"force", "deformation"},
 }
@@ -1764,7 +1789,14 @@ class ConnectionData:
                     "zeroLengthSection uses one Section object, not "
                     "materials_by_dof."
                 )
-        elif self.connection_type in {"rigid", "pinned", "Joint2D", "KrawinklerPanelZone"}:
+        elif self.connection_type in {
+            "rigid",
+            "pinned",
+            "Joint2D",
+            "BeamColumnJoint",
+            "LehighJoint2D",
+            "KrawinklerPanelZone",
+        }:
             if self.materials_by_dof:
                 raise ValueError(
                     f"{self.connection_type} does not use materials_by_dof."
@@ -1775,7 +1807,12 @@ class ConnectionData:
             if any(dof < 1 or dof > 6 for dof in self.materials_by_dof):
                 raise ValueError("Connection DOFs must be in the range 1..6.")
 
-        if self.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+        if self.connection_type in {
+            "Joint2D",
+            "BeamColumnJoint",
+            "LehighJoint2D",
+            "KrawinklerPanelZone",
+        }:
             external_nodes = self.parameters.get("external_nodes", ())
             if not isinstance(external_nodes, (list, tuple)) or len(external_nodes) != 4:
                 raise ValueError(
@@ -1789,15 +1826,16 @@ class ConnectionData:
                 raise ValueError("Joint external nodes must be four distinct tags.")
             self.parameters["external_nodes"] = list(external_nodes)
 
-            panel_material = _strict_int(
-                self.parameters.get("panel_material", 0),
-                "Joint panel material",
-            )
-            if panel_material <= 0:
-                raise ValueError(
-                    f"{self.connection_type} requires a panel material."
+            if self.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+                panel_material = _strict_int(
+                    self.parameters.get("panel_material", 0),
+                    "Joint panel material",
                 )
-            self.parameters["panel_material"] = panel_material
+                if panel_material <= 0:
+                    raise ValueError(
+                        f"{self.connection_type} requires a panel material."
+                    )
+                self.parameters["panel_material"] = panel_material
 
         if self.connection_type == "Joint2D":
             interface_materials = self.parameters.get(
@@ -1844,6 +1882,64 @@ class ConnectionData:
                         "Joint2D imported center node tag must be positive."
                     )
                 self.parameters["imported_center_node_tag"] = imported_center
+
+        if self.connection_type == "BeamColumnJoint":
+            component_materials = self.parameters.get(
+                "component_materials",
+                (),
+            )
+            if (
+                not isinstance(component_materials, (list, tuple))
+                or len(component_materials) != 13
+            ):
+                raise ValueError(
+                    "BeamColumnJoint requires exactly 13 component materials."
+                )
+            normalized_components = [
+                _strict_int(tag, "BeamColumnJoint component material")
+                for tag in component_materials
+            ]
+            if any(tag <= 0 for tag in normalized_components):
+                raise ValueError(
+                    "BeamColumnJoint component material tags must be positive."
+                )
+            self.parameters["component_materials"] = normalized_components
+            height_factor = float(
+                self.parameters.get("height_factor", 1.0)
+            )
+            width_factor = float(
+                self.parameters.get("width_factor", 1.0)
+            )
+            if (
+                not math.isfinite(height_factor)
+                or height_factor <= 0.0
+                or not math.isfinite(width_factor)
+                or width_factor <= 0.0
+            ):
+                raise ValueError(
+                    "BeamColumnJoint height/width factors must be positive."
+                )
+            self.parameters["height_factor"] = height_factor
+            self.parameters["width_factor"] = width_factor
+
+        if self.connection_type == "LehighJoint2D":
+            mode_materials = self.parameters.get("mode_materials", ())
+            if (
+                not isinstance(mode_materials, (list, tuple))
+                or len(mode_materials) != 9
+            ):
+                raise ValueError(
+                    "LehighJoint2D requires exactly 9 deformation-mode materials."
+                )
+            normalized_modes = [
+                _strict_int(tag, "LehighJoint2D material")
+                for tag in mode_materials
+            ]
+            if any(tag <= 0 for tag in normalized_modes):
+                raise ValueError(
+                    "LehighJoint2D material tags must be positive."
+                )
+            self.parameters["mode_materials"] = normalized_modes
 
         if self.connection_type == "KrawinklerPanelZone":
             for key in ("rigid_A", "rigid_E", "rigid_I"):
@@ -7142,7 +7238,12 @@ class ProjectDatabase:
             )
 
         referenced_nodes = {connection.node_i, connection.node_j}
-        if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+        if connection.connection_type in {
+            "Joint2D",
+            "BeamColumnJoint",
+            "LehighJoint2D",
+            "KrawinklerPanelZone",
+        }:
             referenced_nodes.update(
                 int(tag)
                 for tag in connection.parameters.get("external_nodes", ())
@@ -7215,6 +7316,22 @@ class ProjectDatabase:
             referenced_materials.add(
                 int(connection.parameters.get("panel_material", 0))
             )
+        if connection.connection_type == "BeamColumnJoint":
+            referenced_materials.update(
+                int(tag)
+                for tag in connection.parameters.get(
+                    "component_materials",
+                    (),
+                )
+            )
+        if connection.connection_type == "LehighJoint2D":
+            referenced_materials.update(
+                int(tag)
+                for tag in connection.parameters.get(
+                    "mode_materials",
+                    (),
+                )
+            )
         if connection.connection_type == "Joint2D":
             referenced_materials.update(
                 int(tag)
@@ -7259,7 +7376,12 @@ class ProjectDatabase:
                     "coincident. Use rigid/twoNodeLink for separated nodes."
                 )
 
-        if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+        if connection.connection_type in {
+            "Joint2D",
+            "BeamColumnJoint",
+            "LehighJoint2D",
+            "KrawinklerPanelZone",
+        }:
             if int(self.model.ndm) != 2 or int(self.model.ndf) != 3:
                 raise ValueError(
                     f"{connection.connection_type} currently requires a "
@@ -7359,6 +7481,16 @@ class ProjectDatabase:
                 - vectors[index][1] * vectors[(index + 1) % 4][0]
                 for index in range(4)
             ]
+            if (
+                connection.connection_type == "LehighJoint2D"
+                and not all(
+                    value > tolerance * tolerance
+                    for value in cross_values
+                )
+            ):
+                raise ValueError(
+                    "LehighJoint2D nodes must be entered counter-clockwise."
+                )
             if not (
                 all(value > tolerance * tolerance for value in cross_values)
                 or all(value < -tolerance * tolerance for value in cross_values)
@@ -7606,7 +7738,12 @@ class ProjectDatabase:
         used: list[int] = []
         for connection in self.connections.values():
             tags = set(connection.materials_by_dof.values())
-            if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+            if connection.connection_type in {
+                "Joint2D",
+                "BeamColumnJoint",
+                "LehighJoint2D",
+                "KrawinklerPanelZone",
+            }:
                 panel_tag = int(
                     connection.parameters.get("panel_material", 0)
                 )
@@ -7617,6 +7754,24 @@ class ProjectDatabase:
                     int(tag)
                     for tag in connection.parameters.get(
                         "interface_materials",
+                        (),
+                    )
+                    if int(tag) > 0
+                )
+            if connection.connection_type == "BeamColumnJoint":
+                tags.update(
+                    int(tag)
+                    for tag in connection.parameters.get(
+                        "component_materials",
+                        (),
+                    )
+                    if int(tag) > 0
+                )
+            if connection.connection_type == "LehighJoint2D":
+                tags.update(
+                    int(tag)
+                    for tag in connection.parameters.get(
+                        "mode_materials",
                         (),
                     )
                     if int(tag) > 0
