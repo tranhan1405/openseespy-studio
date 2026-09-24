@@ -346,7 +346,7 @@ class Element:
                     "Shell local X vector cannot be zero."
                 )
             self.shell_local_x = values
-        if self.is_shell:
+        if self.is_quad:
             if self.k is None or self.l is None:
                 raise ValueError(
                     f"{self.element_type} requires four node tags."
@@ -372,7 +372,32 @@ class Element:
             self.shell_drilling_stab = None
             self.shell_drilling_nl = False
 
-        uses_section_reference = self.element_type != "truss"
+        self.mefi_widths = tuple(float(value) for value in self.mefi_widths)
+        self.mefi_section_tags = tuple(
+            _strict_int(value, "MEFI section tag")
+            for value in self.mefi_section_tags
+        )
+        if self.element_type == "MEFI":
+            if not self.mefi_widths:
+                raise ValueError("MEFI requires at least one macro-fiber width.")
+            if len(self.mefi_widths) != len(self.mefi_section_tags):
+                raise ValueError(
+                    "MEFI requires one section tag per macro-fiber width."
+                )
+            if any(
+                not math.isfinite(value) or value <= 0.0
+                for value in self.mefi_widths
+            ):
+                raise ValueError(
+                    "MEFI macro-fiber widths must be finite and positive."
+                )
+            if any(tag <= 0 for tag in self.mefi_section_tags):
+                raise ValueError("MEFI section tags must be positive.")
+        else:
+            self.mefi_widths = ()
+            self.mefi_section_tags = ()
+
+        uses_section_reference = self.element_type not in {"truss", "MEFI"}
         uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
         self.section_tag = (
             None
@@ -395,7 +420,7 @@ class Element:
                 else int(self.transf_tag)
             )
         )
-        if self.is_shell:
+        if self.is_quad:
             self.transf_tag = None
 
         if self.element_type in FRAME_ELEMENT_TYPES and self.integration_type not in {
