@@ -2007,9 +2007,32 @@ class _Importer:
                 )
                 self.count("Model definitions")
             elif command == "node":
-                coords = [float(value) for value in args[1:4]]
-                coords = (coords + [0.0] * 3)[:3]
-                self.project.model.add_node(int(args[0]), *coords)
+                ndm = int(self.project.model.ndm)
+                if len(args) < 1 + ndm:
+                    raise ValueError(
+                        f"node needs {ndm} coordinate value(s) for ndm={ndm}"
+                    )
+                coord_values = [
+                    float(value)
+                    for value in args[1:1 + ndm]
+                ]
+                coords = (coord_values + [0.0] * 3)[:3]
+                tag = int(args[0])
+                self.project.model.add_node(tag, *coords)
+
+                rest = list(args[1 + ndm:])
+                if "-mass" in rest:
+                    masses = [
+                        float(value)
+                        for value in self.flag_values(rest, "-mass")
+                    ]
+                    if masses:
+                        masses = (
+                            masses
+                            + [0.0] * self.project.model.ndf
+                        )[:self.project.model.ndf]
+                        self.project.model.set_mass(tag, masses)
+                        self.count("Mass assignments")
                 self.count("Nodes")
             elif command == "fix":
                 values = [int(value) for value in args[1:]]
