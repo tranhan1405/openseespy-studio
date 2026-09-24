@@ -1914,3 +1914,37 @@ def test_beam_column_joint_2d_requires_global_y_height_and_x_width():
         raise AssertionError(
             "Expected rotated BeamColumnJoint2d geometry to be rejected"
         )
+
+
+def test_importer_warns_and_normalizes_beam_column_joint_3d_factors():
+    material_lines = "\n".join(
+        f"ops.uniaxialMaterial('Elastic', {tag}, {1000.0 + tag})"
+        for tag in range(1, 14)
+    )
+    source = f"""
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 3, '-ndf', 6)
+ops.node(101, 0.0, 0.0, -1.0)
+ops.node(102, 1.0, 0.0, 0.0)
+ops.node(103, 0.0, 0.0, 1.0)
+ops.node(104, -1.0, 0.0, 0.0)
+{material_lines}
+ops.element(
+    'beamColumnJoint', 190, 101, 102, 103, 104,
+    {", ".join(str(tag) for tag in range(1, 14))},
+    0.8, 0.9,
+)
+"""
+    result = import_openseespy_source(
+        source,
+        source_name="beam_column_joint_3d_factors.py",
+    )
+
+    connection = result.project.connections[190]
+    assert connection.parameters["height_factor"] == 1.0
+    assert connection.parameters["width_factor"] == 1.0
+    assert any(
+        issue.severity == "WARNING"
+        and "ignores optional height/width factors" in issue.message
+        for issue in result.issues
+    )
