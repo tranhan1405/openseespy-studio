@@ -11,6 +11,7 @@ from openseespy_studio.generator import to_openseespy
 from openseespy_studio.project import ProjectDatabase
 from openseespy_studio.rc_wall import RCWallSpec, build_rc_wall
 from openseespy_studio.ui.rc_wall_wizard import RCWallWizard
+from openseespy_studio.validation import validate_project
 
 
 _APP = QApplication.instance() or QApplication([])
@@ -144,6 +145,17 @@ def test_rc_wall_export_contains_native_opensees_workflow():
         f"{result.web_section_tag}"
         in script
     )
+
+
+def test_rc_wall_passes_core_model_validation():
+    project, _result = _benchmark_project()
+
+    errors = [
+        issue
+        for issue in validate_project(project)
+        if issue.severity == "ERROR"
+    ]
+    assert errors == []
 
 
 def test_rc_wall_project_roundtrip_preserves_mefi_arrays():
