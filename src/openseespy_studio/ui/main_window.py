@@ -91,6 +91,7 @@ from ..mass_source import apply_mass_source, evaluate_mass_source
 from ..moment_curvature import build_moment_curvature_project
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
 from ..test_column import build_test_column
+from ..rc_wall import build_rc_wall
 from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
@@ -208,6 +209,7 @@ from .surface_result_dialog import SurfaceResultDialog
 from .line_geometry_dialog import LineGeometryDialog, PointGeometryDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
+from .rc_wall_wizard import RCWallWizard
 from .icons import studio_icon
 from .results_panel import ResultsPanel
 from .restraint_dialog import RestraintDialog
@@ -2535,6 +2537,13 @@ class MainWindow(QMainWindow):
             "Quick-create a standalone column / experimental test specimen",
         )
         self._make_action(
+            "rc_wall_wizard",
+            "RC Wall",
+            "column-1d",
+            self._show_rc_wall_wizard,
+            "Build a planar reinforced-concrete wall with RCLMS and MEFI",
+        )
+        self._make_action(
             "frame_2d",
             "2D Frame",
             "frame-2d",
@@ -2946,6 +2955,7 @@ class MainWindow(QMainWindow):
         geometry_menu.addSeparator()
         geometry_menu.addActions([
             self.actions["column_1d"],
+            self.actions["rc_wall_wizard"],
             self.actions["frame_2d"],
             self.actions["grid"],
             self.actions["extrude"],
@@ -4819,6 +4829,49 @@ class MainWindow(QMainWindow):
         self.undo_stack.setClean()
         self._set_dirty(False)
         self._refresh_all("New empty project")
+
+    def _show_rc_wall_wizard(self) -> None:
+        dialog = RCWallWizard(
+            self.project,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        before = self.project.to_dict()
+        try:
+            spec = dialog.data()
+            self.selection.clear()
+            self._reset_runtime_results()
+            result = build_rc_wall(
+                self.project,
+                spec,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "RC Wall Wizard",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+
+        self.model = self.project.model
+        self._refresh_all(
+            f"Created RC wall · {len(result.node_tags)} nodes · "
+            f"{len(result.element_tags)} MEFI elements · "
+            f"{len(result.section_tags)} RCLMS sections"
+        )
+        self.selection.set_selection(
+            nodes=set(result.top_node_tags)
+        )
+        self._record_project_change(
+            "Create RC wall with MEFI/RCLMS",
+            before,
+        )
+        self.viewport.set_view("xy")
 
     def _show_test_column_wizard(self) -> None:
         dialog = TestColumnWizard(
