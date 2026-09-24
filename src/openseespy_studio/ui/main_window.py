@@ -20271,12 +20271,18 @@ class MainWindow(QMainWindow):
             element_users = sorted(
                 element.tag
                 for element in self.model.elements.values()
-                if tag in {
-                    element.section_tag,
-                    element.hinge_i_section_tag,
-                    element.hinge_j_section_tag,
-                    element.interior_section_tag,
-                }
+                if (
+                    tag in {
+                        element.section_tag,
+                        element.hinge_i_section_tag,
+                        element.hinge_j_section_tag,
+                        element.interior_section_tag,
+                    }
+                    or (
+                        element.element_type == "MEFI"
+                        and tag in element.mefi_section_tags
+                    )
+                )
             )
             if not element_users:
                 break
@@ -20290,16 +20296,20 @@ class MainWindow(QMainWindow):
                 action_label="Reassign Referenced Sections Now...",
             ):
                 return
-            old_is_shell = section.section_type in SHELL_SECTION_TYPES
+            def section_family(candidate: SectionData) -> str:
+                if candidate.section_type in SHELL_SECTION_TYPES:
+                    return "shell"
+                if candidate.section_type in MEMBRANE_SECTION_TYPES:
+                    return "membrane"
+                return "frame"
+
+            old_family = section_family(section)
             replacement_tags = sorted(
                 candidate_tag
                 for candidate_tag, candidate in self.project.sections.items()
                 if (
                     int(candidate_tag) != int(tag)
-                    and (
-                        (candidate.section_type in SHELL_SECTION_TYPES)
-                        == old_is_shell
-                    )
+                    and section_family(candidate) == old_family
                 )
             )
             choices = ["Create New Section..."] + [
@@ -20324,10 +20334,7 @@ class MainWindow(QMainWindow):
                 created = self._create_section_dependency()
                 if created is None or int(created.tag) == int(tag):
                     return
-                if (
-                    (created.section_type in SHELL_SECTION_TYPES)
-                    != old_is_shell
-                ):
+                if section_family(created) != old_family:
                     QMessageBox.warning(
                         self,
                         "Delete Section",
@@ -20354,6 +20361,11 @@ class MainWindow(QMainWindow):
                 ):
                     if getattr(element, attribute, None) == tag:
                         setattr(element, attribute, replacement_tag)
+                if element.element_type == "MEFI":
+                    element.mefi_section_tags = tuple(
+                        replacement_tag if int(value) == tag else int(value)
+                        for value in element.mefi_section_tags
+                    )
             self._refresh_project_metadata(
                 f"Reassigned Section {tag} references on "
                 f"{len(element_users)} element(s) to {replacement_tag}"
