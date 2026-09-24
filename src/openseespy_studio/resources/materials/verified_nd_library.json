@@ -514,6 +514,80 @@
         "pa": "Pa",
         "c": "Pa"
       }
+    },
+    {
+      "id": "opensees-asd-concrete-3d-starter",
+      "family": "Concrete continuum",
+      "material": "Generic normal-strength concrete plastic-damage continuum",
+      "model": "ASDConcrete3D",
+      "preset_name": "ASD Concrete 3D · Scalar Starter",
+      "parameters_si": {
+        "E": 30000000000,
+        "nu": 0.2,
+        "rho": 2400,
+        "fc": 30000000,
+        "ft": 3000000,
+        "implex": 0,
+        "Kc": 0.6666666666666666,
+        "cdf": 0
+      },
+      "verified_parameters": [
+        "E",
+        "nu",
+        "rho",
+        "fc",
+        "ft",
+        "implex",
+        "Kc",
+        "cdf"
+      ],
+      "behavior": [
+        "Concrete",
+        "Plastic-damage",
+        "Tension and compression damage",
+        "Rate independent starter"
+      ],
+      "compatibility": [
+        "ThreeDimensional"
+      ],
+      "applicability": [
+        "3D solid concrete or masonry continuum modeling",
+        "Large-scale nonlinear simulations using the scalar fc/ft auto-generated constitutive laws"
+      ],
+      "limitations": [
+        "E, rho, fc and ft are SARE initialization values and are not a calibrated concrete dataset.",
+        "SARE V1 supports the scalar-strength profile only; custom Te/Ts/Td/Ce/Cs/Cd backbone lists are not imported or generated.",
+        "Crack-plane anisotropy, viscosity, tangent, IMPL-EX error control and auto-regularization options are not exposed in SARE V1."
+      ],
+      "primary_reference": {
+        "type": "official_documentation",
+        "title": "ASDConcrete3D Material — OpenSees Documentation",
+        "authors": "OpenSees / Massimo Petracca",
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/material/ndMaterials/ASDConcrete3D.html",
+        "doi": ""
+      },
+      "parameter_evidence": {
+        "location": "Official command syntax, option table and usage notes",
+        "note": "The source verifies E/nu, scalar rho/fc/ft options, IMPL-EX activation, Kc range/default and cdf behavior. SARE starter strengths/density are initialization values; Kc=2/3 and cdf=0 follow documented defaults."
+      },
+      "verification": {
+        "status": "verified",
+        "model_definition_checked": true,
+        "compatibility_checked": true,
+        "units_checked": true,
+        "parameter_status": "starter_template",
+        "checked_on": "2026-09-24"
+      },
+      "source_units": {
+        "E": "Pa",
+        "nu": "dimensionless",
+        "rho": "kg/m^3",
+        "fc": "Pa",
+        "ft": "Pa",
+        "implex": "boolean 0/1",
+        "Kc": "dimensionless",
+        "cdf": "dimensionless"
+      }
     }
   ]
 }
