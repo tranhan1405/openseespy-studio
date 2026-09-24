@@ -1619,3 +1619,65 @@ def test_analysis_load_parses_false_external_console_string():
     )
     assert analysis.show_external_console is False
 
+
+
+def test_analysis_thread_settings_round_trip_and_generator():
+    project = ProjectDatabase(model=model())
+    analysis = AnalysisSettingsData(
+        30,
+        "Threaded static",
+        "Static",
+        execution_mode="Multi-thread",
+        num_threads=8,
+    )
+    project.add_analysis(analysis)
+
+    restored = ProjectDatabase.from_dict(project.to_dict()).analyses[30]
+    assert restored.execution_mode == "Multi-thread"
+    assert restored.num_threads == 8
+
+    text = "\n".join(analysis_to_openseespy(restored))
+    assert "ops.setNumThreads(8)" in text
+    assert "'execution_mode': 'Multi-thread'" in text
+    assert "'num_threads': 8" in text
+
+
+def test_analysis_thread_modes_are_safe_and_validated():
+    auto = AnalysisSettingsData(
+        31,
+        "Auto threads",
+        "Static",
+        execution_mode="Auto",
+        num_threads=12,
+    )
+    auto_text = "\n".join(analysis_to_openseespy(auto))
+    assert "# OpenSees threads: Auto (runtime/default)" in auto_text
+    assert "ops.setNumThreads(" not in auto_text
+
+    single = AnalysisSettingsData(
+        32,
+        "Single thread",
+        "Static",
+        execution_mode="Single Thread",
+        num_threads=12,
+    )
+    assert single.num_threads == 1
+    single_text = "\n".join(analysis_to_openseespy(single))
+    assert "ops.setNumThreads(1)" in single_text
+
+    with pytest.raises(ValueError, match="Execution mode"):
+        AnalysisSettingsData(
+            33,
+            "Bad mode",
+            "Static",
+            execution_mode="GPU",
+        )
+
+    with pytest.raises(ValueError, match="threads must be at least 1"):
+        AnalysisSettingsData(
+            34,
+            "Bad threads",
+            "Static",
+            execution_mode="Multi-thread",
+            num_threads=0,
+        )
