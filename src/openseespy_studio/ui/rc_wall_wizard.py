@@ -74,7 +74,7 @@ class RCWallWizard(QWizard):
 
         self.preset = QComboBox()
         self.preset.addItem(
-            "RW-A20-P10-S38 · Tran & Wallace benchmark",
+            "RW-A20-P10-S38 · wall-only benchmark preset",
             "rw-a20",
         )
         self.preset.addItem("Custom / keep current values", "custom")
@@ -87,7 +87,7 @@ class RCWallWizard(QWizard):
         self.boundary_width = _double(228.6, 1.0e-9)
         self.vertical_elements = QSpinBox()
         self.vertical_elements.setRange(1, 1000)
-        self.vertical_elements.setValue(9)
+        self.vertical_elements.setValue(7)
         self.macro_fibers = QSpinBox()
         self.macro_fibers.setRange(3, 100)
         self.macro_fibers.setValue(8)
@@ -237,7 +237,7 @@ class RCWallWizard(QWizard):
         )
         layout.addWidget(self.review)
         warning = QLabel(
-            "V1 creates the physical wall model only. Gravity, pushover, "
+            "V1 creates the physical wall model only (7 MEFI rows for the 2209.8 mm benchmark wall). The two loading-transfer rows in the full OpenSees benchmark are intentionally excluded. Gravity, pushover, "
             "cyclic and time-history analyses remain in SARE's normal "
             "Analysis workflow."
         )
@@ -261,7 +261,7 @@ class RCWallWizard(QWizard):
         self.height.setValue(self._from_mm(2209.8))
         self.thickness.setValue(self._from_mm(152.4))
         self.boundary_width.setValue(self._from_mm(228.6))
-        self.vertical_elements.setValue(9)
+        self.vertical_elements.setValue(7)
         self.macro_fibers.setValue(8)
 
         self.fc_web.setValue(self._stress_display(47.09e6))
