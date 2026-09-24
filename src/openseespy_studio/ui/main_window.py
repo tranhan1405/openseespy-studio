@@ -27476,6 +27476,22 @@ class MainWindow(QMainWindow):
                     self._zoom_selection(),
                 )
             )
+
+            menu.addSeparator()
+            recorder_action = menu.addAction("Create Element Recorder...")
+            recorder_action.setEnabled(
+                connection is not None
+                and connection.connection_type not in {"rigid", "pinned"}
+            )
+            recorder_action.triggered.connect(
+                lambda checked=False, connection_tag=tag: (
+                    self.selection.set_selection(
+                        elements={int(connection_tag)}
+                    ),
+                    self._create_recorder(),
+                )
+            )
+
             delete_action = menu.addAction("Delete")
             delete_action.triggered.connect(
                 lambda: self._delete_connection(tag)
