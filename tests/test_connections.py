@@ -1604,3 +1604,48 @@ def test_generated_analysis_captures_joint_histories_without_recorder():
         "ops.eleResponse(_studio_joint_tag, _studio_joint_response)"
         in script
     )
+
+
+def test_beam_column_joint_component_recorder_adds_stress_strain_query():
+    recorder = RecorderData(
+        tag=40,
+        name="Shear panel loop",
+        recorder_type="Element",
+        target_tags=[90],
+        response="shearPanel",
+    )
+
+    command = "\n".join(recorder_to_openseespy(recorder))
+
+    assert "'shearPanel', 'stressStrain'" in command
+
+
+def test_generated_joint_history_uses_stress_strain_for_rc_components():
+    settings = AnalysisSettingsData(
+        tag=1,
+        name="Static",
+        analysis_type="Static",
+        constraints_handler="Transformation",
+        steps=1,
+        load_increment=1.0,
+    )
+
+    script = "\n".join(analysis_to_openseespy(
+        settings,
+        ndm=2,
+        node_tags=[1],
+        element_tags=[90],
+        joint_response_specs={
+            90: {
+                "connection_type": "BeamColumnJoint",
+                "responses": ["shearPanel", "deformation"],
+            }
+        },
+    ))
+
+    assert (
+        "ops.eleResponse(_studio_joint_tag, "
+        "_studio_joint_response, 'stressStrain')"
+        in script
+    )
+    assert "'shearPanel'" in script
