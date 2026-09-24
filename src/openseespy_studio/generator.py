@@ -2036,7 +2036,7 @@ def analysis_to_openseespy(
         f"        'rayleigh_mode_j': {settings.rayleigh_mode_j},",
         f"        'eigen_solver': {settings.eigen_solver!r},",
         f"        'execution_mode': {settings.execution_mode!r},",
-        f"        'num_threads': {settings.num_threads},"
+        f"        'num_threads': {settings.num_threads},",
         "    },",
         "    'specimen': " + repr(specimen_response_spec) + ",",
         "    'moment_curvature': " + repr(moment_curvature_spec) + ",",
