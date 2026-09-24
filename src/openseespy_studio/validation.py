@@ -269,6 +269,25 @@ def _element_geometry_checks(
                         "Order MEFI nodes counter-clockwise around the panel.",
                     )
                 )
+            if int(model.ndm) == 2:
+                signed_twice_area = sum(
+                    points[index][0] * points[(index + 1) % 4][1]
+                    - points[(index + 1) % 4][0] * points[index][1]
+                    for index in range(4)
+                )
+                if signed_twice_area <= 0.0:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "MEFI geometry",
+                            f"MEFI element {tag} nodes are not "
+                            "counter-clockwise in the XY plane.",
+                            "element",
+                            tag,
+                            "Use I-J-K-L node order counter-clockwise, as "
+                            "required by the OpenSees MEFI formulation.",
+                        )
+                    )
             edge_width = _norm(tuple(
                 points[1][axis] - points[0][axis]
                 for axis in range(3)
