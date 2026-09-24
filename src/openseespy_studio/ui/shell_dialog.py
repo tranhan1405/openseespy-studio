@@ -62,6 +62,7 @@ class NDMaterialDialog(QDialog):
         ("Elastic orthotropic", "ElasticOrthotropic"),
         ("J2 plasticity (von Mises)", "J2Plasticity"),
         ("Drucker-Prager", "DruckerPrager"),
+        ("Pressure-independent multi-yield", "PressureIndependMultiYield"),
     )
 
     PARAMETER_LABELS = {
@@ -92,6 +93,15 @@ class NDMaterialDialog(QDialog):
         "theta": "Hardening mix θ",
         "density": "Mass density",
         "atmPressure": "Atmospheric pressure",
+        "nd": "Analysis dimension nd",
+        "refShearModul": "Reference shear modulus Gr",
+        "refBulkModul": "Reference bulk modulus Br",
+        "cohesi": "Cohesion c",
+        "peakShearStra": "Peak octahedral shear strain γmax",
+        "frictionAng": "Friction angle Φ [deg]",
+        "refPress": "Reference pressure p'r",
+        "pressDependCoe": "Pressure-dependence coefficient d",
+        "noYieldSurf": "Number of yield surfaces",
     }
 
     def __init__(
@@ -260,6 +270,15 @@ class NDMaterialDialog(QDialog):
                 low, decimals = 0.0, 8
                 if key == "theta":
                     high = 1.0
+            elif material_type == "PressureIndependMultiYield":
+                if key == "nd":
+                    low, high, decimals = 2.0, 3.0, 0
+                elif key == "noYieldSurf":
+                    low, high, decimals = 1.0, 39.0, 0
+                elif key == "frictionAng":
+                    low, high, decimals = 0.0, 89.999999, 6
+                elif key in {"peakShearStra", "pressDependCoe"}:
+                    low = 0.0
 
             widget = _float_spin(
                 shown,
@@ -292,12 +311,21 @@ class NDMaterialDialog(QDialog):
                 "σ0, σ∞, δ and H define yielding/hardening. OpenSees "
                 "provides a PlateFiber formulation."
             )
-        else:
+        elif material_type == "DruckerPrager":
             text = (
                 "Drucker-Prager pressure-sensitive plasticity. OpenSees "
                 "documents ThreeDimensional and PlaneStrain formulations "
                 "only; it is intentionally not available for PlateFiber "
                 "shell sections in SARE."
+            )
+        else:
+            text = (
+                "Pressure-independent multi-yield soil/clay model using "
+                "automatic nested yield surfaces. OpenSees supports nd=2 "
+                "(plane strain) or nd=3 (3D). Gravity/static loading is "
+                "elastic; elastoplastic response requires updateMaterialStage. "
+                "SARE currently supports positive automatic noYieldSurf only, "
+                "not explicit custom surface pairs."
             )
         self.note.setText(text)
 
