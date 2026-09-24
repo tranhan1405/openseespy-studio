@@ -1343,7 +1343,8 @@ class _Importer:
                 raise ValueError(f"{kind} needs matching -mat and -dir lists")
             orient_x = (1.0, 0.0, 0.0)
             orient_y = (0.0, 1.0, 0.0)
-            if "-orient" in rest:
+            orientation_override = "-orient" in rest
+            if orientation_override:
                 index = rest.index("-orient") + 1
                 orientation: list[float] = []
                 while index < len(rest):
@@ -1355,6 +1356,27 @@ class _Importer:
                 if len(orientation) >= 6:
                     orient_x = tuple(orientation[:3])
                     orient_y = tuple(orientation[3:6])
+
+            parameters: dict[str, Any] = {}
+            if kind == "twoNodeLink":
+                parameters["orientation_override"] = orientation_override
+                parameters["p_delta"] = [
+                    float(value)
+                    for value in self.flag_values(rest, "-pDelta")
+                ]
+                parameters["shear_dist"] = [
+                    float(value)
+                    for value in self.flag_values(rest, "-shearDist")
+                ]
+                parameters["mass"] = float(
+                    self.flag_value(rest, "-mass", 0.0) or 0.0
+                )
+                do_rayleigh = "-doRayleigh" in rest
+            else:
+                do_rayleigh = bool(
+                    int(self.flag_value(rest, "-doRayleigh", 0) or 0)
+                )
+
             self.project.add_connection(
                 ConnectionData(
                     tag,
@@ -1365,9 +1387,8 @@ class _Importer:
                     materials_by_dof=dict(zip(dirs, mats)),
                     orient_x=orient_x,
                     orient_y=orient_y,
-                    do_rayleigh=bool(
-                        int(self.flag_value(rest, "-doRayleigh", 0) or 0)
-                    ),
+                    do_rayleigh=do_rayleigh,
+                    parameters=parameters,
                 )
             )
             self.count("Elements")
