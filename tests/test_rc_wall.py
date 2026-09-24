@@ -384,6 +384,16 @@ def test_rc_wall_finish_reveals_generated_mefi_model():
     assert "elements=set(result.element_tags)" in source
     assert 'self.viewport.set_view("xy", render=False)' in source
     assert "self.viewport.fit_view()" in source
+    assert "expected_node_count" in source
+    assert "expected_element_count" in source
+    assert "missing_nodes" in source
+    assert "missing_elements" in source
+    assert "wrong_elements" in source
+    assert "self._refresh_tree()" in source
+    assert "self.viewport._visible_element_tags()" in source
+    assert "self.viewport.show_all()" in source
+    assert '"RC Wall Created · Viewport Error"' in source
+    assert "The wall remains available under FE Model > Elements." in source
 
 
 def test_rc_wall_wizard_custom_mode_and_origin_roundtrip():
