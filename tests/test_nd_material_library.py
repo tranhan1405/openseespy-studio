@@ -49,10 +49,10 @@ def _record(model: str):
     )
 
 
-def test_verified_nd_library_baseline_has_eight_supported_models():
+def test_verified_nd_library_baseline_has_nine_supported_models():
     records = load_verified_nd_material_library()
 
-    assert len(records) == 8
+    assert len(records) == 9
     assert {record.model for record in records} == {
         "ElasticIsotropic",
         "ElasticOrthotropic",
@@ -62,6 +62,7 @@ def test_verified_nd_library_baseline_has_eight_supported_models():
         "PressureDependMultiYield",
         "ASDConcrete3D",
         "OrthotropicRAConcrete",
+        "SmearedSteelDoubleLayer",
     }
     assert all(record.is_verified for record in records)
     assert all(record.is_starter_template for record in records)
@@ -125,6 +126,12 @@ def test_verified_nd_library_declares_formulation_compatibility():
         "OrthotropicRAConcrete"
     )
 
+    smeared = _record("SmearedSteelDoubleLayer")
+    assert smeared.compatibility == ("Plane Stress",)
+    assert not nd_material_supports_plate_fiber(
+        "SmearedSteelDoubleLayer"
+    )
+
     for record in records:
         assert set(record.compatibility) == set(
             nd_material_supported_formulations(record.model)
@@ -142,6 +149,7 @@ def test_nd_library_facets_and_combined_filters():
         "Plastic continuum",
         "Pressure-sensitive plasticity",
         "RC membrane concrete",
+        "RC membrane reinforcement",
     )
     assert "PlateFiber" in facets["compatibility"]
     assert "BeamFiber" in facets["compatibility"]
@@ -296,7 +304,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert dialog.add_button.isEnabled()
         assert dialog.material_data().tag == 11
         assert dialog.material_data().source["status"] == "verified"
-        assert dialog.result_count.text() == "8 / 8 shown"
+        assert dialog.result_count.text() == "9 / 9 shown"
         assert dialog.copy_command.isEnabled()
         assert dialog.command_preview.text() == (
             "ops.nDMaterial('ElasticIsotropic', "
@@ -307,7 +315,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert model_index >= 0
         dialog.model_filter.setCurrentIndex(model_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 8 shown"
+        assert dialog.result_count.text() == "1 / 9 shown"
         assert dialog.material_data().material_type == "J2Plasticity"
 
         dialog.clear_filters.click()
@@ -316,7 +324,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert behavior_index >= 0
         dialog.behavior_filter.setCurrentIndex(behavior_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 8 shown"
+        assert dialog.result_count.text() == "1 / 9 shown"
         assert (
             dialog.material_data().material_type
             == "ElasticOrthotropic"
@@ -330,7 +338,7 @@ def test_nd_library_dialog_browses_and_filters_records():
         assert formulation_index >= 0
         dialog.compatibility_filter.setCurrentIndex(formulation_index)
         _APP.processEvents()
-        assert dialog.result_count.text() == "1 / 8 shown"
+        assert dialog.result_count.text() == "1 / 9 shown"
         assert (
             dialog.material_data().material_type
             == "ElasticOrthotropic"
@@ -356,13 +364,13 @@ def test_nd_library_dialog_browses_and_filters_records():
 
         dialog.search.setText("definitely-no-such-material")
         _APP.processEvents()
-        assert dialog.result_count.text() == "0 / 8 shown"
+        assert dialog.result_count.text() == "0 / 9 shown"
         assert not dialog.add_button.isEnabled()
         assert not dialog.copy_command.isEnabled()
 
         dialog.clear_filters.click()
         _APP.processEvents()
-        assert dialog.result_count.text() == "8 / 8 shown"
+        assert dialog.result_count.text() == "9 / 9 shown"
         assert "Verified against source: 2026-09-24" in dialog.source.text()
 
         dialog.copy_citation.click()
@@ -383,6 +391,33 @@ def test_nd_library_dialog_browses_and_filters_records():
         dialog.close()
         dialog.deleteLater()
         _APP.processEvents()
+
+
+def test_smeared_steel_library_record_is_dependency_aware():
+    record = _record("SmearedSteelDoubleLayer")
+    material = nd_material_from_library_record(record, tag=81)
+
+    assert material.parameters["mat1"] == 1.0
+    assert material.parameters["mat2"] == 2.0
+    assert material.parameters["ratio1"] == 0.01
+    assert material.parameters["ratio2"] == 0.01
+    assert "dependency tags" in " ".join(record.limitations)
+
+    project = ProjectDatabase()
+    try:
+        project.add_nd_material(material)
+    except ValueError as exc:
+        assert "missing uniaxial material" in str(exc)
+    else:
+        raise AssertionError(
+            "Smeared steel starter must require its uniaxial dependencies."
+        )
+
+    project.add_material(MaterialData(1, "Steel X", "Steel02"))
+    project.add_material(MaterialData(2, "Steel Y", "Steel02"))
+    project.add_nd_material(material)
+    assert project.nd_materials_using_material(1) == [81]
+    assert project.nd_materials_using_material(2) == [81]
 
 
 def test_pressure_independ_multi_yield_library_and_generator():
