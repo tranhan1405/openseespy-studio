@@ -52,6 +52,8 @@ def test_verified_nd_library_baseline_has_three_supported_models():
     assert all(record.is_starter_template for record in records)
     assert all(record.source_url for record in records)
     assert all(record.compatibility for record in records)
+    assert all(record.verification_date == "2026-09-24" for record in records)
+    assert all(record.citation_text for record in records)
 
 
 def test_verified_nd_library_declares_plate_fiber_compatibility():
@@ -74,6 +76,7 @@ def test_nd_library_facets_and_combined_filters():
     assert "PlateFiber" in facets["compatibility"]
     assert "BeamFiber" in facets["compatibility"]
     assert "ElasticOrthotropic" in facets["model"]
+    assert "Orthotropic" in facets["behavior"]
 
     beam_fiber = filter_verified_nd_material_library(
         records,
@@ -86,9 +89,25 @@ def test_nd_library_facets_and_combined_filters():
 
     j2 = filter_verified_nd_material_library(
         records,
-        query="pressure-insensitive",
+        query="pressure-insensitive metal",
     )
     assert [record.model for record in j2] == ["J2Plasticity"]
+
+    source_search = filter_verified_nd_material_library(
+        records,
+        query="OpenSees Documentation orthotropic",
+    )
+    assert [record.model for record in source_search] == [
+        "ElasticOrthotropic"
+    ]
+
+    elastic_behavior = filter_verified_nd_material_library(
+        records,
+        behavior="Orthotropic",
+    )
+    assert [record.model for record in elastic_behavior] == [
+        "ElasticOrthotropic"
+    ]
     assert filter_verified_nd_material_library(()) == ()
 
 
@@ -111,6 +130,48 @@ def test_nd_library_rejects_invalid_physical_parameters(monkeypatch):
         assert "E > 0" in str(exc)
     else:
         raise AssertionError("Invalid E should be rejected.")
+
+
+def test_nd_library_rejects_missing_verification_date(monkeypatch):
+    raw = asdict(_record("ElasticIsotropic"))
+    raw["verification"].pop("checked_on", None)
+    payload = {
+        "schema_version": 1,
+        "records": [raw],
+    }
+    monkeypatch.setattr(
+        nd_library,
+        "_resource_text",
+        lambda: json.dumps(payload),
+    )
+
+    try:
+        nd_library.load_verified_nd_material_library()
+    except ValueError as exc:
+        assert "checked_on" in str(exc)
+    else:
+        raise AssertionError("Missing checked_on should be rejected.")
+
+
+def test_nd_library_rejects_incomplete_source_units(monkeypatch):
+    raw = asdict(_record("ElasticOrthotropic"))
+    raw["source_units"].pop("Gzx")
+    payload = {
+        "schema_version": 1,
+        "records": [raw],
+    }
+    monkeypatch.setattr(
+        nd_library,
+        "_resource_text",
+        lambda: json.dumps(payload),
+    )
+
+    try:
+        nd_library.load_verified_nd_material_library()
+    except ValueError as exc:
+        assert "source_units" in str(exc)
+    else:
+        raise AssertionError("Incomplete source_units should be rejected.")
 
 
 def test_nd_library_insert_carries_traceable_source_metadata():
@@ -144,6 +205,7 @@ def test_nd_library_export_includes_provenance_and_valid_command():
     assert any(line.startswith("# Source URL: https://") for line in comments)
     assert any("PlateFiber" in line for line in comments)
     assert "# Parameter status: starter_template" in comments
+    assert "# Source verified on: 2026-09-24" in comments
 
     command = nd_material_to_openseespy(
         material,
@@ -177,6 +239,18 @@ def test_nd_library_dialog_browses_and_filters_records():
         _APP.processEvents()
         assert dialog.result_count.text() == "1 / 3 shown"
         assert dialog.material_data().material_type == "J2Plasticity"
+
+        dialog.clear_filters.click()
+        _APP.processEvents()
+        behavior_index = dialog.behavior_filter.findData("Orthotropic")
+        assert behavior_index >= 0
+        dialog.behavior_filter.setCurrentIndex(behavior_index)
+        _APP.processEvents()
+        assert dialog.result_count.text() == "1 / 3 shown"
+        assert (
+            dialog.material_data().material_type
+            == "ElasticOrthotropic"
+        )
 
         dialog.clear_filters.click()
         _APP.processEvents()
@@ -219,6 +293,16 @@ def test_nd_library_dialog_browses_and_filters_records():
         dialog.clear_filters.click()
         _APP.processEvents()
         assert dialog.result_count.text() == "3 / 3 shown"
+        assert "Verified against source: 2026-09-24" in dialog.source.text()
+
+        dialog.copy_citation.click()
+        _APP.processEvents()
+        assert "OpenSees Documentation" in QApplication.clipboard().text()
+
+        dialog.copy_source_url.click()
+        _APP.processEvents()
+        assert QApplication.clipboard().text().startswith("https://")
+
         dialog.copy_command.click()
         _APP.processEvents()
         assert (
