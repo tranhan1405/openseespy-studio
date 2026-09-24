@@ -120,3 +120,16 @@ def test_motion_frame_keeps_displacement_contour_scale_visible():
     assert 'scalar_bar_args={"title": scalar_title}' in source
     assert 'point_data["magnitude"]' in source
     assert 'show_scalar_bar=not bool(element_points)' in source
+
+
+def test_animation_transport_shows_time_or_analysis_coordinate():
+    build_source = inspect.getsource(ResultsPanel._build_motion_tab)
+    coordinate_source = inspect.getsource(ResultsPanel._motion_coordinate_text)
+    emit_source = inspect.getsource(ResultsPanel._emit_current_motion_frame)
+
+    assert 'self.motion_coordinate_label = QLabel("Time: -")' in build_source
+    assert 'return f"Time: {value:.6g} {unit}"' in coordinate_source
+    assert 'return f"Phase: {value:.1f}°"' in coordinate_source
+    assert 'return f"Coordinate: {value:.6g}"' in coordinate_source
+    assert 'return f"Value: {100.0 * value:.1f}%"' in coordinate_source
+    assert 'self.motion_coordinate_label.setText(' in emit_source
