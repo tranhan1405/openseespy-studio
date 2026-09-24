@@ -7265,6 +7265,12 @@ class ProjectDatabase:
                     for tag in result.element_scope
                 ]
 
+        # A connection may be edited between an element-backed type
+        # (e.g. semiRigid/zeroLength) and an MPC-only type (rigid/pinned).
+        # Remove now-invalid element recorder/result scopes immediately.
+        self.prune_recorders()
+        self.prune_solution_results()
+
     def _ground_node_in_use_elsewhere(
         self,
         node_tag: int,
@@ -8486,6 +8492,21 @@ class ProjectDatabase:
         }
         missing = [tag for tag in recorder.target_tags if tag not in valid_elements]
         if missing:
+            mpc_only = sorted(
+                tag
+                for tag in missing
+                if (
+                    tag in self.connections
+                    and self.connections[tag].connection_type in {"rigid", "pinned"}
+                )
+            )
+            if mpc_only:
+                raise ValueError(
+                    "Rigid/Pinned connections are MPC constraints, not OpenSees "
+                    "elements, and cannot be Element recorder targets: "
+                    + ", ".join(map(str, mpc_only))
+                    + ". Record connected node responses instead."
+                )
             raise ValueError(
                 "Recorder references missing element tag(s): "
                 + ", ".join(map(str, missing))
@@ -9134,7 +9155,11 @@ class ProjectDatabase:
                 "Solution result references missing node tag(s): "
                 + ", ".join(map(str, missing_nodes))
             )
-        valid_elements = set(self.model.elements) | set(self.connections)
+        valid_elements = set(self.model.elements) | {
+            tag
+            for tag, connection in self.connections.items()
+            if connection.connection_type in ELEMENT_BACKED_CONNECTION_TYPES
+        }
         missing_elements = [
             tag for tag in result.element_scope
             if tag not in valid_elements
