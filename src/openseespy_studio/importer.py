@@ -1310,6 +1310,27 @@ class _Importer:
             if len(args) == 21:
                 parameters["height_factor"] = float(args[19])
                 parameters["width_factor"] = float(args[20])
+            if (
+                int(self.project.model.ndm) == 3
+                and (
+                    abs(float(parameters["height_factor"]) - 1.0) > 1.0e-12
+                    or abs(float(parameters["width_factor"]) - 1.0) > 1.0e-12
+                )
+            ):
+                self.issue(
+                    "WARNING",
+                    None,
+                    "beamColumnJoint",
+                    (
+                        "BeamColumnJoint3d currently ignores optional "
+                        "height/width factors in OpenSees. Imported values "
+                        f"({parameters['height_factor']:g}, "
+                        f"{parameters['width_factor']:g}) were normalized "
+                        "to 1.0 for solver-faithful SARE behavior."
+                    ),
+                )
+                parameters["height_factor"] = 1.0
+                parameters["width_factor"] = 1.0
             self.project.add_connection(
                 ConnectionData(
                     tag=tag,
