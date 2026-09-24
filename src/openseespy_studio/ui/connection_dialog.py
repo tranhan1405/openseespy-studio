@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -933,8 +934,20 @@ class ConnectionDialog(QDialog):
         joint_layout.addStretch(1)
 
         self.joint_page = joint_page
+        # BeamColumnJoint and panel-zone forms can be substantially taller
+        # than the available dialog height. Keep the tab bar and dialog
+        # buttons fixed while the tab body scrolls independently.
+        self.joint_scroll = QScrollArea()
+        self.joint_scroll.setWidgetResizable(True)
+        self.joint_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+        self.joint_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarAsNeeded
+        )
+        self.joint_scroll.setWidget(joint_page)
         self.joint_tab_index = self.tabs.addTab(
-            joint_page,
+            self.joint_scroll,
             "Joint / Panel Zone",
         )
 
