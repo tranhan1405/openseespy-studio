@@ -4892,9 +4892,26 @@ def to_openseespy(
             )
 
     if recorders:
+        valid_recorder_element_tags = set(model.elements) | {
+            connection_tag
+            for connection_tag, connection in (connections or {}).items()
+            if connection.connection_type in ELEMENT_BACKED_CONNECTION_TYPES
+        }
         lines.extend(["", "# Recorders"])
         for tag in sorted(recorders):
             recorder = recorders[tag]
+            if recorder.recorder_type != "Node":
+                invalid_targets = sorted(
+                    int(target)
+                    for target in recorder.target_tags
+                    if int(target) not in valid_recorder_element_tags
+                )
+                if invalid_targets:
+                    raise ValueError(
+                        f"Recorder {recorder.tag} targets non-element or "
+                        "missing connection/element tag(s): "
+                        + ", ".join(map(str, invalid_targets))
+                    )
             lines.append(
                 f"# Recorder {recorder.tag}: {recorder.name}"
             )
