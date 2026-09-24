@@ -3844,17 +3844,31 @@ class MainWindow(QMainWindow):
         )
         if self.background_combo.findText(saved_background) < 0:
             saved_background = "ANSYS Gradient"
-        self._background_custom_bottom = str(
-            background_settings.value(
-                "display/backgroundBottom",
-                "#f2f5f8",
+        raw_background_bottom = QColor(
+            str(
+                background_settings.value(
+                    "display/backgroundBottom",
+                    "#f2f5f8",
+                )
             )
         )
-        self._background_custom_top = str(
-            background_settings.value(
-                "display/backgroundTop",
-                "#e1e8ef",
+        raw_background_top = QColor(
+            str(
+                background_settings.value(
+                    "display/backgroundTop",
+                    "#e1e8ef",
+                )
             )
+        )
+        self._background_custom_bottom = (
+            raw_background_bottom.name()
+            if raw_background_bottom.isValid()
+            else "#f2f5f8"
+        )
+        self._background_custom_top = (
+            raw_background_top.name()
+            if raw_background_top.isValid()
+            else "#e1e8ef"
         )
         self.background_combo.setCurrentText(saved_background)
 
@@ -3991,6 +4005,8 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _background_swatch_style(color: str) -> str:
         qcolor = QColor(str(color))
+        if not qcolor.isValid():
+            qcolor = QColor("#f2f5f8")
         text = "#ffffff" if qcolor.lightnessF() < 0.45 else "#20262e"
         return (
             f"background: {qcolor.name()}; color: {text}; "
