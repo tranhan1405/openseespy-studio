@@ -333,3 +333,31 @@ def test_cpu_execution_controls_enable_thread_count_only_for_multithread():
         assert dialog.num_threads.value() == 4
     finally:
         _close(dialog)
+
+
+def test_analysis_ribbon_exposes_active_cpu_controls():
+    import inspect
+    from openseespy_studio.ui.main_window import MainWindow
+
+    ribbon_source = inspect.getsource(MainWindow._build_actions_and_ribbon)
+    sync_source = inspect.getsource(
+        MainWindow._sync_analysis_ribbon_cpu_controls
+    )
+    update_source = inspect.getsource(
+        MainWindow._update_active_analysis_cpu
+    )
+
+    assert "analysis_cpu_mode_ribbon" in ribbon_source
+    assert "analysis_threads_ribbon" in ribbon_source
+    assert '"Compute"' in ribbon_source
+    assert '"Auto"' in ribbon_source
+    assert '"Single Thread"' in ribbon_source
+    assert '"Multi-thread"' in ribbon_source
+
+    assert "active_analysis_tag" in sync_source
+    assert 'settings.execution_mode == "Multi-thread"' in sync_source
+    assert "setEnabled(False)" in sync_source
+
+    assert "AnalysisSettingsData.from_dict(payload)" in update_source
+    assert "project.update_analysis" in update_source
+    assert "_record_project_change" in update_source
