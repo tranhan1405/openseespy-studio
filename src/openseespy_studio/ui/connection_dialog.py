@@ -204,16 +204,11 @@ class ConnectionDialog(QDialog):
         self.units = dict(units or {})
         self.ndm = int(ndm)
         self.ndf = int(ndf)
+        # These labels are element-direction labels, not raw nodal DOF
+        # indices. zeroLength and twoNodeLink use different direction
+        # numbering for 2D rotational response, so the rows are refreshed
+        # whenever the connection model changes.
         self.display_dof_labels = list(self.DOF_LABELS)
-        if self.ndm == 2 and self.ndf == 3:
-            self.display_dof_labels = [
-                ("UX", "In-plane translation X"),
-                ("UY", "In-plane translation Y"),
-                ("RZ", "Out-of-plane rotation"),
-                ("—", "Not available in this 2D model"),
-                ("—", "Not available in this 2D model"),
-                ("—", "Not available in this 2D model"),
-            ]
 
         root = QVBoxLayout(self)
 
@@ -267,16 +262,8 @@ class ConnectionDialog(QDialog):
             self.connection_type.setCurrentText("zeroLength")
 
         self.preset = QComboBox()
-        for label, dofs in self.PRESETS:
-            adjusted = tuple(dofs)
-            if self.ndm == 2 and self.ndf == 3:
-                if label == "Rotational hinge RZ":
-                    adjusted = (3,)
-                elif label == "Planar joint UX-UY-RZ":
-                    adjusted = (1, 2, 3)
-                elif label == "Full 6-DOF spring":
-                    adjusted = (1, 2, 3)
-            self.preset.addItem(label, adjusted)
+        for label, directions in self.PRESETS:
+            self.preset.addItem(label, tuple(directions))
 
         self.to_ground = QCheckBox("Create coincident fixed ground node")
         self.to_ground.setChecked(
@@ -347,11 +334,11 @@ class ConnectionDialog(QDialog):
         self.test_buttons: list[QPushButton] = []
         self.new_material_buttons: list[QPushButton] = []
         self.chain_buttons: list[QPushButton] = []
+        self.dof_row_labels: list[QLabel] = []
 
         for dof, (label, meaning) in enumerate(self.display_dof_labels, start=1):
             row = QHBoxLayout()
             check = QCheckBox("Active")
-            check.setEnabled(dof <= self.ndf)
             combo = QComboBox()
             for tag in sorted(self.materials):
                 material = self.materials[tag]
@@ -385,11 +372,14 @@ class ConnectionDialog(QDialog):
 
             holder = QWidget()
             holder.setLayout(row)
-            dof_form.addRow(
-                f"{label} · dir {dof}<br><span style='color:#788897'>{meaning}</span>:",
-                holder,
+            row_label = QLabel(
+                f"{label} · dir {dof}<br>"
+                f"<span style='color:#788897'>{meaning}</span>"
             )
+            row_label.setTextFormat(Qt.RichText)
+            dof_form.addRow(row_label, holder)
 
+            self.dof_row_labels.append(row_label)
             self.dof_checks.append(check)
             self.material_combos.append(combo)
             self.material_type_labels.append(type_label)
@@ -825,6 +815,90 @@ class ConnectionDialog(QDialog):
         )
         self._refresh_section_combo(select_tag=staged.tag)
 
+    def _direction_profile(
+        self,
+        connection_type: str | None = None,
+    ) -> tuple[list[tuple[str, str]], set[int]]:
+        connection_type = (
+            connection_type or self.connection_type.currentText()
+        )
+        labels = list(self.DOF_LABELS)
+
+        if connection_type not in {
+            "zeroLength",
+            "twoNodeLink",
+            "semiRigid",
+        }:
+            return labels, set()
+
+        if self.ndm == 2 and self.ndf == 3:
+            if connection_type in {"zeroLength", "semiRigid"}:
+                # OpenSees zeroLength directions are local physical axes:
+                # 1/2/3 = translations X/Y/Z; 4/5/6 = rotations X/Y/Z.
+                # Therefore planar RZ is direction 6 even though the node's
+                # third nodal DOF is RZ.
+                labels = [
+                    ("UX", "In-plane translation X"),
+                    ("UY", "In-plane translation Y"),
+                    ("—", "UZ is unavailable in a 2D frame"),
+                    ("—", "RX is unavailable in a 2D frame"),
+                    ("—", "RY is unavailable in a 2D frame"),
+                    ("RZ", "Out-of-plane rotation about local Z"),
+                ]
+                return labels, {1, 2, 6}
+
+            # twoNodeLink uses its 2D basic directions 1, 2, 3.
+            labels = [
+                ("UX", "In-plane translation X"),
+                ("UY", "In-plane translation Y"),
+                ("RZ", "Out-of-plane rotation in 2D twoNodeLink"),
+                ("—", "Not available in a 2D twoNodeLink"),
+                ("—", "Not available in a 2D twoNodeLink"),
+                ("—", "Not available in a 2D twoNodeLink"),
+            ]
+            return labels, {1, 2, 3}
+
+        if self.ndm == 3 and self.ndf >= 6:
+            return labels, {1, 2, 3, 4, 5, 6}
+
+        # Translation-only or uncommon model builders: expose only the
+        # physical translational directions that the nodal model can carry.
+        allowed = {
+            direction
+            for direction in (1, 2, 3)
+            if direction <= self.ndf
+        }
+        return labels, allowed
+
+    def _allowed_spring_directions(
+        self,
+        connection_type: str | None = None,
+    ) -> set[int]:
+        return self._direction_profile(connection_type)[1]
+
+    def _refresh_direction_rows(self, connection_type: str) -> None:
+        labels, allowed = self._direction_profile(connection_type)
+        self.display_dof_labels = labels
+        spring_mode = connection_type in {
+            "zeroLength",
+            "twoNodeLink",
+            "semiRigid",
+        }
+        for direction, (label, meaning) in enumerate(labels, start=1):
+            index = direction - 1
+            available = spring_mode and direction in allowed
+            self.dof_row_labels[index].setText(
+                f"{label} · dir {direction}<br>"
+                f"<span style='color:#788897'>{meaning}</span>"
+            )
+            self.dof_checks[index].setEnabled(available)
+            if not available:
+                self.dof_checks[index].setChecked(False)
+            self._sync_dof_row(
+                index,
+                self.dof_checks[index].isChecked(),
+            )
+
     def _connection_type_changed(self, _text: str) -> None:
         connection_type = self.connection_type.currentText()
         section_mode = connection_type == "zeroLengthSection"
@@ -840,6 +914,7 @@ class ConnectionDialog(QDialog):
         kinematic_mode = connection_type in {"rigid", "pinned"}
 
         self.preset.setEnabled(spring_mode)
+        self._refresh_direction_rows(connection_type)
         self.tabs.setTabEnabled(self.dof_tab_index, spring_mode)
         self.tabs.setTabEnabled(self.section_tab_index, section_mode)
         self.tabs.setTabEnabled(self.joint_tab_index, joint_mode)
@@ -887,12 +962,19 @@ class ConnectionDialog(QDialog):
             self.tabs.setCurrentIndex(0)
 
         if connection_type == "semiRigid":
-            target = 3 if self.ndm == 2 and self.ndf == 3 else min(6, self.ndf)
-            for dof, check in enumerate(self.dof_checks, start=1):
-                if dof <= self.ndf and not any(
-                    item.isChecked() for item in self.dof_checks
+            target = (
+                6
+                if self.ndm == 2 and self.ndf == 3
+                else min(6, self.ndf)
+            )
+            allowed = self._allowed_spring_directions(connection_type)
+            if not any(item.isChecked() for item in self.dof_checks):
+                for direction, check in enumerate(
+                    self.dof_checks,
+                    start=1,
                 ):
-                    check.setChecked(dof == target)
+                    if direction in allowed:
+                        check.setChecked(direction == target)
 
         self._update_node_status()
 
@@ -902,9 +984,24 @@ class ConnectionDialog(QDialog):
         self._apply_preset_index(index)
 
     def _apply_preset_index(self, index: int) -> None:
-        dofs = set(self.preset.itemData(index) or ())
-        for dof, check in enumerate(self.dof_checks, start=1):
-            check.setChecked(dof in dofs)
+        connection_type = self.connection_type.currentText()
+        directions = set(self.preset.itemData(index) or ())
+        if (
+            connection_type == "twoNodeLink"
+            and self.ndm == 2
+            and self.ndf == 3
+        ):
+            # The same physical RZ mechanism is direction 3 for a 2D
+            # twoNodeLink, but direction 6 for zeroLength.
+            directions = {
+                3 if direction == 6 else direction
+                for direction in directions
+            }
+        allowed = self._allowed_spring_directions(connection_type)
+        directions.intersection_update(allowed)
+
+        for direction, check in enumerate(self.dof_checks, start=1):
+            check.setChecked(direction in directions)
 
         label = self.preset.itemText(index)
         if "translational slip" in label.lower():
@@ -913,10 +1010,20 @@ class ConnectionDialog(QDialog):
                 {"Pinching4", "Hysteretic", "ElasticPPGap", "Steel02", "Elastic"},
             )
         elif "rotational hinge" in label.lower():
-            self._select_material_type(
-                5,
-                {"Pinching4", "Hysteretic", "Steel02"},
+            rotational_direction = (
+                3
+                if (
+                    connection_type == "twoNodeLink"
+                    and self.ndm == 2
+                    and self.ndf == 3
+                )
+                else 6
             )
+            if rotational_direction in allowed:
+                self._select_material_type(
+                    rotational_direction - 1,
+                    {"Pinching4", "Hysteretic", "Steel02"},
+                )
 
     def _select_material_type(
         self,
@@ -1058,7 +1165,13 @@ class ConnectionDialog(QDialog):
         ]
 
     def _sync_dof_row(self, index: int, checked: bool) -> None:
-        available = index < self.ndf
+        direction = index + 1
+        available = (
+            direction
+            in self._allowed_spring_directions(
+                self.connection_type.currentText()
+            )
+        )
         self.material_combos[index].setEnabled(bool(checked) and available)
         self.new_material_buttons[index].setEnabled(available)
         self.chain_buttons[index].setEnabled(available)
@@ -1273,21 +1386,29 @@ class ConnectionDialog(QDialog):
 
         materials_by_dof: dict[int, int] = {}
         if spring_mode:
-            for dof, (check, combo) in enumerate(
+            allowed_directions = self._allowed_spring_directions(
+                connection_type
+            )
+            for direction, (check, combo) in enumerate(
                 zip(self.dof_checks, self.material_combos),
                 start=1,
             ):
-                if dof > self.ndf or not check.isChecked():
+                if (
+                    direction not in allowed_directions
+                    or not check.isChecked()
+                ):
                     continue
                 material_tag = combo.currentData()
                 if material_tag is None:
                     raise ValueError(
-                        f"DOF {dof} is active but has no material."
+                        f"Direction {direction} is active but has no material."
                     )
-                materials_by_dof[dof] = int(material_tag)
+                materials_by_dof[direction] = int(material_tag)
 
             if not materials_by_dof:
-                raise ValueError("Enable at least one connection DOF.")
+                raise ValueError(
+                    "Enable at least one valid connection direction."
+                )
 
         section_tag: int | None = None
         if section_mode:
