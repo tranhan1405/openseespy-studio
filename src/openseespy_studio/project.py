@@ -6713,6 +6713,42 @@ class ProjectDatabase:
                 "Transformation before using Joint2D."
             )
 
+        def _rigid_connection_has_offset(
+            connection: ConnectionData,
+        ) -> bool:
+            if connection.connection_type != "rigid":
+                return False
+            node_i = self.model.nodes.get(int(connection.node_i))
+            node_j = self.model.nodes.get(int(connection.node_j))
+            if node_i is None or node_j is None:
+                return False
+            return any(
+                abs(float(a) - float(b)) > 1.0e-12
+                for a, b in zip(node_i.xyz, node_j.xyz)
+            )
+
+        has_offset_rigid = any(
+            (
+                int(tag) not in ignored_connections
+                and _rigid_connection_has_offset(connection)
+            )
+            for tag, connection in self.connections.items()
+        )
+        if (
+            candidate_connection is not None
+            and _rigid_connection_has_offset(candidate_connection)
+        ):
+            has_offset_rigid = True
+        if (
+            has_offset_rigid
+            and analysis.constraints_handler != "Transformation"
+        ):
+            raise ValueError(
+                "Rigid connections between separated nodes use rigidLink "
+                "beam offset constraints and require the Transformation "
+                "constraint handler in SARE."
+            )
+
         ignored = {
             int(tag) for tag in (ignore_constraint_tags or set())
         }
