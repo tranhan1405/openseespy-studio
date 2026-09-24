@@ -165,3 +165,179 @@ def test_connection_tag_cannot_conflict_with_structural_element():
         assert "conflicts with an element tag" in str(exc)
     else:
         raise AssertionError("Expected connection/element tag conflict")
+
+
+def frame2d_project() -> ProjectDatabase:
+    model = StructuralModel(name="2D joint test", ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 0.0, 0.0, 0.0)
+    model.add_node(10, 0.0, 0.0, 0.0)   # left
+    model.add_node(11, 1.0, 1.0, 0.0)   # top
+    model.add_node(12, 2.0, 0.0, 0.0)   # right
+    model.add_node(13, 1.0, -1.0, 0.0)  # bottom
+    project = ProjectDatabase(model=model)
+    project.add_material(elastic_material())
+    return project
+
+
+def test_rigid_connection_exports_rigid_link_beam():
+    connection = ConnectionData(
+        tag=20,
+        name="Rigid beam-column joint",
+        connection_type="rigid",
+        node_i=1,
+        node_j=2,
+    )
+
+    line = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert line == "ops.rigidLink('beam', 1, 2)"
+
+
+def test_pinned_connection_ties_only_2d_translations():
+    connection = ConnectionData(
+        tag=21,
+        name="Pinned beam end",
+        connection_type="pinned",
+        node_i=1,
+        node_j=2,
+    )
+
+    line = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert line == "ops.equalDOF(1, 2, 1, 2)"
+    assert ", 3)" not in line
+
+
+def test_semi_rigid_2d_connection_exports_zero_length_rz_spring():
+    connection = ConnectionData(
+        tag=22,
+        name="Semi-rigid RZ",
+        connection_type="semiRigid",
+        node_i=1,
+        node_j=2,
+        materials_by_dof={3: 1},
+    )
+
+    line = connection_to_openseespy(connection, ndm=2, ndf=3)
+
+    assert "ops.element('zeroLength', 22, 1, 2" in line
+    assert "'-mat', 1, '-dir', 3" in line
+
+
+def test_joint2d_round_trip_and_generator():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=30,
+        name="RC beam-column joint",
+        connection_type="Joint2D",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 1,
+        },
+    )
+    project.add_connection(connection)
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    script = connection_to_openseespy(
+        restored.connections[30],
+        ndm=2,
+        ndf=3,
+    )
+
+    assert restored.connections[30].parameters["external_nodes"] == [
+        10,
+        11,
+        12,
+        13,
+    ]
+    assert "_sare_joint2d_center_30" in script
+    assert (
+        "ops.element('Joint2D', 30, 10, 11, 12, 13, "
+        "_sare_joint2d_center_30, 0, 0, 0, 0, 1, 1)"
+        in script
+    )
+
+
+def test_krawinkler_panel_zone_generator_builds_expected_macro():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=40,
+        name="Steel panel zone",
+        connection_type="KrawinklerPanelZone",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "rigid_A": 1000.0,
+            "rigid_E": 2.0e11,
+            "rigid_I": 1000.0,
+        },
+    )
+    project.add_connection(connection)
+
+    script = connection_to_openseespy(
+        connection,
+        ndm=2,
+        ndf=3,
+    )
+
+    assert script.count("ops.element('elasticBeamColumn'") == 8
+    assert script.count("ops.equalDOF(") == 4
+    assert (
+        "ops.element('zeroLength', 40, "
+        "_sare_pz_40_tlh, _sare_pz_40_tlv, '-mat', 1, '-dir', 3"
+        in script
+    )
+    assert "ops.geomTransf('Linear', _sare_pz_40_tr)" in script
+
+
+def test_joint_models_are_restricted_to_2d_three_dof_frame_for_now():
+    project = base_project()
+    project.model.add_node(3, 0.0, 1.0, 0.0)
+    project.model.add_node(4, 1.0, 1.0, 0.0)
+    connection = ConnectionData(
+        tag=31,
+        name="Wrong dimensional Joint2D",
+        connection_type="Joint2D",
+        node_i=1,
+        node_j=2,
+        parameters={
+            "external_nodes": [1, 2, 3, 4],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 0,
+        },
+    )
+
+    try:
+        project.add_connection(connection)
+    except ValueError as exc:
+        assert "2D frame model" in str(exc)
+    else:
+        raise AssertionError("Expected Joint2D in a 3D model to fail")
+
+
+def test_joint_panel_material_is_tracked_as_connection_dependency():
+    project = frame2d_project()
+    connection = ConnectionData(
+        tag=32,
+        name="Dependency joint",
+        connection_type="Joint2D",
+        node_i=10,
+        node_j=11,
+        parameters={
+            "external_nodes": [10, 11, 12, 13],
+            "panel_material": 1,
+            "interface_materials": [0, 0, 0, 0],
+            "large_disp": 0,
+        },
+    )
+    project.add_connection(connection)
+
+    assert project.connections_using_material(1) == [32]
