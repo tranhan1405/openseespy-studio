@@ -24,7 +24,20 @@ from .selection import parse_tag_expression
 
 RECORDER_RESPONSES: dict[str, list[str]] = {
     "Node": ["disp", "vel", "accel", "reaction"],
-    "Element": ["globalForce", "localForce"],
+    "Element": [
+        "globalForce",
+        "localForce",
+        "force",
+        "deformation",
+        "basicForce",
+        "localDisplacement",
+        "basicDisplacement",
+        "stiff",
+        "centralNode",
+        "size",
+        "stiffness",
+        "defoANDforce",
+    ],
     "Shell": ["force", "deformation"],
     "Section": ["force", "deformation"],
     "Fiber": ["stressStrain", "stress", "strain"],
@@ -167,7 +180,10 @@ class RecorderDialog(QDialog):
         form.addRow("", self.include_time)
 
         note = QLabel(
-            "Node: disp/vel/accel/reaction · Element: global/local force · "
+            "Node: disp/vel/accel/reaction · Element responses depend on type; "
+            "zeroLength supports force/deformation, twoNodeLink supports "
+            "force/local/basic force and displacement, Joint2D supports "
+            "force/deformation/centralNode/size/stiffness/defoANDforce · "
             "Shell: Gauss-point force/deformation (GP 1..4) · "
             "Section: force/deformation · Fiber: stress/strain/stressStrain. "
             "Fiber selection may use an explicit index or nearest y-z coordinates."
