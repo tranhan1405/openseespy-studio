@@ -23363,6 +23363,21 @@ class MainWindow(QMainWindow):
             "size",
             "stiffness",
             "defoANDforce",
+            "internalDisplacement",
+            "externalDisplacement",
+            "node1BarSlipL",
+            "node1BarSlipR",
+            "node1InterfaceShear",
+            "node2BarSlipB",
+            "node2BarSlipT",
+            "node2InterfaceShear",
+            "node3BarSlipL",
+            "node3BarSlipR",
+            "node3InterfaceShear",
+            "node4BarSlipB",
+            "node4BarSlipT",
+            "node4InterfaceShear",
+            "shearPanel",
         )
         return [
             (labels.get(query, query), query, 1)
@@ -23452,6 +23467,12 @@ class MainWindow(QMainWindow):
         if not allowed_sets:
             return None
         common = set.intersection(*allowed_sets)
+        if int(self.model.ndm) == 3 and any(
+            connection is not None
+            and connection.connection_type == "BeamColumnJoint"
+            for connection in connections
+        ):
+            common.discard("externalDisplacement")
         preferred = (
             "force",
             "deformation",
