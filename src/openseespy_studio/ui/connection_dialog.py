@@ -218,7 +218,8 @@ class ConnectionDialog(QDialog):
 
         intro = QLabel(
             "Create idealized frame connections and nonlinear joint models: "
-            "Rigid, Pinned, Semi-Rigid, zeroLength/twoNodeLink, Joint2D, "
+            "Rigid, Pinned, Semi-Rigid, zeroLength/CoupledZeroLength/"
+            "twoNodeLink, Joint2D, "
             "RC BeamColumnJoint, LehighJoint2D, or a Gupta-Krawinkler "
             "steel panel-zone macro. Use the dedicated tabs below for "
             "material, section, and joint data."
@@ -254,6 +255,7 @@ class ConnectionDialog(QDialog):
             "pinned",
             "semiRigid",
             "zeroLength",
+            "CoupledZeroLength",
             "zeroLengthSection",
             "twoNodeLink",
             "Joint2D",
@@ -332,8 +334,10 @@ class ConnectionDialog(QDialog):
         dof_layout = QVBoxLayout(dof_page)
         hint = QLabel(
             "Direction IDs follow the selected OpenSees element convention. "
-            "For a 2D zeroLength/semi-rigid spring, RZ is dir 6; for a "
-            "2D twoNodeLink, RZ is dir 3. Enable only the mechanisms "
+            "For a 2D zeroLength/semi-rigid spring, RZ is dir 6; for "
+            "CoupledZeroLength and 2D twoNodeLink, RZ is dir 3. "
+            "CoupledZeroLength requires exactly two active directions using "
+            "the same UniaxialMaterial. Enable only the mechanisms "
             "intentionally represented by the connection."
         )
         hint.setWordWrap(True)
@@ -1167,13 +1171,18 @@ class ConnectionDialog(QDialog):
 
         if connection_type not in {
             "zeroLength",
+            "CoupledZeroLength",
             "twoNodeLink",
             "semiRigid",
         }:
             return labels, set()
 
         if self.ndm == 2 and self.ndf == 3:
-            if connection_type in {"zeroLength", "semiRigid"}:
+            if connection_type in {
+            "zeroLength",
+            "CoupledZeroLength",
+            "semiRigid",
+        }:
                 # OpenSees zeroLength directions are local physical axes:
                 # 1/2/3 = translations X/Y/Z; 4/5/6 = rotations X/Y/Z.
                 # Therefore planar RZ is direction 6 even though the node's
@@ -1188,6 +1197,18 @@ class ConnectionDialog(QDialog):
                 ]
                 return labels, {1, 2, 6}
 
+            if connection_type == "CoupledZeroLength":
+                # CoupledZeroLength uses nodal DOF indices 1..ndf.
+                labels = [
+                    ("UX", "Nodal translation X"),
+                    ("UY", "Nodal translation Y"),
+                    ("RZ", "Nodal out-of-plane rotation"),
+                    ("—", "Not available in a 2D/3DOF model"),
+                    ("—", "Not available in a 2D/3DOF model"),
+                    ("—", "Not available in a 2D/3DOF model"),
+                ]
+                return labels, {1, 2, 3}
+
             # twoNodeLink uses its 2D basic directions 1, 2, 3.
             labels = [
                 ("UX", "In-plane translation X"),
@@ -1201,6 +1222,11 @@ class ConnectionDialog(QDialog):
 
         if self.ndm == 3 and self.ndf >= 6:
             return labels, {1, 2, 3, 4, 5, 6}
+
+        if connection_type == "CoupledZeroLength":
+            return labels, set(
+                range(1, min(int(self.ndf), 6) + 1)
+            )
 
         # Translation-only or uncommon model builders: expose only the
         # physical translational directions that the nodal model can carry.
@@ -1222,6 +1248,7 @@ class ConnectionDialog(QDialog):
         self.display_dof_labels = labels
         spring_mode = connection_type in {
             "zeroLength",
+            "CoupledZeroLength",
             "twoNodeLink",
             "semiRigid",
         }
@@ -1241,7 +1268,9 @@ class ConnectionDialog(QDialog):
             )
 
     def _sync_two_node_link_options(self) -> None:
-        is_link = self.connection_type.currentText() == "twoNodeLink"
+        connection_type = self.connection_type.currentText()
+        is_link = connection_type == "twoNodeLink"
+        is_coupled = connection_type == "CoupledZeroLength"
         self.link_group.setEnabled(is_link)
         p_count = 2 if self.ndm == 2 else 4
         s_count = 1 if self.ndm == 2 else 2
@@ -1262,8 +1291,11 @@ class ConnectionDialog(QDialog):
             self.tabs.setTabEnabled(
                 self.orientation_tab_index,
                 (
-                    not is_link
-                    or self.link_orientation_override.isChecked()
+                    not is_coupled
+                    and (
+                        not is_link
+                        or self.link_orientation_override.isChecked()
+                    )
                 ),
             )
 
@@ -1272,6 +1304,7 @@ class ConnectionDialog(QDialog):
         section_mode = connection_type == "zeroLengthSection"
         spring_mode = connection_type in {
             "zeroLength",
+            "CoupledZeroLength",
             "twoNodeLink",
             "semiRigid",
         }
@@ -1283,7 +1316,9 @@ class ConnectionDialog(QDialog):
         }
         kinematic_mode = connection_type in {"rigid", "pinned"}
 
-        self.preset.setEnabled(spring_mode)
+        self.preset.setEnabled(
+            spring_mode and connection_type != "CoupledZeroLength"
+        )
         self._refresh_direction_rows(connection_type)
         self.tabs.setTabEnabled(self.dof_tab_index, spring_mode)
         self.tabs.setTabEnabled(self.section_tab_index, section_mode)
@@ -1295,6 +1330,7 @@ class ConnectionDialog(QDialog):
         self.to_ground.setEnabled(
             connection_type in {
                 "zeroLength",
+                "CoupledZeroLength",
                 "zeroLengthSection",
                 "semiRigid",
             }
@@ -1304,6 +1340,7 @@ class ConnectionDialog(QDialog):
 
         rayleigh_supported = connection_type in {
             "zeroLength",
+            "CoupledZeroLength",
             "zeroLengthSection",
             "semiRigid",
             "twoNodeLink",
@@ -1318,6 +1355,7 @@ class ConnectionDialog(QDialog):
             not joint_mode and not self.to_ground.isChecked()
         )
 
+        coupled_mode = connection_type == "CoupledZeroLength"
         joint2d_mode = connection_type == "Joint2D"
         bcj_mode = connection_type == "BeamColumnJoint"
         lehigh_mode = connection_type == "LehighJoint2D"
@@ -1502,6 +1540,37 @@ class ConnectionDialog(QDialog):
                         reordered,
                     ):
                         spin.setValue(int(tag))
+
+        if coupled_mode:
+            self.preset.setCurrentIndex(0)
+            allowed = sorted(self._allowed_spring_directions(connection_type))
+            active = [
+                direction
+                for direction, check in enumerate(self.dof_checks, start=1)
+                if check.isChecked() and direction in allowed
+            ]
+            if len(active) != 2:
+                chosen = list(active[:1])
+                chosen.extend(
+                    direction
+                    for direction in allowed
+                    if direction not in chosen
+                )
+                chosen = chosen[:2]
+                for direction, check in enumerate(self.dof_checks, start=1):
+                    check.setChecked(direction in chosen)
+            active = [
+                direction
+                for direction, check in enumerate(self.dof_checks, start=1)
+                if check.isChecked()
+            ]
+            if len(active) == 2:
+                source_tag = self.material_combos[active[0] - 1].currentData()
+                if source_tag is not None:
+                    target_combo = self.material_combos[active[1] - 1]
+                    index = target_combo.findData(source_tag)
+                    if index >= 0:
+                        target_combo.setCurrentIndex(index)
 
         if joint_mode:
             self.tabs.setCurrentIndex(self.joint_tab_index)
@@ -1910,6 +1979,7 @@ class ConnectionDialog(QDialog):
         )
         zero_length = self.connection_type.currentText() in {
             "zeroLength",
+            "CoupledZeroLength",
             "zeroLengthSection",
             "semiRigid",
             "pinned",
@@ -2034,6 +2104,7 @@ class ConnectionDialog(QDialog):
         section_mode = connection_type == "zeroLengthSection"
         spring_mode = connection_type in {
             "zeroLength",
+            "CoupledZeroLength",
             "twoNodeLink",
             "semiRigid",
         }
@@ -2069,6 +2140,17 @@ class ConnectionDialog(QDialog):
                 raise ValueError(
                     "Enable at least one valid connection direction."
                 )
+            if connection_type == "CoupledZeroLength":
+                if len(materials_by_dof) != 2:
+                    raise ValueError(
+                        "CoupledZeroLength requires exactly two active "
+                        "directions."
+                    )
+                if len(set(materials_by_dof.values())) != 1:
+                    raise ValueError(
+                        "CoupledZeroLength uses one UniaxialMaterial shared "
+                        "by both active directions."
+                    )
 
         section_tag: int | None = None
         if section_mode:
@@ -2112,6 +2194,7 @@ class ConnectionDialog(QDialog):
         if (
             connection_type in {
                 "zeroLength",
+                "CoupledZeroLength",
                 "zeroLengthSection",
                 "semiRigid",
                 "pinned",
@@ -2291,6 +2374,7 @@ class ConnectionDialog(QDialog):
                 self.to_ground.isChecked()
                 if connection_type in {
                     "zeroLength",
+                    "CoupledZeroLength",
                     "zeroLengthSection",
                     "semiRigid",
                 }
@@ -2304,6 +2388,7 @@ class ConnectionDialog(QDialog):
                 self.do_rayleigh.isChecked()
                 if connection_type in {
                     "zeroLength",
+                    "CoupledZeroLength",
                     "zeroLengthSection",
                     "semiRigid",
                     "twoNodeLink",
@@ -2335,6 +2420,7 @@ class ConnectionDialog(QDialog):
         connection_type = self.connection_type.currentText()
         needs_uniaxial = connection_type in {
             "zeroLength",
+            "CoupledZeroLength",
             "twoNodeLink",
             "semiRigid",
             "Joint2D",
