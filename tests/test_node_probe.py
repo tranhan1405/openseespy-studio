@@ -70,17 +70,32 @@ def test_node_probe_time_history_exposes_shared_animation_transport():
     assert 'self.motion_page.setVisible(' in show_source
 
 
-def test_animation_shows_frame_local_min_max_without_changing_scalar_range():
+def test_animation_min_max_is_opt_in_and_keeps_scalar_range():
     extrema_source = inspect.getsource(ModelViewport._update_motion_extrema)
+    draw_source = inspect.getsource(ModelViewport._draw_motion_extrema_snapshot)
+    toggle_source = inspect.getsource(ModelViewport.set_motion_extrema_visible)
     motion_source = inspect.getsource(ModelViewport.show_motion_frame)
     clear_source = inspect.getsource(ModelViewport.clear_result_overlay)
+    init_source = inspect.getsource(ModelViewport.__init__)
 
-    assert '"MAX {max_value:.4g}' in extrema_source
-    assert '"MIN {min_value:.4g}' in extrema_source
-    assert 'text_color="#c62828"' in extrema_source
-    assert 'text_color="#1565c0"' in extrema_source
-    assert 'show_scalar_bar=False' in extrema_source
+    assert 'self._motion_extrema_visible = False' in init_source
+    assert 'if self._motion_extrema_visible:' in extrema_source
+    assert '"MAX {max_value:.4g}' in draw_source
+    assert '"MIN {min_value:.4g}' in draw_source
+    assert 'text_color="#c62828"' in draw_source
+    assert 'text_color="#1565c0"' in draw_source
+    assert 'show_scalar_bar=False' in draw_source
+    assert 'self._motion_extrema_visible = bool(visible)' in toggle_source
     assert 'self._update_motion_extrema(' in motion_source
     assert 'clim=(0.0, scalar_upper)' in motion_source
     assert '"motion-max-label"' in clear_source
     assert '"motion-min-label"' in clear_source
+
+
+def test_result_ribbon_exposes_min_max_toggle_default_off():
+    source = inspect.getsource(MainWindow._build_actions_and_ribbon)
+
+    assert '"result_min_max"' in source
+    assert '"Min / Max"' in source
+    assert 'self.viewport.set_motion_extrema_visible' in source
+    assert 'self.actions["result_min_max"].setChecked(False)' in source
