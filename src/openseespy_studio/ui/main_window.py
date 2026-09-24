@@ -20296,6 +20296,8 @@ class MainWindow(QMainWindow):
                 for tag, node in self.model.nodes.items()
             },
             units=self.project.units,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -20326,6 +20328,7 @@ class MainWindow(QMainWindow):
                 orient_y=tuple(spec["orient_y"]),
                 do_rayleigh=bool(spec["do_rayleigh"]),
                 generated_ground_node=created_ground,
+                parameters=dict(spec.get("parameters", {})),
             )
             self.project.add_connection(connection)
         except (KeyError, TypeError, ValueError) as exc:
@@ -20394,6 +20397,8 @@ class MainWindow(QMainWindow):
                 for node_tag, node in self.model.nodes.items()
             },
             units=self.project.units,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -20439,6 +20444,7 @@ class MainWindow(QMainWindow):
                 ),
                 generated_section_tag=connection.generated_section_tag,
                 generated_constraint_tag=connection.generated_constraint_tag,
+                parameters=dict(spec.get("parameters", {})),
             )
             self.project.update_connection(tag, updated)
 
@@ -20498,7 +20504,11 @@ class MainWindow(QMainWindow):
 
         from ..material_chain import describe_material_chain
 
-        dof_labels = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+        dof_labels = (
+            ("UX", "UY", "RZ")
+            if self.model.ndm == 2 and self.model.ndf == 3
+            else ("UX", "UY", "UZ", "RX", "RY", "RZ")
+        )
         material_text = []
         for dof in sorted(connection.materials_by_dof):
             material_tag = connection.materials_by_dof[dof]
@@ -20547,6 +20557,53 @@ class MainWindow(QMainWindow):
             ("Local X", connection.orient_x),
             ("Local Y", connection.orient_y),
         ]
+
+        if connection.connection_type in {"Joint2D", "KrawinklerPanelZone"}:
+            external_nodes = connection.parameters.get("external_nodes", [])
+            panel_tag = connection.parameters.get("panel_material")
+            panel = self.project.materials.get(
+                int(panel_tag)
+            ) if panel_tag is not None else None
+            rows.extend([
+                (
+                    "External nodes",
+                    "Left / Top / Right / Bottom = "
+                    + " / ".join(str(tag) for tag in external_nodes),
+                ),
+                (
+                    "Panel material",
+                    (
+                        f"{panel_tag} - {panel.name}"
+                        if panel is not None
+                        else str(panel_tag)
+                    ),
+                ),
+            ])
+
+        if connection.connection_type == "Joint2D":
+            rows.extend([
+                (
+                    "Interface materials",
+                    " / ".join(
+                        str(tag)
+                        for tag in connection.parameters.get(
+                            "interface_materials",
+                            (0, 0, 0, 0),
+                        )
+                    ),
+                ),
+                (
+                    "Large displacement",
+                    connection.parameters.get("large_disp", 0),
+                ),
+            ])
+        elif connection.connection_type == "KrawinklerPanelZone":
+            rows.extend([
+                ("Rigid-link A", connection.parameters.get("rigid_A", "-")),
+                ("Rigid-link E", connection.parameters.get("rigid_E", "-")),
+                ("Rigid-link Iz", connection.parameters.get("rigid_I", "-")),
+            ])
+
         self.properties_panel.set_properties("Connection", rows)
 
     def _create_constraint(self) -> None:
