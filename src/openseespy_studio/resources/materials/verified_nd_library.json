@@ -312,6 +312,88 @@
         "density": "kg/m^3",
         "atmPressure": "Pa"
       }
+    },
+    {
+      "id": "opensees-pressure-independ-multi-yield-medium-clay-starter",
+      "family": "Multi-yield soil",
+      "material": "Medium clay pressure-independent multi-yield starter",
+      "model": "PressureIndependMultiYield",
+      "preset_name": "Pressure Independent Multi Yield · Medium Clay Starter",
+      "parameters_si": {
+        "nd": 2,
+        "rho": 1500,
+        "refShearModul": 60000000,
+        "refBulkModul": 300000000,
+        "cohesi": 37000,
+        "peakShearStra": 0.1,
+        "frictionAng": 0,
+        "refPress": 80000,
+        "pressDependCoe": 0,
+        "noYieldSurf": 20
+      },
+      "verified_parameters": [
+        "nd",
+        "rho",
+        "refShearModul",
+        "refBulkModul",
+        "cohesi",
+        "peakShearStra",
+        "frictionAng",
+        "refPress",
+        "pressDependCoe",
+        "noYieldSurf"
+      ],
+      "behavior": [
+        "Elasto-plastic",
+        "Pressure independent",
+        "Multi-yield surface",
+        "Clay / undrained fast loading"
+      ],
+      "compatibility": [
+        "PlaneStrain",
+        "ThreeDimensional"
+      ],
+      "applicability": [
+        "Monotonic or cyclic response with confinement-insensitive shear behavior",
+        "Organic soils or clay under fast undrained loading conditions"
+      ],
+      "limitations": [
+        "Gravity and other initial static loading is elastic until updateMaterialStage switches the material stage.",
+        "SARE currently supports only the automatic positive noYieldSurf form; explicit custom yield-surface pairs are not imported/generated.",
+        "Not compatible with PlateFiber shell sections.",
+        "Suggested medium-clay values are an initialization reference, not a project-specific calibration."
+      ],
+      "primary_reference": {
+        "type": "official_documentation",
+        "title": "Pressure Independent Multi Yield — OpenSees Documentation",
+        "authors": "OpenSees / UC San Diego",
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/material/ndMaterials/PressureIndependentMultiYield.html",
+        "doi": ""
+      },
+      "parameter_evidence": {
+        "location": "Official command argument table, material-stage notes and suggested parameter values",
+        "note": "SARE uses the automatic-surface form. The starter uses the documented medium-clay suggested density, moduli, cohesion and peak shear strain; refPress is set consistently to 80 kPa for the documented suggested values."
+      },
+      "verification": {
+        "status": "verified",
+        "model_definition_checked": true,
+        "compatibility_checked": true,
+        "units_checked": true,
+        "parameter_status": "starter_template",
+        "checked_on": "2026-09-24"
+      },
+      "source_units": {
+        "nd": "dimensionless",
+        "rho": "kg/m^3",
+        "refShearModul": "Pa",
+        "refBulkModul": "Pa",
+        "cohesi": "Pa",
+        "peakShearStra": "dimensionless",
+        "frictionAng": "degree",
+        "refPress": "Pa",
+        "pressDependCoe": "dimensionless",
+        "noYieldSurf": "count"
+      }
     }
   ]
 }
