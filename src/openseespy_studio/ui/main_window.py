@@ -20734,24 +20734,48 @@ class MainWindow(QMainWindow):
             ])
         elif connection.connection_type == "BeamColumnJoint":
             labels = (
-                "N1 slip L", "N1 slip R", "N1 interface shear",
-                "N2 slip B", "N2 slip T", "N2 interface shear",
-                "N3 slip L", "N3 slip R", "N3 interface shear",
-                "N4 slip B", "N4 slip T", "N4 interface shear",
-                "Shear panel",
+                "Mat1 · N1 bar-slip left",
+                "Mat2 · N1 bar-slip right",
+                "Mat3 · N1 interface shear",
+                "Mat4 · N2 bar-slip bottom",
+                "Mat5 · N2 bar-slip top",
+                "Mat6 · N2 interface shear",
+                "Mat7 · N3 bar-slip left",
+                "Mat8 · N3 bar-slip right",
+                "Mat9 · N3 interface shear",
+                "Mat10 · N4 bar-slip bottom",
+                "Mat11 · N4 bar-slip top",
+                "Mat12 · N4 interface shear",
+                "Mat13 · Shear panel",
             )
             materials = connection.parameters.get(
                 "component_materials", ()
             )
-            component_text = []
+            rows.extend([
+                (
+                    "Formulation",
+                    (
+                        "2D · 4 nodes × 3 DOF"
+                        if int(self.model.ndm) == 2
+                        else "3D · 4 nodes × 6 DOF · in-plane joint action"
+                    ),
+                ),
+                (
+                    "Opposite chords",
+                    "Node 1↔3 = height · Node 2↔4 = width",
+                ),
+            ])
             for label, material_tag in zip(labels, materials):
                 material = self.project.materials.get(int(material_tag))
-                component_text.append(
-                    f"{label}: {material_tag}"
-                    + (f" - {material.name}" if material is not None else "")
-                )
+                rows.append((
+                    label,
+                    (
+                        f"{material_tag} - {material.name}"
+                        if material is not None
+                        else f"{material_tag} - missing"
+                    ),
+                ))
             rows.extend([
-                ("Component materials", "; ".join(component_text) or "-"),
                 (
                     "Height factor",
                     connection.parameters.get("height_factor", 1.0),
@@ -20759,6 +20783,24 @@ class MainWindow(QMainWindow):
                 (
                     "Width factor",
                     connection.parameters.get("width_factor", 1.0),
+                ),
+                (
+                    "Factor behavior",
+                    (
+                        "Active in BeamColumnJoint2d"
+                        if int(self.model.ndm) == 2
+                        else (
+                            "Fixed at 1.0 · current OpenSees "
+                            "BeamColumnJoint3d ignores optional factors"
+                        )
+                    ),
+                ),
+                (
+                    "Joint deformation vector",
+                    (
+                        "1 Bar slip · 2 Interface shear · "
+                        "3 Shear panel · 4 Total"
+                    ),
                 ),
             ])
         elif connection.connection_type == "LehighJoint2D":
