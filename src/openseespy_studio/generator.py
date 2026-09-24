@@ -244,13 +244,17 @@ def nd_material_source_comments(
             "# Compatible formulations: "
             + ", ".join(str(value) for value in compatibility)
         )
+    verification = source.get("verification", {})
+    if not isinstance(verification, dict):
+        verification = {}
     parameter_status = str(
-        source.get("verification", {}).get("parameter_status", "")
-        if isinstance(source.get("verification", {}), dict)
-        else ""
+        verification.get("parameter_status", "")
     ).strip()
     if parameter_status:
         comments.append("# Parameter status: " + parameter_status)
+    checked_on = str(verification.get("checked_on", "")).strip()
+    if checked_on:
+        comments.append("# Source verified on: " + checked_on)
     return comments
 
 
