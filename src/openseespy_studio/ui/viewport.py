@@ -3053,7 +3053,12 @@ class ModelViewport(QWidget):
         if self._model is None:
             return
 
-        joint_types = {"Joint2D", "KrawinklerPanelZone"}
+        joint_types = {
+            "Joint2D",
+            "BeamColumnJoint",
+            "LehighJoint2D",
+            "KrawinklerPanelZone",
+        }
         external_nodes = []
         if connection.connection_type in joint_types:
             external_nodes = [
@@ -3102,6 +3107,44 @@ class ModelViewport(QWidget):
                     ),
                     name=f"connection-joint2d-center-{connection.tag}",
                     color="#5e35b1",
+                    pickable=False,
+                    render=False,
+                )
+                return
+
+            if connection.connection_type in {
+                "BeamColumnJoint",
+                "LehighJoint2D",
+            }:
+                is_rc = connection.connection_type == "BeamColumnJoint"
+                glyph = pv.Cube(
+                    center=center,
+                    x_length=x_length,
+                    y_length=y_length,
+                    z_length=thickness,
+                )
+                self.plotter.add_mesh(
+                    glyph,
+                    name=(
+                        f"connection-beam-column-joint-{connection.tag}"
+                        if is_rc
+                        else f"connection-lehigh-joint-{connection.tag}"
+                    ),
+                    color="#00897b" if is_rc else "#3949ab",
+                    opacity=0.22,
+                    edge_color="#00695c" if is_rc else "#283593",
+                    show_edges=True,
+                    line_width=3,
+                    pickable=False,
+                    render=False,
+                )
+                self.plotter.add_mesh(
+                    pv.Sphere(
+                        radius=size * 0.22,
+                        center=center,
+                    ),
+                    name=f"connection-joint-center-{connection.tag}",
+                    color="#00695c" if is_rc else "#283593",
                     pickable=False,
                     render=False,
                 )
