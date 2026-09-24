@@ -4835,7 +4835,7 @@ class MainWindow(QMainWindow):
         self._set_dirty(False)
         self._refresh_all("New empty project")
 
-    def _show_rc_wall_wizard(self) -> None:
+    def _show_rc_wall_wizard(self, checked: bool = False) -> None:
         dialog = RCWallWizard(
             self.project,
             parent=self,
@@ -4895,14 +4895,11 @@ class MainWindow(QMainWindow):
                 if (
                     issue.severity == "ERROR"
                     and (
-                        spec.replace_geometry
-                        or (
-                            issue.category,
-                            issue.message,
-                            issue.object_kind,
-                            issue.object_tag,
-                        ) not in existing_error_keys
-                    )
+                        issue.category,
+                        issue.message,
+                        issue.object_kind,
+                        issue.object_tag,
+                    ) not in existing_error_keys
                 )
             ]
             if generated_errors:
