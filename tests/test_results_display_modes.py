@@ -140,6 +140,22 @@ def test_solution_result_restores_display_mode(qapp):
 
 
 
+def test_shell_principal_strain_renderer_and_main_window_wiring():
+    viewport_source = inspect.getsource(
+        ModelViewport.show_shell_deformation_contour
+    )
+    render_source = inspect.getsource(MainWindow._render_result_data)
+    handler_source = inspect.getsource(
+        MainWindow._show_shell_deformation_result
+    )
+
+    assert "shell_principal_strains" in viewport_source
+    assert '"E1"' in viewport_source
+    assert '"E2"' in viewport_source
+    assert 'result_type == "ShellDeformation"' in render_source
+    assert "show_shell_deformation_contour" in handler_source
+
+
 def test_shell_displacement_renderer_and_main_window_are_shell_scoped():
     viewport_source = inspect.getsource(
         ModelViewport.show_shell_displacement_contour
@@ -1442,6 +1458,12 @@ def test_shell_principal_strain_formula_uses_engineering_shear():
 
 def test_shell_strain_tab_includes_principal_values(qapp):
     panel = ResultsPanel()
+    captured = []
+    panel.shell_deformation_requested.connect(
+        lambda component, scope: captured.append(
+            (str(component), list(scope))
+        )
+    )
     try:
         panel.set_result(_two_frame_motion_result())
         panel.show_solution_result(
@@ -1456,6 +1478,7 @@ def test_shell_strain_tab_includes_principal_values(qapp):
             )
             == "Strain"
         )
+        assert panel.shell_strain_component.currentData() == "E1"
         headers = [
             panel.shell_tables["Strain"].horizontalHeaderItem(i).text()
             for i in range(panel.shell_tables["Strain"].columnCount())
@@ -1471,6 +1494,10 @@ def test_shell_strain_tab_includes_principal_values(qapp):
         assert float(
             panel.shell_tables["Strain"].item(0, 5).text()
         ) == pytest.approx(principal[1], rel=1.0e-5)
+
+        panel.shell_strain_show_button.click()
+        qapp.processEvents()
+        assert captured[-1] == ("E1", [20])
     finally:
         panel.close()
         panel.deleteLater()
