@@ -933,6 +933,7 @@ class ResultsPanel(QWidget):
     node_contour_requested = Signal(str, str)
     shell_displacement_requested = Signal(str, float, str, object)
     shell_deformation_requested = Signal(str, str, object)
+    shell_deformation_frame_requested = Signal(int, str, str, object)
     hinge_state_requested = Signal()
     element_selected = Signal(int)
     job_selected = Signal(int)
@@ -4756,6 +4757,14 @@ class ResultsPanel(QWidget):
                 bool(self.crack_accumulate.isChecked()),
                 float(self.crack_line_scale.value()),
                 sorted(self._active_crack_element_scope),
+            )
+            return
+        if self._active_solution_kind == "ShellDeformation":
+            self.shell_deformation_frame_requested.emit(
+                int(source_index),
+                str(self.shell_strain_component.currentData()),
+                str(self.shell_strain_location.currentData()),
+                sorted(self._active_shell_element_scope),
             )
             return
         self.motion_frame_requested.emit(
