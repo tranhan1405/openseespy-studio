@@ -7090,6 +7090,7 @@ class ModelViewport(QWidget):
 
         points: list[np.ndarray] = []
         lines: list[int] = []
+        faces: list[int] = []
         intensity: list[float] = []
 
         for tag, panel_states in sorted(by_element.items()):
@@ -7201,15 +7202,61 @@ class ModelViewport(QWidget):
 
                 half_length = line_scale * min(limits)
                 direction = dx * local_x + dy * local_y
-                start_point = center - half_length * direction
-                end_point = center + half_length * direction
+                direction_norm = float(np.linalg.norm(direction))
+                if direction_norm <= 1.0e-12:
+                    cumulative += raw_width
+                    continue
+                direction = direction / direction_norm
 
-                base = len(points)
-                points.extend((start_point, end_point))
-                lines.extend((2, base, base + 1))
+                # Draw a real surface strip as well as a center line.  GPU
+                # line/tube rendering can disappear on some Qt/VTK/OpenGL
+                # combinations, while a filled quad remains reliable.
+                side = np.cross(normal, direction)
+                side_norm = float(np.linalg.norm(side))
+                if side_norm <= 1.0e-12:
+                    cumulative += raw_width
+                    continue
+                side = side / side_norm
+                half_thickness = max(
+                    max(width_geom, height_geom) * 0.006,
+                    min(panel_width_geom, height_geom) * 0.012,
+                )
+                surface_offset = (
+                    normal * max(width_geom, height_geom) * 5.0e-3
+                )
+
+                # Duplicate the crack on both wall faces.  This keeps cracks
+                # visible after the user rotates from the front to the back.
+                for face_sign in (1.0, -1.0):
+                    face_center = (
+                        0.5 * (bottom + top)
+                        + face_sign * surface_offset
+                    )
+                    start_point = face_center - half_length * direction
+                    end_point = face_center + half_length * direction
+                    edge = half_thickness * side
+
+                    base = len(points)
+                    points.extend((
+                        start_point,
+                        end_point,
+                        start_point - edge,
+                        start_point + edge,
+                        end_point + edge,
+                        end_point - edge,
+                    ))
+                    lines.extend((2, base, base + 1))
+                    faces.extend((
+                        4,
+                        base + 2,
+                        base + 3,
+                        base + 4,
+                        base + 5,
+                    ))
                 intensity.append(float(state.ratio))
                 cumulative += raw_width
 
+        stats["rendered_segments"] = len(intensity)
         self.clear_result_overlay(render=False)
         self.set_undeformed_model_visible(True, render=False)
         if not points:
@@ -7218,17 +7265,18 @@ class ModelViewport(QWidget):
 
         mesh = pv.PolyData(np.asarray(points, dtype=float))
         mesh.lines = np.asarray(lines, dtype=np.int64)
-        mesh.cell_data["crack_intensity"] = np.asarray(
-            intensity,
-            dtype=float,
-        )
+        mesh.faces = np.asarray(faces, dtype=np.int64)
         self.plotter.add_mesh(
             mesh,
             name="result-crack-pattern",
             color="#c62828",
+            style="surface",
+            opacity=1.0,
             line_width=9,
             render_lines_as_tubes=True,
             lighting=False,
+            show_edges=False,
+            culling=False,
             pickable=False,
             render=False,
         )
