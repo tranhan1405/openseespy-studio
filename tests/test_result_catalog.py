@@ -67,6 +67,26 @@ def test_static_and_transient_catalogs_exclude_specialized_curves():
 
 
 
+def test_nonmodal_catalog_exposes_shell_displacement_fringe():
+    for analysis_type in ("Static", "Transient", "Pushover", "Cyclic"):
+        choices = result_choices_for_analysis(analysis_type)
+        shell_disp = [
+            choice
+            for choice in choices
+            if choice.result_type == "ShellDisplacement"
+        ]
+        assert len(shell_disp) == 4
+        assert {choice.settings["component"] for choice in shell_disp} == {
+            "|U|", "UX", "UY", "UZ"
+        }
+        assert all(choice.category == "Shell Results" for choice in shell_disp)
+        assert all(choice.settings["scale"] == 10.0 for choice in shell_disp)
+        assert all(
+            choice.settings["display_mode"] == "deformed_only"
+            for choice in shell_disp
+        )
+
+
 def test_nonmodal_catalog_exposes_concrete_crack_pattern():
     for analysis_type in ("Static", "Transient", "Pushover", "Cyclic"):
         choices = result_choices_for_analysis(analysis_type)
