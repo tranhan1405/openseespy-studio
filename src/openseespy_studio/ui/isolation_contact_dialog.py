@@ -44,12 +44,15 @@ def _float_spin(
 def _combo_by_tag(items, selected=None, *, placeholder="Select..."):
     combo = QComboBox()
     combo.addItem(placeholder, None)
-    for tag, label in items:
+    normalized_items = list(items)
+    for tag, label in normalized_items:
         combo.addItem(str(label), int(tag))
     if selected is not None:
         index = combo.findData(int(selected))
         if index >= 0:
             combo.setCurrentIndex(index)
+    elif len(normalized_items) == 1:
+        combo.setCurrentIndex(1)
     return combo
 
 
@@ -277,6 +280,10 @@ class LeadRubberXDialog(_ScrollableDialog):
         for index, label in enumerate(flag_labels, start=1):
             flag = QCheckBox(label)
             flag.setChecked(bool(int(p.get(f"tag{index}", 0))))
+            flag.setToolTip(
+                "OpenSees LeadRubberX optional behavior switch "
+                f"{index}."
+            )
             self.flags.append(flag)
 
         self.form.addRow("Tag:", self.tag)
@@ -543,6 +550,20 @@ class TripleFrictionPendulumDialog(_ScrollableDialog):
         )
         self.form.addRow(f"Minimum vertical force [{self.units.force}]:", self.min_fv)
         self.form.addRow("Element tolerance:", self.tol)
+
+        for index in range(1, 4):
+            self.lengths[f"L{index}"].setToolTip(
+                f"Effective pendulum length L{index} for sliding interface {index}."
+            )
+            self.lengths[f"d{index}"].setToolTip(
+                f"OpenSees Ubar{index}: displacement capacity of sliding "
+                f"interface {index}. Stored internally as d{index} for "
+                "backward-compatible FEWIZ project files."
+            )
+        self.kvt.setToolTip(
+            "Vertical tension stiffness Kvt. This is stiffness "
+            "(force/length), not flexibility."
+        )
         self.note.setText(
             "TripleFrictionPendulum is a 3D/6DOF isolation element. "
             "The three d1/d2/d3 storage keys are shown here using the "
