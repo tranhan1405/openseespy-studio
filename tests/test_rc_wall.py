@@ -13,7 +13,11 @@ from PySide6.QtWidgets import QApplication, QDialog, QWizard
 
 from openseespy_studio.generator import build_mefi_crack_specs, to_openseespy
 from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
-from openseespy_studio.rc_wall import RCWallSpec, build_rc_wall
+from openseespy_studio.rc_wall import (
+    RCWallSpec,
+    build_rc_wall,
+    rc_wall_reinforcement_summary,
+)
 import openseespy_studio.ui.main_window as main_window_module
 from openseespy_studio.ui import viewport as viewport_module
 from openseespy_studio.ui.main_window import MainWindow
