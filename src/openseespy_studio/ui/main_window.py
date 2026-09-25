@@ -30529,6 +30529,8 @@ class MainWindow(QMainWindow):
                     | CONTINUUM_QUAD_ELEMENT_TYPES
                     | SOLID_ELEMENT_TYPES
                     | WALL_MACRO_ELEMENT_TYPES
+                    | CABLE_ELEMENT_TYPES
+                    | BEARING_ELEMENT_TYPES
                 )
             ):
                 definition_menu = menu.addMenu("Definition")
@@ -30571,6 +30573,16 @@ class MainWindow(QMainWindow):
                     )
                     edit_wall.triggered.connect(
                         lambda: self._edit_wall_macro_element(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in (CABLE_ELEMENT_TYPES | BEARING_ELEMENT_TYPES)
+                ):
+                    edit_special = definition_menu.addAction(
+                        "Edit Special Element Definition..."
+                    )
+                    edit_special.triggered.connect(
+                        lambda: self._edit_special_element(tag)
                     )
                 if has_frame:
                     formulation = definition_menu.addAction(
