@@ -10381,7 +10381,7 @@ class ProjectDatabase:
                 default_component = "Nxx"
             else:
                 allowed_components = {
-                    "Exx", "Eyy", "Gxy",
+                    "Exx", "Eyy", "Gxy", "E1", "E2",
                     "Kxx", "Kyy", "Kxy",
                     "Gxz", "Gyz",
                 }
