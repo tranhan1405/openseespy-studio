@@ -37,7 +37,9 @@ WALL_MACRO_3D_ELEMENT_TYPES = {"MVLEM_3D"}
 WALL_MACRO_ELEMENT_TYPES = (
     WALL_MACRO_2D_ELEMENT_TYPES | WALL_MACRO_3D_ELEMENT_TYPES
 )
-TRUSS_ELEMENT_TYPES = {"truss", "corotTruss"}
+TRUSS_MATERIAL_ELEMENT_TYPES = {"truss", "corotTruss"}
+TRUSS_SECTION_ELEMENT_TYPES = {"trussSection", "corotTrussSection"}
+TRUSS_ELEMENT_TYPES = TRUSS_MATERIAL_ELEMENT_TYPES | TRUSS_SECTION_ELEMENT_TYPES
 CABLE_ELEMENT_TYPES = {"CatenaryCable"}
 BEARING_ELEMENT_TYPES = {
     "elastomericBearingPlasticity",
@@ -929,7 +931,7 @@ class Element:
                     self.truss_material_tag,
                     "Truss material tag",
                 )
-                if self.element_type in TRUSS_ELEMENT_TYPES
+                if self.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
                 else int(self.truss_material_tag)
             )
         )
@@ -1329,7 +1331,7 @@ class Element:
         )
 
         uses_section_reference = self.element_type not in (
-            TRUSS_ELEMENT_TYPES
+            TRUSS_MATERIAL_ELEMENT_TYPES
             | EMBEDDED_ELEMENT_TYPES
             | CONTINUUM_QUAD_ELEMENT_TYPES
             | SOLID_ELEMENT_TYPES
@@ -1369,6 +1371,11 @@ class Element:
             self.transf_tag = None
         if self.element_type in SPECIAL_TWO_NODE_ELEMENT_TYPES:
             self.section_tag = None
+        if self.element_type in TRUSS_MATERIAL_ELEMENT_TYPES:
+            self.section_tag = None
+        elif self.element_type in TRUSS_SECTION_ELEMENT_TYPES:
+            self.truss_area = 0.0
+            self.truss_material_tag = None
 
         if self.element_type in BEAM_INTEGRATION_ELEMENT_TYPES and self.integration_type not in {
             "Lobatto",
@@ -2080,7 +2087,7 @@ class StructuralModel:
             element = self.elements.get(normalized_tag)
             if (
                 element is None
-                or element.element_type in TRUSS_ELEMENT_TYPES
+                or element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
                 or element.element_type in SPECIAL_TWO_NODE_ELEMENT_TYPES
                 or element.element_type in BEAM_CONTACT_ELEMENT_TYPES
             ):
@@ -2094,7 +2101,7 @@ class StructuralModel:
         element_tags: Iterable[int],
         material_tag: int | None,
     ) -> set[int]:
-        """Assign a uniaxial material only to Truss/CorotTruss elements."""
+        """Assign a uniaxial material only to area/material truss elements."""
         assigned: set[int] = set()
         value = (
             None
@@ -2104,7 +2111,10 @@ class StructuralModel:
         for tag in element_tags:
             normalized_tag = _strict_int(tag, "Element tag")
             element = self.elements.get(normalized_tag)
-            if element is None or element.element_type not in TRUSS_ELEMENT_TYPES:
+            if (
+                element is None
+                or element.element_type not in TRUSS_MATERIAL_ELEMENT_TYPES
+            ):
                 continue
             element.truss_material_tag = value
             assigned.add(element.tag)
