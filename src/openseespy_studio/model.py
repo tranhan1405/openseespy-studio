@@ -41,10 +41,15 @@ TRUSS_MATERIAL_ELEMENT_TYPES = {"truss", "corotTruss"}
 TRUSS_SECTION_ELEMENT_TYPES = {"trussSection", "corotTrussSection"}
 TRUSS_ELEMENT_TYPES = TRUSS_MATERIAL_ELEMENT_TYPES | TRUSS_SECTION_ELEMENT_TYPES
 CABLE_ELEMENT_TYPES = {"CatenaryCable"}
+FRICTION_BEARING_ELEMENT_TYPES = {
+    "flatSliderBearing",
+    "singleFPBearing",
+}
 BEARING_ELEMENT_TYPES = {
     "elastomericBearingPlasticity",
     "LeadRubberX",
     "TripleFrictionPendulum",
+    *FRICTION_BEARING_ELEMENT_TYPES,
 }
 CONTACT_TWO_NODE_ELEMENT_TYPES = {
     "zeroLengthContact2D",
@@ -490,6 +495,135 @@ def _normalize_special_element_parameters(
             and int(result["transf_tag"]) <= 0
         ):
             raise ValueError("BeamContact3D transformation tag must be positive.")
+        return result
+
+    if element_type in FRICTION_BEARING_ELEMENT_TYPES:
+        required = {"frn_model_tag", "kInit", "p_mat_tag", "mz_mat_tag"}
+        if element_type == "singleFPBearing":
+            required.add("Reff")
+        optional = {
+            "t_mat_tag", "my_mat_tag", "orientation", "shearDist",
+            "doRayleigh", "mass", "maxIter", "tol",
+        }
+        missing = sorted(required - set(raw))
+        if missing:
+            raise ValueError(
+                f"{element_type} requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - required - optional)
+        if extra:
+            raise ValueError(
+                f"Unsupported {element_type} parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+
+        result = {
+            "frn_model_tag": _strict_int(
+                raw["frn_model_tag"],
+                f"{element_type} friction model tag",
+            ),
+            "kInit": float(raw["kInit"]),
+            "p_mat_tag": _strict_int(
+                raw["p_mat_tag"],
+                f"{element_type} axial material tag",
+            ),
+            "mz_mat_tag": _strict_int(
+                raw["mz_mat_tag"],
+                f"{element_type} Mz material tag",
+            ),
+            "shearDist": float(raw.get("shearDist", 0.0)),
+            "doRayleigh": _strict_bool(
+                raw.get("doRayleigh", False),
+                f"{element_type} Rayleigh flag",
+            ),
+            "mass": float(raw.get("mass", 0.0)),
+            "maxIter": _strict_int(
+                raw.get("maxIter", 20),
+                f"{element_type} maxIter",
+            ),
+            "tol": float(raw.get("tol", 1.0e-8)),
+        }
+        if element_type == "singleFPBearing":
+            result["Reff"] = float(raw["Reff"])
+        for key, label in (
+            ("t_mat_tag", "torsion material tag"),
+            ("my_mat_tag", "My material tag"),
+        ):
+            value = raw.get(key)
+            result[key] = (
+                None
+                if value is None
+                else _strict_int(value, f"{element_type} {label}")
+            )
+
+        orientation = raw.get("orientation")
+        if orientation is None:
+            result["orientation"] = None
+        else:
+            try:
+                values = tuple(float(value) for value in orientation)
+            except TypeError as exc:
+                raise ValueError(
+                    f"{element_type} orientation must contain six values."
+                ) from exc
+            if len(values) != 6 or any(
+                not math.isfinite(value) for value in values
+            ):
+                raise ValueError(
+                    f"{element_type} orientation must contain six finite values."
+                )
+            x = values[:3]
+            y = values[3:]
+            cross = (
+                x[1] * y[2] - x[2] * y[1],
+                x[2] * y[0] - x[0] * y[2],
+                x[0] * y[1] - x[1] * y[0],
+            )
+            if (
+                sum(value * value for value in x) <= 1.0e-24
+                or sum(value * value for value in y) <= 1.0e-24
+                or sum(value * value for value in cross) <= 1.0e-24
+            ):
+                raise ValueError(
+                    f"{element_type} orientation x/y vectors must be "
+                    "non-zero and non-parallel."
+                )
+            result["orientation"] = values
+
+        numeric_keys = ["kInit", "shearDist", "mass", "tol"]
+        if element_type == "singleFPBearing":
+            numeric_keys.append("Reff")
+        if any(
+            not math.isfinite(float(result[key]))
+            for key in numeric_keys
+        ):
+            raise ValueError(f"{element_type} parameters must be finite.")
+        if int(result["frn_model_tag"]) <= 0:
+            raise ValueError(f"{element_type} friction model tag must be positive.")
+        for key in ("p_mat_tag", "mz_mat_tag", "t_mat_tag", "my_mat_tag"):
+            value = result.get(key)
+            if value is not None and int(value) <= 0:
+                raise ValueError(f"{element_type} material tags must be positive.")
+        if float(result["kInit"]) <= 0.0:
+            raise ValueError(f"{element_type} kInit must be positive.")
+        if (
+            element_type == "singleFPBearing"
+            and float(result["Reff"]) <= 0.0
+        ):
+            raise ValueError("singleFPBearing Reff must be positive.")
+        if not 0.0 <= float(result["shearDist"]) <= 1.0:
+            raise ValueError(
+                f"{element_type} shearDist must satisfy 0 <= value <= 1."
+            )
+        if float(result["mass"]) < 0.0:
+            raise ValueError(f"{element_type} mass cannot be negative.")
+        if int(result["maxIter"]) < 1:
+            raise ValueError(f"{element_type} maxIter must be at least 1.")
+        if float(result["tol"]) <= 0.0:
+            raise ValueError(f"{element_type} tol must be positive.")
         return result
 
     required = (
@@ -1705,18 +1839,34 @@ class StructuralModel:
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
         if (
-            element_type == "elastomericBearingPlasticity"
+            element_type
+            in ({"elastomericBearingPlasticity"} | FRICTION_BEARING_ELEMENT_TYPES)
             and (int(self.ndm), int(self.ndf)) not in {(2, 3), (3, 6)}
         ):
             raise ValueError(
-                "elastomericBearingPlasticity requires ndm=2/ndf=3 "
-                "or ndm=3/ndf=6; got "
-                f"ndm={self.ndm}, ndf={self.ndf}."
+                f"{element_type} requires ndm=2/ndf=3 or ndm=3/ndf=6; "
+                f"got ndm={self.ndm}, ndf={self.ndf}."
             )
         normalized_special = _normalize_special_element_parameters(
             element_type,
             special_parameters or {},
         )
+        if element_type in FRICTION_BEARING_ELEMENT_TYPES:
+            if int(self.ndm) == 3:
+                if (
+                    normalized_special.get("t_mat_tag") is None
+                    or normalized_special.get("my_mat_tag") is None
+                ):
+                    raise ValueError(
+                        f"3D {element_type} requires t_mat_tag and my_mat_tag."
+                    )
+            elif (
+                normalized_special.get("t_mat_tag") is not None
+                or normalized_special.get("my_mat_tag") is not None
+            ):
+                raise ValueError(
+                    f"2D {element_type} does not use t_mat_tag or my_mat_tag."
+                )
         if element_type == "elastomericBearingPlasticity":
             if int(self.ndm) == 3:
                 if (
