@@ -10,8 +10,10 @@ from .beam_loads import (
 )
 from .units import UnitSystem
 from .model import (
+    BEAM_CONTACT_ELEMENT_TYPES,
     BEARING_ELEMENT_TYPES,
     CABLE_ELEMENT_TYPES,
+    CONTACT_TWO_NODE_ELEMENT_TYPES,
     CONTINUUM_QUAD_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
@@ -717,6 +719,16 @@ def nd_material_to_openseespy(
             f"{int(round(value('conc')))}, {value('rouX'):g}, "
             f"{value('rouY'):g}, {value('nu'):g}, "
             f"{value('alfadow'):g})"
+        )
+
+    if material.material_type in {
+        "ContactMaterial2D",
+        "ContactMaterial3D",
+    }:
+        return (
+            f"ops.nDMaterial('{material.material_type}', "
+            f"{material.tag}, {value('mu'):g}, {value('G'):g}, "
+            f"{value('c'):g}, {value('t'):g})"
         )
 
     raise ValueError(
@@ -4445,7 +4457,9 @@ def to_openseespy(
             )
             if (
                 length2 <= 1.0e-24
-                and element.element_type not in BEARING_ELEMENT_TYPES
+                and element.element_type not in (
+                    BEARING_ELEMENT_TYPES | CONTACT_TWO_NODE_ELEMENT_TYPES
+                )
             ):
                 geometry_reference_errors.append(
                     f"element {element.tag} -> zero length"
@@ -4517,6 +4531,28 @@ def to_openseespy(
                 f"material {material.tag} -> missing material "
                 + ", ".join(map(str, missing))
             )
+
+    nd_material_catalog = set(nd_materials or {})
+    for element in model.elements.values():
+        if element.element_type in BEAM_CONTACT_ELEMENT_TYPES:
+            nd_tag = int(element.special_parameters["nd_material_tag"])
+            if nd_tag not in nd_material_catalog:
+                material_reference_errors.append(
+                    f"{element.element_type} element {element.tag} "
+                    f"-> missing nDMaterial {nd_tag}"
+                )
+            if (
+                element.element_type == "BeamContact3D"
+                and (
+                    transformations is None
+                    or int(element.special_parameters["transf_tag"])
+                    not in transformations
+                )
+            ):
+                material_reference_errors.append(
+                    f"BeamContact3D element {element.tag} -> missing "
+                    f"transformation {element.special_parameters['transf_tag']}"
+                )
 
     for section in (sections or {}).values():
         referenced_materials: set[int] = set()
@@ -5340,11 +5376,24 @@ def to_openseespy(
         "# Nodes",
     ]
 
+    current_ndf = int(model.ndf)
     for tag in sorted(model.nodes):
         node = model.nodes[tag]
+        node_ndf = int(node.ndf)
+        if node_ndf != current_ndf:
+            lines.append(
+                f"ops.model('basic', '-ndm', {model.ndm}, "
+                f"'-ndf', {node_ndf})"
+            )
+            current_ndf = node_ndf
         coordinates = tuple(node.xyz[:model.ndm])
         coordinate_text = ", ".join(f"{value:g}" for value in coordinates)
         lines.append(f"ops.node({tag}, {coordinate_text})")
+    if current_ndf != int(model.ndf):
+        lines.append(
+            f"ops.model('basic', '-ndm', {model.ndm}, "
+            f"'-ndf', {model.ndf})"
+        )
 
     mass_nodes = [
         tag for tag, node in model.nodes.items()
@@ -5355,7 +5404,7 @@ def to_openseespy(
         for tag in sorted(mass_nodes):
             mass = ", ".join(
                 f"{value:g}"
-                for value in model.nodes[tag].mass[:model.ndf]
+                for value in model.nodes[tag].mass[:int(model.nodes[tag].ndf)]
             )
             lines.append(f"ops.mass({tag}, {mass})")
 
@@ -5364,7 +5413,7 @@ def to_openseespy(
         node = model.nodes[tag]
         if any(node.fixity):
             fix = ", ".join(
-                str(v) for v in node.fixity[:model.ndf]
+                str(v) for v in node.fixity[:int(node.ndf)]
             )
             lines.append(f"ops.fix({tag}, {fix})")
 
@@ -5432,6 +5481,61 @@ def to_openseespy(
     ])
     for tag in sorted(model.elements):
         e = model.elements[tag]
+
+        if e.element_type == "zeroLengthContact2D":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            kn = float(p["Kn"]) * u.length_to_m / u.force_to_n
+            kt = float(p["Kt"]) * u.length_to_m / u.force_to_n
+            nx, ny = (float(value) for value in p["normal"])
+            lines.append(
+                "ops.element('zeroLengthContact2D', "
+                f"{tag}, {e.i}, {e.j}, {kn:g}, {kt:g}, "
+                f"{float(p['mu']):g}, '-normal', {nx:g}, {ny:g})"
+            )
+            continue
+
+        if e.element_type == "zeroLengthContact3D":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            kn = float(p["Kn"]) * u.length_to_m / u.force_to_n
+            kt = float(p["Kt"]) * u.length_to_m / u.force_to_n
+            cohesion = u.force_from_n(float(p["cohesion"]))
+            lines.append(
+                "ops.element('zeroLengthContact3D', "
+                f"{tag}, {e.i}, {e.j}, {kn:g}, {kt:g}, "
+                f"{float(p['mu']):g}, {cohesion:g}, {int(p['dir'])})"
+            )
+            continue
+
+        if e.element_type == "BeamContact2D":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            width = u.length_from_m(float(p["width"]))
+            gtol = u.length_from_m(float(p["gTol"]))
+            ftol = u.force_from_n(float(p["fTol"]))
+            lines.append(
+                "ops.element('BeamContact2D', "
+                f"{tag}, {e.i}, {e.j}, {int(e.k)}, {int(e.l)}, "
+                f"{int(p['nd_material_tag'])}, {width:g}, "
+                f"{gtol:g}, {ftol:g}, {int(p['cFlag'])})"
+            )
+            continue
+
+        if e.element_type == "BeamContact3D":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            radius = u.length_from_m(float(p["radius"]))
+            gtol = u.length_from_m(float(p["gTol"]))
+            ftol = u.force_from_n(float(p["fTol"]))
+            lines.append(
+                "ops.element('BeamContact3D', "
+                f"{tag}, {e.i}, {e.j}, {int(e.k)}, {int(e.l)}, "
+                f"{radius:g}, {int(p['transf_tag'])}, "
+                f"{int(p['nd_material_tag'])}, {gtol:g}, "
+                f"{ftol:g}, {int(p['cFlag'])})"
+            )
+            continue
 
         if e.element_type in CABLE_ELEMENT_TYPES:
             p = e.special_parameters
