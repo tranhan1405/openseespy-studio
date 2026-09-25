@@ -5557,7 +5557,7 @@ class ModelViewport(QWidget):
                         render=False,
                     )
             if render:
-                self.plotter.render()
+                self.request_render()
             return
 
         selected_element_mesh = self._element_overlay_mesh(self._selected_elements)
