@@ -7215,30 +7215,40 @@ class ProjectDatabase:
 
     def remove_friction_model(self, tag: int) -> None:
         tag = _strict_int(tag, "Friction model tag")
-        users = sorted(
+        tfp_users = sorted(
             element.tag
             for element in self.model.elements.values()
             if (
-                (
-                    element.element_type == "TripleFrictionPendulum"
-                    and tag in {
-                        int(element.special_parameters[key])
-                        for key in ("frnTag1", "frnTag2", "frnTag3")
-                    }
-                )
-                or (
-                    element.element_type in FRICTION_BEARING_ELEMENT_TYPES
-                    and int(
-                        element.special_parameters["frn_model_tag"]
-                    ) == tag
-                )
+                element.element_type == "TripleFrictionPendulum"
+                and tag in {
+                    int(element.special_parameters[key])
+                    for key in ("frnTag1", "frnTag2", "frnTag3")
+                }
             )
         )
-        if users:
+        bearing_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in FRICTION_BEARING_ELEMENT_TYPES
+                and int(element.special_parameters["frn_model_tag"]) == tag
+            )
+        )
+        if tfp_users or bearing_users:
+            details = []
+            if tfp_users:
+                details.append(
+                    "TripleFrictionPendulum element(s): "
+                    + ", ".join(map(str, tfp_users))
+                )
+            if bearing_users:
+                details.append(
+                    "friction-bearing element(s): "
+                    + ", ".join(map(str, bearing_users))
+                )
             raise ValueError(
-                f"Friction model {tag} is still referenced by bearing "
-                "element(s): "
-                + ", ".join(map(str, users))
+                f"Friction model {tag} is still referenced by "
+                + "; ".join(details)
                 + "."
             )
         self.friction_models.pop(tag, None)
