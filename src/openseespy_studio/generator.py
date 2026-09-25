@@ -10,6 +10,8 @@ from .beam_loads import (
 )
 from .units import UnitSystem
 from .model import (
+    BEARING_ELEMENT_TYPES,
+    CABLE_ELEMENT_TYPES,
     CONTINUUM_QUAD_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
@@ -4413,7 +4415,10 @@ def to_openseespy(
                 ) ** 2
                 for index in range(3)
             )
-            if length2 <= 1.0e-24:
+            if (
+                length2 <= 1.0e-24
+                and element.element_type not in BEARING_ELEMENT_TYPES
+            ):
                 geometry_reference_errors.append(
                     f"element {element.tag} -> zero length"
                 )
@@ -4512,6 +4517,24 @@ def to_openseespy(
                 f"truss element {element.tag} -> missing material "
                 f"{element.truss_material_tag}"
             )
+        if element.element_type in BEARING_ELEMENT_TYPES:
+            referenced = {
+                int(value)
+                for key in (
+                    "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                )
+                for value in [element.special_parameters.get(key)]
+                if value is not None
+            }
+            missing = sorted(
+                tag for tag in referenced
+                if material_catalog is not None and tag not in material_catalog
+            )
+            if missing:
+                material_reference_errors.append(
+                    f"bearing element {element.tag} -> missing material "
+                    + ", ".join(map(str, missing))
+                )
 
     for connection in (connections or {}).values():
         missing = sorted({
@@ -5341,6 +5364,72 @@ def to_openseespy(
     ])
     for tag in sorted(model.elements):
         e = model.elements[tag]
+
+        if e.element_type in CABLE_ELEMENT_TYPES:
+            p = e.special_parameters
+            unit_system = UnitSystem.from_mapping(units)
+            weight = (
+                float(p["weight"])
+                * unit_system.length_to_m
+                / unit_system.force_to_n
+            )
+            elastic_modulus = unit_system.stress_from_pa(float(p["E"]))
+            area = float(p["A"]) / (unit_system.length_to_m ** 2)
+            unstressed_length = unit_system.length_from_m(float(p["L0"]))
+            rho = (
+                float(p["rho"])
+                * unit_system.length_to_m
+                / unit_system.mass_unit_kg
+            )
+            error_tol = unit_system.length_from_m(float(p["errorTol"]))
+            lines.append(
+                "ops.element('CatenaryCable', "
+                f"{tag}, {e.i}, {e.j}, {weight:g}, "
+                f"{elastic_modulus:g}, {area:g}, {unstressed_length:g}, "
+                f"{float(p['alpha']):g}, "
+                f"{float(p['temperature_change']):g}, {rho:g}, "
+                f"{error_tol:g}, {int(p['Nsubsteps'])}, "
+                f"{int(p['massType'])})"
+            )
+            continue
+
+        if e.element_type in BEARING_ELEMENT_TYPES:
+            p = e.special_parameters
+            unit_system = UnitSystem.from_mapping(units)
+            k_init = (
+                float(p["kInit"])
+                * unit_system.length_to_m
+                / unit_system.force_to_n
+            )
+            qd = unit_system.force_from_n(float(p["qd"]))
+            args = (
+                "ops.element('elastomericBearingPlasticity', "
+                f"{tag}, {e.i}, {e.j}, {k_init:g}, {qd:g}, "
+                f"{float(p['alpha1']):g}, {float(p['alpha2']):g}, "
+                f"{float(p['mu']):g}, '-P', {int(p['p_mat_tag'])}"
+            )
+            if int(model.ndm) == 3:
+                args += (
+                    f", '-T', {int(p['t_mat_tag'])}, "
+                    f"'-My', {int(p['my_mat_tag'])}"
+                )
+            args += f", '-Mz', {int(p['mz_mat_tag'])}"
+            orientation = p.get("orientation")
+            if orientation is not None:
+                values = tuple(float(value) for value in orientation)
+                args += ", '-orient', " + ", ".join(
+                    f"{value:g}" for value in values
+                )
+            if abs(float(p["shearDist"]) - 0.5) > 1.0e-12:
+                args += f", '-shearDist', {float(p['shearDist']):g}"
+            if bool(p["doRayleigh"]):
+                args += ", '-doRayleigh'"
+            if float(p["mass"]) > 0.0:
+                mass = float(p["mass"]) / unit_system.mass_unit_kg
+                args += f", '-mass', {mass:g}"
+            args += ")"
+            lines.append(args)
+            continue
 
         if e.element_type in EMBEDDED_ELEMENT_TYPES:
             if e.k is None or e.l is None:
