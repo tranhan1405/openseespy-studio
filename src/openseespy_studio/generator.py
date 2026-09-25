@@ -24,7 +24,7 @@ from .model import (
     WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
 )
-from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, FrictionModelData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
+from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, FrictionModelData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, MEMBRANE_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 from .response_spectrum import build_period_grid
 
@@ -6026,7 +6026,9 @@ def to_openseespy(
                         f"missing section {e.section_tag}; element not generated."
                     )
                     continue
-                if assigned_section.section_type in SHELL_SECTION_TYPES:
+                if assigned_section.section_type in (
+                    SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES
+                ):
                     lines.append(
                         f"# ERROR: {e.element_type} element {tag} cannot use "
                         f"shell section {e.section_tag}; element not generated."
