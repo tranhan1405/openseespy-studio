@@ -65,7 +65,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 49
+PROJECT_FORMAT_VERSION = 50
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -534,6 +534,87 @@ class MaterialData:
                 float(value) for value in data.get("factors", [])
             ],
             source=deepcopy(dict(data.get("source", {}))),
+        )
+
+
+@dataclass
+class FrictionModelData:
+    tag: int
+    name: str
+    friction_type: str = "Coulomb"
+    parameters: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Friction model tag")
+        if self.tag <= 0:
+            raise ValueError("Friction model tag must be positive.")
+        self.name = str(self.name).strip() or f"Friction {self.tag}"
+        self.friction_type = str(self.friction_type)
+        supported = {"Coulomb", "VelDependent"}
+        if self.friction_type not in supported:
+            raise ValueError(
+                f"Unsupported friction model type: {self.friction_type}. "
+                "FEWIZ currently supports Coulomb and VelDependent."
+            )
+        raw = dict(self.parameters)
+        if self.friction_type == "Coulomb":
+            required = ("mu",)
+        else:
+            required = ("muSlow", "muFast", "transRate")
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                f"{self.friction_type} requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                f"Unsupported {self.friction_type} parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        self.parameters = {
+            key: float(raw[key])
+            for key in required
+        }
+        if any(
+            not math.isfinite(value)
+            for value in self.parameters.values()
+        ):
+            raise ValueError("Friction model parameters must be finite.")
+        if self.friction_type == "Coulomb":
+            if self.parameters["mu"] < 0.0:
+                raise ValueError("Coulomb mu cannot be negative.")
+        else:
+            if (
+                self.parameters["muSlow"] < 0.0
+                or self.parameters["muFast"] < 0.0
+            ):
+                raise ValueError(
+                    "VelDependent friction coefficients cannot be negative."
+                )
+            if self.parameters["transRate"] <= 0.0:
+                raise ValueError(
+                    "VelDependent transRate must be positive."
+                )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "friction_type": self.friction_type,
+            "parameters": dict(self.parameters),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FrictionModelData":
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", "")),
+            friction_type=str(data.get("friction_type", "Coulomb")),
+            parameters=dict(data.get("parameters", {})),
         )
 
 
@@ -5217,6 +5298,7 @@ class ProjectDatabase:
         default_factory=dict
     )
     materials: dict[int, MaterialData] = field(default_factory=dict)
+    friction_models: dict[int, FrictionModelData] = field(default_factory=dict)
     nd_materials: dict[int, NDMaterialData] = field(default_factory=dict)
 
     # Reserved object stores. They are persisted now so future editors can be
@@ -7019,6 +7101,71 @@ class ProjectDatabase:
                 + ". Reassign those references before deleting it."
             )
         self.materials.pop(tag, None)
+
+    def next_friction_model_tag(self) -> int:
+        return max(self.friction_models, default=0) + 1
+
+    def add_friction_model(self, model: FrictionModelData) -> None:
+        if model.tag in self.friction_models:
+            raise ValueError(
+                f"Friction model tag {model.tag} already exists."
+            )
+        self.friction_models[model.tag] = model
+
+    def update_friction_model(
+        self,
+        original_tag: int,
+        model: FrictionModelData,
+    ) -> None:
+        original_tag = _strict_int(
+            original_tag,
+            "Friction model original tag",
+        )
+        if original_tag not in self.friction_models:
+            raise ValueError(
+                f"Friction model tag {original_tag} does not exist."
+            )
+        if (
+            model.tag != original_tag
+            and model.tag in self.friction_models
+        ):
+            raise ValueError(
+                f"Friction model tag {model.tag} already exists."
+            )
+        self.friction_models.pop(original_tag)
+        self.friction_models[model.tag] = model
+        if model.tag != original_tag:
+            for element in self.model.elements.values():
+                if element.element_type != "TripleFrictionPendulum":
+                    continue
+                for key in ("frnTag1", "frnTag2", "frnTag3"):
+                    if (
+                        element.special_parameters.get(key)
+                        == original_tag
+                    ):
+                        element.special_parameters[key] = model.tag
+
+    def remove_friction_model(self, tag: int) -> None:
+        tag = _strict_int(tag, "Friction model tag")
+        users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type == "TripleFrictionPendulum"
+                and tag in {
+                    int(element.special_parameters[key])
+                    for key in ("frnTag1", "frnTag2", "frnTag3")
+                }
+            )
+        )
+        if users:
+            raise ValueError(
+                f"Friction model {tag} is still referenced by "
+                "TripleFrictionPendulum element(s): "
+                + ", ".join(map(str, users))
+                + "."
+            )
+        self.friction_models.pop(tag, None)
 
     def next_section_tag(self) -> int:
         return max(self.sections, default=0) + 1
@@ -11112,6 +11259,10 @@ class ProjectDatabase:
                 self.materials[tag].to_dict()
                 for tag in sorted(self.materials)
             ],
+            "friction_models": [
+                self.friction_models[tag].to_dict()
+                for tag in sorted(self.friction_models)
+            ],
             "nd_materials": [
                 self.nd_materials[tag].to_dict()
                 for tag in sorted(self.nd_materials)
@@ -11366,6 +11517,24 @@ class ProjectDatabase:
                 materials[material.tag] = material
 
         return materials
+
+    @staticmethod
+    def _load_friction_models(
+        raw: Any,
+    ) -> dict[int, FrictionModelData]:
+        result: dict[int, FrictionModelData] = {}
+        for index, item in enumerate(
+            _require_list(raw, "Friction models")
+        ):
+            model = FrictionModelData.from_dict(
+                _require_object(item, f"Friction model item {index}")
+            )
+            if model.tag in result:
+                raise ValueError(
+                    f"Duplicate friction model tag {model.tag}."
+                )
+            result[model.tag] = model
+        return result
 
     @staticmethod
     def _load_nd_materials(raw: Any) -> dict[int, NDMaterialData]:
@@ -11704,6 +11873,9 @@ class ProjectDatabase:
                 data.get("surface_recorders", [])
             ),
             materials=cls._load_materials(data.get("materials", [])),
+            friction_models=cls._load_friction_models(
+                data.get("friction_models", [])
+            ),
             nd_materials=cls._load_nd_materials(
                 data.get("nd_materials", [])
             ),
