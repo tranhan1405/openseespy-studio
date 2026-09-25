@@ -10,7 +10,10 @@ import pytest
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from openseespy_studio.crack_results import crack_severity
-from openseespy_studio.postprocess import shell_principal_strains
+from openseespy_studio.postprocess import (
+    shell_principal_strains,
+    shell_surface_strains,
+)
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.results_panel import ResultsPanel
 from openseespy_studio.ui.viewport import ModelViewport
@@ -1447,6 +1450,15 @@ def test_member_force_table_follows_animation_frame(qapp):
         qapp.processEvents()
 
 
+def test_shell_surface_strain_uses_membrane_plus_z_curvature():
+    values = [0.001, 0.002, 0.003, 0.01, -0.02, 0.03]
+    top = shell_surface_strains(values, 0.05)
+    bottom = shell_surface_strains(values, -0.05)
+
+    assert top == pytest.approx((0.0015, 0.001, 0.0045))
+    assert bottom == pytest.approx((0.0005, 0.003, 0.0015))
+
+
 def test_shell_principal_strain_formula_uses_engineering_shear():
     principal = shell_principal_strains([0.001, -0.001, 0.002])
     assert principal is not None
@@ -1460,8 +1472,8 @@ def test_shell_strain_tab_includes_principal_values(qapp):
     panel = ResultsPanel()
     captured = []
     panel.shell_deformation_requested.connect(
-        lambda component, scope: captured.append(
-            (str(component), list(scope))
+        lambda component, location, scope: captured.append(
+            (str(component), str(location), list(scope))
         )
     )
     try:
@@ -1479,6 +1491,7 @@ def test_shell_strain_tab_includes_principal_values(qapp):
             == "Strain"
         )
         assert panel.shell_strain_component.currentData() == "E1"
+        assert panel.shell_strain_location.currentData() == "mid"
         headers = [
             panel.shell_tables["Strain"].horizontalHeaderItem(i).text()
             for i in range(panel.shell_tables["Strain"].columnCount())
@@ -1495,9 +1508,12 @@ def test_shell_strain_tab_includes_principal_values(qapp):
             panel.shell_tables["Strain"].item(0, 5).text()
         ) == pytest.approx(principal[1], rel=1.0e-5)
 
+        panel.shell_strain_location.setCurrentIndex(
+            panel.shell_strain_location.findData("top")
+        )
         panel.shell_strain_show_button.click()
         qapp.processEvents()
-        assert captured[-1] == ("E1", [20])
+        assert captured[-1] == ("E1", "top", [20])
     finally:
         panel.close()
         panel.deleteLater()
