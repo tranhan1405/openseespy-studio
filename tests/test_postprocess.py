@@ -33,6 +33,8 @@ from openseespy_studio.postprocess import (
     member_end_resultants,
     moment_curvature_curve,
     section_response_curve,
+    shell_principal_strains,
+    shell_surface_strains,
     nodal_result_scalar,
     pushover_capacity_curve,
     section_component_samples,
@@ -52,6 +54,25 @@ from openseespy_studio.project import (
     TransformationData,
 )
 
+
+
+def test_shell_principal_strains_use_engineering_shear():
+    e1, e2 = shell_principal_strains(
+        [0.001, -0.001, 0.002]
+    )
+    expected = math.sqrt(2.0) * 0.001
+    assert e1 == pytest.approx(expected)
+    assert e2 == pytest.approx(-expected)
+
+
+def test_shell_surface_strains_apply_curvature_at_z():
+    values = [0.001, 0.002, 0.003, 0.01, -0.02, 0.03]
+    assert shell_surface_strains(values, 0.05) == pytest.approx(
+        (0.0015, 0.001, 0.0045)
+    )
+    assert shell_surface_strains(values, -0.05) == pytest.approx(
+        (0.0005, 0.003, 0.0015)
+    )
 
 
 def test_nodal_result_scalar_keeps_force_and_moment_groups_separate():
