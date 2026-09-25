@@ -5,7 +5,12 @@ import math
 from typing import Iterable
 
 from .beam_loads import resolve_self_weight_local
-from .model import FRAME_ELEMENT_TYPES, SHELL_ELEMENT_TYPES, SUPPORTED_ELEMENT_TYPES
+from .model import (
+    EMBEDDED_ELEMENT_TYPES,
+    FRAME_ELEMENT_TYPES,
+    SHELL_ELEMENT_TYPES,
+    SUPPORTED_ELEMENT_TYPES,
+)
 from .project import (
     AnalysisSettingsData,
     ProjectDatabase,
@@ -69,6 +74,44 @@ def _suggest_vecxz(
 
 def _format_vector(values: tuple[float, float, float]) -> str:
     return "(" + ", ".join(f"{value:g}" for value in values) + ")"
+
+
+def _point_in_triangle_xy(
+    point: tuple[float, float, float],
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+    d: tuple[float, float, float],
+    *,
+    tolerance: float = 1.0e-8,
+) -> tuple[bool, bool]:
+    """Return (inside_or_boundary, nondegenerate) using barycentric weights."""
+    denominator = (
+        (b[1] - d[1]) * (a[0] - d[0])
+        + (d[0] - b[0]) * (a[1] - d[1])
+    )
+    scale = max(
+        abs(a[0]), abs(a[1]),
+        abs(b[0]), abs(b[1]),
+        abs(d[0]), abs(d[1]),
+        1.0,
+    )
+    if abs(denominator) <= 1.0e-14 * scale * scale:
+        return False, False
+
+    w1 = (
+        (b[1] - d[1]) * (point[0] - d[0])
+        + (d[0] - b[0]) * (point[1] - d[1])
+    ) / denominator
+    w2 = (
+        (d[1] - a[1]) * (point[0] - d[0])
+        + (a[0] - d[0]) * (point[1] - d[1])
+    ) / denominator
+    w3 = 1.0 - w1 - w2
+    inside = all(
+        -tolerance <= value <= 1.0 + tolerance
+        for value in (w1, w2, w3)
+    )
+    return inside, True
 
 
 def _shell_quad_ordering_issue(
@@ -275,6 +318,91 @@ def _element_geometry_checks(
                     "Choose a formulation supported by SARE.",
                 )
             )
+            continue
+
+        if element.element_type in EMBEDDED_ELEMENT_TYPES:
+            if int(model.ndm) != 2 or int(model.ndf) not in {2, 3}:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Embedded reinforcement",
+                        f"Embedded element {tag} currently requires a 2D "
+                        "model with ndf=2 or ndf=3.",
+                        "element",
+                        tag,
+                        "Use the embedded-rebar infrastructure only with "
+                        "the current 2D continuum/MEFI workflow.",
+                    )
+                )
+                continue
+
+            constrained = tuple(
+                float(value) for value in model.nodes[element.i].xyz
+            )
+            retained = [
+                tuple(float(value) for value in model.nodes[node_tag].xyz)
+                for node_tag in (element.j, element.k, element.l)
+            ]
+            inside, nondegenerate = _point_in_triangle_xy(
+                constrained,
+                retained[0],
+                retained[1],
+                retained[2],
+            )
+            if not nondegenerate:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Embedded reinforcement",
+                        f"Embedded element {tag} uses a degenerate retained "
+                        "triangle.",
+                        "element",
+                        tag,
+                        "Choose three non-collinear host nodes.",
+                    )
+                )
+            elif not inside:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Embedded reinforcement",
+                        f"Embedded node {element.i} lies outside the retained "
+                        f"triangle {element.j}-{element.k}-{element.l}.",
+                        "element",
+                        tag,
+                        "Reassign the embedded node to a host triangle that "
+                        "contains it.",
+                    )
+                )
+
+            if (
+                element.embedded_constrain_rotation
+                and int(model.ndf) < 3
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Embedded reinforcement",
+                        f"Embedded element {tag} requests rotational coupling "
+                        f"but the model has ndf={model.ndf}.",
+                        "element",
+                        tag,
+                        "Disable rotational coupling or use ndf=3.",
+                    )
+                )
+            if element.embedded_penalty is None:
+                issues.append(
+                    ValidationIssue(
+                        "WARNING",
+                        "Embedded reinforcement",
+                        f"Embedded element {tag} uses the OpenSees default "
+                        "penalty stiffness.",
+                        "element",
+                        tag,
+                        "Prefer an explicit penalty stiffness of the same "
+                        "order as the surrounding material modulus.",
+                    )
+                )
             continue
 
         if element.element_type == "MEFI":
@@ -1020,7 +1148,11 @@ def _support_and_connectivity_checks(
 
     for element in model.elements.values():
         node_tags = element.node_tags()
-        if (
+        if element.element_type in EMBEDDED_ELEMENT_TYPES:
+            for retained in (element.j, element.k, element.l):
+                if retained is not None:
+                    connect(element.i, retained)
+        elif (
             element.element_type in SHELL_ELEMENT_TYPES
             or element.element_type == "MEFI"
         ):
