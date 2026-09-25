@@ -1181,7 +1181,7 @@ class PropertiesPanel(QWidget):
         self.result_shell_location.addItem("Bottom (-z)", "bottom")
         self.result_shell_location.setToolTip(
             "For membrane/principal Shell strain, Top/Bottom is derived "
-            "with the SARE display convention ε(z)=ε0+zκ at z=±h/2 "
+            "with OpenSees plate-fiber kinematics ε(z)=ε0−zκ at z=±h/2 "
             "using the assigned Shell section thickness."
         )
         self.result_display = QComboBox()
