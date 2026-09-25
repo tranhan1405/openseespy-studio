@@ -42,6 +42,7 @@ from ..deformed_geometry import (
 from ..model import (
     QUAD_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
+    TRUSS_ELEMENT_TYPES,
     StructuralModel,
     classify_fixity,
     shell_surface_geometry,
@@ -2181,7 +2182,7 @@ class ModelViewport(QWidget):
         return max(totals, key=lambda tag: (totals[tag], -tag))
 
     def _element_material_tag(self, element) -> int | None:
-        if element.element_type == "truss":
+        if element.element_type in TRUSS_ELEMENT_TYPES:
             return element.truss_material_tag
         if element.section_tag is None:
             return None
@@ -2249,7 +2250,7 @@ class ModelViewport(QWidget):
             if self._model_color_mode != "material":
                 return self._element_color_key(element)
 
-            if element.element_type == "truss":
+            if element.element_type in TRUSS_ELEMENT_TYPES:
                 return "material", element.truss_material_tag
             if element.section_tag is None:
                 return "material", None
@@ -8313,7 +8314,7 @@ class ModelViewport(QWidget):
             if length <= 1.0e-15:
                 continue
 
-            if element.element_type == "truss":
+            if element.element_type in TRUSS_ELEMENT_TYPES:
                 if component != "N":
                     continue
                 member_axis = member_vector / length
