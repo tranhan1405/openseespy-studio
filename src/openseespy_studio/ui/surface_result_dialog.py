@@ -55,6 +55,7 @@ class SurfaceResultDialog(QDialog):
         root.addWidget(info)
 
         form = QFormLayout()
+        self.form = form
         self.tag = QSpinBox()
         self.tag.setRange(1, 2147483647)
         self.tag.setValue(result.tag if result is not None else int(next_tag))
@@ -192,9 +193,7 @@ class SurfaceResultDialog(QDialog):
         self.component.clear()
         self.component.addItems(list(options))
         self.location.setVisible(result_type == "ShellDeformation")
-        location_label = self.layout().itemAt(1).layout().labelForField(
-            self.location
-        )
+        location_label = self.form.labelForField(self.location)
         if location_label is not None:
             location_label.setVisible(result_type == "ShellDeformation")
         index = self.component.findText(current)
