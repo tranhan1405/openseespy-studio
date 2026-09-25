@@ -20,11 +20,13 @@ SHELL_ELEMENT_TYPES = {
 }
 MEMBRANE_ELEMENT_TYPES = {"MEFI"}
 TRUSS_ELEMENT_TYPES = {"truss", "corotTruss"}
+EMBEDDED_ELEMENT_TYPES = {"ASDEmbeddedNodeElement"}
 QUAD_ELEMENT_TYPES = SHELL_ELEMENT_TYPES | MEMBRANE_ELEMENT_TYPES
 SUPPORTED_ELEMENT_TYPES = (
     FRAME_ELEMENT_TYPES
     | QUAD_ELEMENT_TYPES
     | TRUSS_ELEMENT_TYPES
+    | EMBEDDED_ELEMENT_TYPES
 )
 
 
@@ -210,6 +212,8 @@ class Element:
     shell_drilling_nl: bool = False
     mefi_widths: tuple[float, ...] = ()
     mefi_section_tags: tuple[int, ...] = ()
+    embedded_penalty: float | None = None
+    embedded_constrain_rotation: bool = False
 
     @property
     def is_shell(self) -> bool:
@@ -219,8 +223,12 @@ class Element:
     def is_quad(self) -> bool:
         return self.element_type in QUAD_ELEMENT_TYPES
 
+    @property
+    def is_embedded(self) -> bool:
+        return self.element_type in EMBEDDED_ELEMENT_TYPES
+
     def node_tags(self) -> tuple[int, ...]:
-        if self.is_quad:
+        if self.is_quad or self.is_embedded:
             if self.k is None or self.l is None:
                 return (self.i, self.j)
             return (self.i, self.j, self.k, self.l)
@@ -349,7 +357,7 @@ class Element:
                     "Shell local X vector cannot be zero."
                 )
             self.shell_local_x = values
-        if self.is_quad:
+        if self.is_quad or self.is_embedded:
             if self.k is None or self.l is None:
                 raise ValueError(
                     f"{self.element_type} requires four node tags."
@@ -363,6 +371,8 @@ class Element:
         else:
             self.k = None
             self.l = None
+
+        if not self.is_quad:
             self.shell_corotational = False
             self.shell_local_x = None
             self.shell_no_eas = False
@@ -400,7 +410,28 @@ class Element:
             self.mefi_widths = ()
             self.mefi_section_tags = ()
 
-        uses_section_reference = self.element_type not in (TRUSS_ELEMENT_TYPES | {"MEFI"})
+        self.embedded_constrain_rotation = _strict_bool(
+            self.embedded_constrain_rotation,
+            "Embedded-node rotation flag",
+        )
+        if self.embedded_penalty is not None:
+            self.embedded_penalty = float(self.embedded_penalty)
+            if (
+                not math.isfinite(self.embedded_penalty)
+                or self.embedded_penalty <= 0.0
+            ):
+                raise ValueError(
+                    "Embedded-node penalty stiffness must be finite and positive."
+                )
+        if not self.is_embedded:
+            self.embedded_penalty = None
+            self.embedded_constrain_rotation = False
+
+        uses_section_reference = self.element_type not in (
+            TRUSS_ELEMENT_TYPES
+            | EMBEDDED_ELEMENT_TYPES
+            | {"MEFI"}
+        )
         uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
         self.section_tag = (
             None
@@ -423,7 +454,7 @@ class Element:
                 else int(self.transf_tag)
             )
         )
-        if self.is_quad:
+        if self.is_quad or self.is_embedded:
             self.transf_tag = None
 
         if self.element_type in FRAME_ELEMENT_TYPES and self.integration_type not in {
@@ -586,6 +617,8 @@ class StructuralModel:
         shell_drilling_nl: bool = False,
         mefi_widths: tuple[float, ...] | list[float] = (),
         mefi_section_tags: tuple[int, ...] | list[int] = (),
+        embedded_penalty: float | None = None,
+        embedded_constrain_rotation: bool = False,
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -599,8 +632,9 @@ class StructuralModel:
             raise ValueError(f"Unsupported element type: {element_type}")
         is_shell = element_type in SHELL_ELEMENT_TYPES
         is_quad = element_type in QUAD_ELEMENT_TYPES
+        is_embedded = element_type in EMBEDDED_ELEMENT_TYPES
         raw_nodes = [i, j]
-        if is_quad:
+        if is_quad or is_embedded:
             if k is None or l is None:
                 raise ValueError(
                     f"{element_type} element {tag} requires four nodes."
@@ -609,7 +643,7 @@ class StructuralModel:
             l = _strict_int(l, "Element L-node tag")
             raw_nodes.extend([k, l])
         if len(set(raw_nodes)) != len(raw_nodes):
-            if is_quad:
+            if is_quad or is_embedded:
                 raise ValueError(
                     f"{element_type} element {tag} requires four distinct "
                     "node tags."
@@ -627,6 +661,13 @@ class StructuralModel:
             raise ValueError(
                 f"{element_type} requires a 3D/6DOF model; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if is_embedded and (
+            int(self.ndm) != 2 or int(self.ndf) not in {2, 3}
+        ):
+            raise ValueError(
+                "ASDEmbeddedNodeElement infrastructure currently supports "
+                "2D models with ndf=2 or ndf=3."
             )
         if element_type == "MEFI" and (self.ndm, self.ndf) not in {
             (2, 3), (3, 6),
@@ -682,6 +723,8 @@ class StructuralModel:
             shell_drilling_nl,
             tuple(mefi_widths),
             tuple(mefi_section_tags),
+            embedded_penalty=embedded_penalty,
+            embedded_constrain_rotation=embedded_constrain_rotation,
         )
         self.elements[tag] = ele
         return ele
@@ -1175,6 +1218,10 @@ class StructuralModel:
                     shell_drilling_nl=source.shell_drilling_nl,
                     mefi_widths=source.mefi_widths,
                     mefi_section_tags=source.mefi_section_tags,
+                    embedded_penalty=source.embedded_penalty,
+                    embedded_constrain_rotation=(
+                        source.embedded_constrain_rotation
+                    ),
                 )
                 created_elements.add(new_tag)
 
@@ -1230,6 +1277,10 @@ class StructuralModel:
                     "shell_drilling_nl": element.shell_drilling_nl,
                     "mefi_widths": list(element.mefi_widths),
                     "mefi_section_tags": list(element.mefi_section_tags),
+                    "embedded_penalty": element.embedded_penalty,
+                    "embedded_constrain_rotation": (
+                        element.embedded_constrain_rotation
+                    ),
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -1337,6 +1388,8 @@ class StructuralModel:
                 item.get("shell_drilling_nl", False),
                 tuple(item.get("mefi_widths", ())),
                 tuple(item.get("mefi_section_tags", ())),
+                item.get("embedded_penalty"),
+                item.get("embedded_constrain_rotation", False),
             )
 
         return model
