@@ -140,7 +140,8 @@ class FrictionModelDialog(_ScrollableDialog):
         self._sync_type()
         self.note.setText(
             "Friction models are reusable project properties. "
-            "TripleFrictionPendulum references three friction-model tags."
+            "flatSliderBearing and singleFPBearing reference one model; "
+            "TripleFrictionPendulum references three."
         )
 
     def _sync_type(self, *_args) -> None:
@@ -419,6 +420,274 @@ class LeadRubberXDialog(_ScrollableDialog):
             self.tag.value(),
             self.node_i.value(),
             self.node_j.value(),
+            self.group.text().strip() or "isolation",
+            params,
+        )
+
+
+class FrictionBearingDialog(_ScrollableDialog):
+    """Unified editor for OpenSees flatSliderBearing / singleFPBearing."""
+
+    FORMULATIONS = (
+        ("Flat slider bearing", "flatSliderBearing"),
+        ("Single friction pendulum", "singleFPBearing"),
+    )
+
+    def __init__(
+        self,
+        *,
+        tag: int,
+        node_i: int,
+        node_j: int,
+        ndm: int,
+        materials,
+        friction_models,
+        units=None,
+        element=None,
+        parent=None,
+    ):
+        super().__init__(
+            "Edit Friction Bearing"
+            if element is not None
+            else "Create Friction Bearing",
+            parent,
+        )
+        self.ndm = int(ndm)
+        self.units = UnitSystem.from_mapping(units)
+        p = dict(
+            getattr(element, "special_parameters", {})
+            if element is not None else {}
+        )
+        self.tag = _tag_spin(getattr(element, "tag", tag))
+        self.node_i = _tag_spin(getattr(element, "i", node_i))
+        self.node_j = _tag_spin(getattr(element, "j", node_j))
+        self.group = QLineEdit(getattr(element, "group", "isolation"))
+
+        self.kind = QComboBox()
+        for label, value in self.FORMULATIONS:
+            self.kind.addItem(label, value)
+        initial_kind = getattr(element, "element_type", "flatSliderBearing")
+        index = self.kind.findData(initial_kind)
+        if index >= 0:
+            self.kind.setCurrentIndex(index)
+
+        friction_items = [
+            (frn_tag, f"{frn_tag} - {item.name} ({item.friction_type})")
+            for frn_tag, item in sorted((friction_models or {}).items())
+        ]
+        self.friction = _combo_by_tag(
+            friction_items,
+            p.get("frn_model_tag"),
+            placeholder="Select friction model...",
+        )
+
+        material_items = [
+            (mat_tag, f"{mat_tag} - {item.name} ({item.material_type})")
+            for mat_tag, item in sorted((materials or {}).items())
+        ]
+        self.mat_p = _combo_by_tag(
+            material_items,
+            p.get("p_mat_tag"),
+            placeholder="Select axial material...",
+        )
+        self.mat_t = _combo_by_tag(
+            material_items,
+            p.get("t_mat_tag"),
+            placeholder="Select torsion material...",
+        )
+        self.mat_my = _combo_by_tag(
+            material_items,
+            p.get("my_mat_tag"),
+            placeholder="Select My material...",
+        )
+        self.mat_mz = _combo_by_tag(
+            material_items,
+            p.get("mz_mat_tag"),
+            placeholder="Select Mz material...",
+        )
+
+        self.reff = _float_spin(
+            self.units.length_from_m(float(p.get("Reff", 2.5))),
+            minimum=1.0e-15,
+            decimals=10,
+        )
+        self.k_init = _float_spin(
+            float(p.get("kInit", 2.0e7))
+            * self.units.length_to_m
+            / self.units.force_to_n,
+            minimum=1.0e-15,
+        )
+        self.shear_dist = _float_spin(
+            float(p.get("shearDist", 0.0)),
+            minimum=0.0,
+            maximum=1.0,
+        )
+        self.mass = _float_spin(
+            float(p.get("mass", 0.0)) / self.units.mass_unit_kg,
+            minimum=0.0,
+        )
+        self.do_rayleigh = QCheckBox("Include element in Rayleigh damping")
+        self.do_rayleigh.setChecked(bool(p.get("doRayleigh", False)))
+        self.max_iter = QSpinBox()
+        self.max_iter.setRange(1, 1_000_000)
+        self.max_iter.setValue(int(p.get("maxIter", 20)))
+        self.tol = _float_spin(
+            float(p.get("tol", 1.0e-8)),
+            minimum=1.0e-16,
+            decimals=14,
+        )
+
+        orientation = p.get("orientation")
+        self.custom_orientation = QCheckBox("Use explicit local x/y vectors")
+        self.custom_orientation.setChecked(orientation is not None)
+        default_orientation = (
+            (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+            if self.ndm == 3
+            else (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+        )
+        values = (
+            tuple(float(value) for value in orientation)
+            if orientation is not None
+            else default_orientation
+        )
+        self.orientation = [_float_spin(value) for value in values]
+
+        self.form.addRow("Tag:", self.tag)
+        self.form.addRow("Formulation:", self.kind)
+        self.form.addRow("Node I:", self.node_i)
+        self.form.addRow("Node J:", self.node_j)
+        self.form.addRow("Group:", self.group)
+        self.form.addRow("Friction model:", self.friction)
+        self.form.addRow(
+            f"Effective radius Reff [{self.units.length}]:",
+            self.reff,
+        )
+        self.form.addRow(
+            f"Initial shear stiffness kInit "
+            f"[{self.units.force}/{self.units.length}]:",
+            self.k_init,
+        )
+        self.form.addRow("Axial material (-P):", self.mat_p)
+        self.form.addRow("Torsion material (-T):", self.mat_t)
+        self.form.addRow("Moment-y material (-My):", self.mat_my)
+        self.form.addRow("Moment-z material (-Mz):", self.mat_mz)
+        self.form.addRow("Shear-distance ratio:", self.shear_dist)
+        self.form.addRow(
+            f"Element mass [{self.units.mass_label}]:",
+            self.mass,
+        )
+        self.form.addRow("", self.do_rayleigh)
+        self.form.addRow("Local iteration limit:", self.max_iter)
+        self.form.addRow("Local iteration tolerance:", self.tol)
+        self.form.addRow("", self.custom_orientation)
+        for label, widget in zip(
+            ("x1", "x2", "x3", "y1", "y2", "y3"),
+            self.orientation,
+        ):
+            self.form.addRow(f"Local {label}:", widget)
+
+        self.kind.currentIndexChanged.connect(self._sync_formulation)
+        self.custom_orientation.toggled.connect(self._sync_orientation)
+        self._sync_formulation()
+        self._sync_orientation(self.custom_orientation.isChecked())
+
+    @staticmethod
+    def _required(combo: QComboBox, label: str) -> int:
+        value = combo.currentData()
+        if value is None:
+            raise ValueError(f"Select {label}.")
+        return int(value)
+
+    def _sync_formulation(self, *_args) -> None:
+        single_fp = self.kind.currentData() == "singleFPBearing"
+        self.reff.setEnabled(single_fp)
+        three_d = self.ndm == 3
+        self.mat_t.setEnabled(three_d)
+        self.mat_my.setEnabled(three_d)
+        if not three_d:
+            self.mat_t.setCurrentIndex(0)
+            self.mat_my.setCurrentIndex(0)
+        self.note.setText(
+            (
+                "singleFPBearing uses a spherical sliding surface with "
+                "effective radius Reff. "
+                if single_fp
+                else "flatSliderBearing uses a flat sliding interface. "
+            )
+            + (
+                "3D/6DOF requires axial (-P), torsion (-T), My and Mz "
+                "uniaxial materials."
+                if three_d
+                else "2D/3DOF requires axial (-P) and Mz uniaxial materials."
+            )
+            + " Friction behavior comes from the selected reusable "
+            "Friction Model."
+        )
+
+    def _sync_orientation(self, checked: bool) -> None:
+        for widget in self.orientation:
+            widget.setEnabled(bool(checked))
+
+    def values(self):
+        if self.node_i.value() == self.node_j.value():
+            raise ValueError("Friction-bearing end-node tags must be different.")
+        kind = str(self.kind.currentData())
+        orientation = None
+        if self.custom_orientation.isChecked():
+            orientation = tuple(widget.value() for widget in self.orientation)
+            x = orientation[:3]
+            y = orientation[3:]
+            x_norm2 = sum(value * value for value in x)
+            y_norm2 = sum(value * value for value in y)
+            cross = (
+                x[1] * y[2] - x[2] * y[1],
+                x[2] * y[0] - x[0] * y[2],
+                x[0] * y[1] - x[1] * y[0],
+            )
+            if (
+                x_norm2 <= 1.0e-24
+                or y_norm2 <= 1.0e-24
+                or sum(value * value for value in cross)
+                <= 1.0e-16 * x_norm2 * y_norm2
+            ):
+                raise ValueError(
+                    "Local x/y vectors must be non-zero and non-parallel."
+                )
+
+        u = self.units
+        params = {
+            "frn_model_tag": self._required(
+                self.friction,
+                "friction model",
+            ),
+            "kInit": self.k_init.value() * u.force_to_n / u.length_to_m,
+            "p_mat_tag": self._required(self.mat_p, "axial material (-P)"),
+            "mz_mat_tag": self._required(self.mat_mz, "Mz material (-Mz)"),
+            "t_mat_tag": (
+                self._required(self.mat_t, "torsion material (-T)")
+                if self.ndm == 3
+                else None
+            ),
+            "my_mat_tag": (
+                self._required(self.mat_my, "My material (-My)")
+                if self.ndm == 3
+                else None
+            ),
+            "orientation": orientation,
+            "shearDist": self.shear_dist.value(),
+            "doRayleigh": self.do_rayleigh.isChecked(),
+            "mass": self.mass.value() * u.mass_unit_kg,
+            "maxIter": self.max_iter.value(),
+            "tol": self.tol.value(),
+        }
+        if kind == "singleFPBearing":
+            params["Reff"] = u.length_to_m_value(self.reff.value())
+
+        return (
+            self.tag.value(),
+            self.node_i.value(),
+            self.node_j.value(),
+            kind,
             self.group.text().strip() or "isolation",
             params,
         )
