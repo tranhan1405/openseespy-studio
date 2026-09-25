@@ -176,6 +176,110 @@ def test_rc_wall_rejects_invalid_material_input_before_mutation():
     assert project.to_dict() == before
 
 
+def test_rc_wall_hybrid_boundary_rebar_deducts_smeared_ratio():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    spec = RCWallSpec(
+        width=1220.0,
+        height=2209.8,
+        thickness=152.4,
+        boundary_width=228.6,
+        vertical_elements=7,
+        macro_fibers=8,
+        boundary_unconfined_thickness=50.8,
+        boundary_confined_thickness=101.6,
+        reinforcement_mode="hybrid",
+        boundary_bar_count=4,
+        boundary_bar_diameter=16.0,
+        boundary_truss_type="corotTruss",
+    )
+
+    result = build_rc_wall(project, spec)
+
+    bar_area = math.pi * 16.0 ** 2 / 4.0
+    discrete_area = 4.0 * bar_area
+    discrete_ratio = discrete_area / (228.6 * 152.4)
+    expected_remaining = 0.0323 - discrete_ratio
+
+    assert len(result.reinforcement_element_tags) == 14
+    assert result.boundary_discrete_rho_y == pytest.approx(discrete_ratio)
+    assert result.boundary_smeared_rho_y == pytest.approx(
+        expected_remaining
+    )
+    assert result.reinforcement_selection_name in project.selection_sets
+
+    boundary_steel = project.nd_materials[result.nd_material_tags[3]]
+    assert boundary_steel.parameters["ratio2"] == pytest.approx(
+        expected_remaining
+    )
+
+    boundary_material_tag = result.material_tags[2]
+    left_tags = result.reinforcement_element_tags[:7]
+    right_tags = result.reinforcement_element_tags[7:]
+    assert len(left_tags) == len(right_tags) == 7
+    for tag in result.reinforcement_element_tags:
+        element = project.model.elements[tag]
+        assert element.element_type == "corotTruss"
+        assert element.group == "rc-wall-rebar"
+        assert element.truss_area == pytest.approx(discrete_area)
+        assert element.truss_material_tag == boundary_material_tag
+
+    first_left = project.model.elements[left_tags[0]]
+    first_right = project.model.elements[right_tags[0]]
+    assert first_left.node_tags() == (1, 3)
+    assert first_right.node_tags() == (2, 4)
+
+
+def test_rc_wall_hybrid_rejects_discrete_steel_above_total_ratio():
+    project = ProjectDatabase()
+    before = project.to_dict()
+    spec = RCWallSpec(
+        reinforcement_mode="hybrid",
+        boundary_bar_count=20,
+        boundary_bar_diameter=0.025,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"exceeds the specified boundary rho-y",
+    ):
+        build_rc_wall(project, spec)
+
+    assert project.to_dict() == before
+
+
+def test_rc_wall_hybrid_export_contains_corot_truss():
+    project = ProjectDatabase()
+    spec = RCWallSpec(
+        reinforcement_mode="hybrid",
+        boundary_bar_count=4,
+        boundary_bar_diameter=0.016,
+    )
+    result = build_rc_wall(project, spec)
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+
+    first = result.reinforcement_element_tags[0]
+    element = project.model.elements[first]
+    assert (
+        f"ops.element('corotTruss', {first}, {element.i}, {element.j}, "
+        in script
+    )
+
+
 def test_rc_wall_builder_creates_expected_material_chain():
     project, result = _benchmark_project()
 
