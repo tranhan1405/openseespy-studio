@@ -16173,7 +16173,10 @@ class MainWindow(QMainWindow):
         )
 
     def _assign_section_to_selection(self) -> None:
-        selected_tags = self._selected_element_tags("Assign Section")
+        selected_tags = self._selected_element_tags(
+            "Assign Section",
+            create_if_missing=True,
+        )
         if selected_tags is None:
             return
         element_tags = {
