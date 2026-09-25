@@ -816,22 +816,72 @@ def _element_geometry_checks(
                     )
                 )
             elif (
-                element.element_type == "elasticBeamColumn"
+                element.element_type
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                 and section.section_type != "Elastic"
             ):
                 issues.append(
                     ValidationIssue(
                         "ERROR",
                         "Element formulation",
-                        f"elasticBeamColumn element {tag} cannot use "
-                        f"{section.section_type} section {section.tag} in the "
-                        "current 3D generator.",
+                        f"{element.element_type} element {tag} requires an "
+                        f"Elastic section; got {section.section_type} "
+                        f"section {section.tag}.",
                         "element",
                         tag,
-                        "Use an Elastic section, or switch the element to "
-                        "forceBeamColumn / dispBeamColumn for Fiber sections.",
+                        "Assign an Elastic section to this element.",
                     )
                 )
+            elif element.element_type == "dispBeamColumnInt":
+                if (int(model.ndm), int(model.ndf)) != (2, 3):
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Element formulation",
+                            f"dispBeamColumnInt element {tag} requires "
+                            "ndm=2 and ndf=3.",
+                            "element",
+                            tag,
+                            "Use this formulation only in a 2D/3DOF model.",
+                        )
+                    )
+                if section.section_type != "FiberInt":
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Element formulation",
+                            f"dispBeamColumnInt element {tag} requires a "
+                            f"FiberInt section; got {section.section_type} "
+                            f"section {section.tag}.",
+                            "element",
+                            tag,
+                            "Assign a FiberInt section.",
+                        )
+                    )
+                if element.integration_points < 1:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Beam integration",
+                            f"dispBeamColumnInt element {tag} needs at least "
+                            "1 integration point.",
+                            "element",
+                            tag,
+                            "Increase the integration-point count.",
+                        )
+                    )
+                if not 0.0 <= float(element.beam_center_ratio) <= 1.0:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Element formulation",
+                            f"dispBeamColumnInt element {tag} has cRot="
+                            f"{element.beam_center_ratio:g}; expected 0..1.",
+                            "element",
+                            tag,
+                            "Set the center-of-rotation ratio cRot in 0..1.",
+                        )
+                    )
             elif (
                 element.element_type
                 in {"forceBeamColumn", "dispBeamColumn"}
@@ -872,6 +922,39 @@ def _element_geometry_checks(
                     "element",
                     tag,
                     "Assign an existing transformation.",
+                )
+            )
+            continue
+
+        if (
+            element.element_type == "dispBeamColumnInt"
+            and transformation.transformation_type != "LinearInt"
+        ):
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Transformation",
+                    f"dispBeamColumnInt element {tag} requires a LinearInt "
+                    f"transformation; got {transformation.transformation_type}.",
+                    "element",
+                    tag,
+                    "Assign a LinearInt geometric transformation.",
+                )
+            )
+            continue
+        if (
+            element.element_type != "dispBeamColumnInt"
+            and transformation.transformation_type == "LinearInt"
+        ):
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Transformation",
+                    f"LinearInt transformation {transformation.tag} is reserved "
+                    "for dispBeamColumnInt elements.",
+                    "element",
+                    tag,
+                    "Use Linear/PDelta/Corotational for this frame formulation.",
                 )
             )
             continue
