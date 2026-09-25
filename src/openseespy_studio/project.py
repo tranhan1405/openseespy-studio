@@ -6935,7 +6935,8 @@ class ProjectDatabase:
                     element.truss_material_tag = material.tag
                 if element.element_type in BEARING_ELEMENT_TYPES:
                     for key in (
-                        "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                        "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag",
+                        "vertMatTag", "rotZMatTag", "rotXMatTag", "rotYMatTag",
                     ):
                         if element.special_parameters.get(key) == original_tag:
                             element.special_parameters[key] = material.tag
@@ -7031,7 +7032,9 @@ class ProjectDatabase:
                     int(value)
                     for key in (
                         "p_mat_tag", "t_mat_tag",
-                        "my_mat_tag", "mz_mat_tag"
+                        "my_mat_tag", "mz_mat_tag",
+                        "vertMatTag", "rotZMatTag",
+                        "rotXMatTag", "rotYMatTag",
                     )
                     for value in [element.special_parameters.get(key)]
                     if value is not None
@@ -9080,7 +9083,7 @@ class ProjectDatabase:
         element = self.model.elements[element_tag]
         self._validate_element_geometry(element)
 
-        if element.element_type in BEARING_ELEMENT_TYPES:
+        if element.element_type == "elastomericBearingPlasticity":
             referenced = {
                 int(value)
                 for key in (
@@ -9112,6 +9115,51 @@ class ProjectDatabase:
                 raise ValueError(
                     "elastomericBearingPlasticity requires a 2D/3DOF "
                     "or 3D/6DOF model."
+                )
+
+        if element.element_type == "LeadRubberX":
+            if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+                raise ValueError(
+                    "LeadRubberX requires a 3D/6DOF model."
+                )
+
+        if element.element_type == "TripleFrictionPendulum":
+            if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+                raise ValueError(
+                    "TripleFrictionPendulum requires a 3D/6DOF model."
+                )
+            material_keys = (
+                "vertMatTag", "rotZMatTag", "rotXMatTag", "rotYMatTag"
+            )
+            referenced_materials = {
+                int(element.special_parameters[key])
+                for key in material_keys
+            }
+            missing_materials = sorted(
+                tag
+                for tag in referenced_materials
+                if tag not in self.materials
+            )
+            if missing_materials:
+                raise ValueError(
+                    f"TripleFrictionPendulum element {element_tag} "
+                    "references missing uniaxial material tag(s): "
+                    + ", ".join(map(str, missing_materials))
+                )
+            referenced_friction = {
+                int(element.special_parameters[key])
+                for key in ("frnTag1", "frnTag2", "frnTag3")
+            }
+            missing_friction = sorted(
+                tag
+                for tag in referenced_friction
+                if tag not in self.friction_models
+            )
+            if missing_friction:
+                raise ValueError(
+                    f"TripleFrictionPendulum element {element_tag} "
+                    "references missing friction model tag(s): "
+                    + ", ".join(map(str, missing_friction))
                 )
 
         if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
