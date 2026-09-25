@@ -153,9 +153,10 @@ def _normalize_special_element_parameters(
             raise ValueError(
                 "CatenaryCable Nsubsteps must be at least 1."
             )
-        if int(result["massType"]) not in {0, 1, 2, 3}:
+        if int(result["massType"]) != 0:
             raise ValueError(
-                "CatenaryCable massType must be 0, 1, 2, or 3."
+                "CatenaryCable currently supports massType=0 "
+                "(lumped mass) only."
             )
         return result
 
@@ -1276,13 +1277,10 @@ class StructuralModel:
             )
         if (
             element_type == "CatenaryCable"
-            and (
-                int(self.ndm) != 3
-                or int(self.ndf) not in {3, 6}
-            )
+            and (int(self.ndm), int(self.ndf)) != (3, 3)
         ):
             raise ValueError(
-                "CatenaryCable requires ndm=3 with ndf=3 or 6; got "
+                "CatenaryCable requires ndm=3/ndf=3; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
         if (
