@@ -26887,6 +26887,13 @@ class MainWindow(QMainWindow):
             "right-back": "rc-wall-rebar-right-back-",
             "right-center": "rc-wall-rebar-right-center-",
             "web-horizontal": "rc-wall-rebar-web-horizontal-",
+            "boundary-horizontal-left": (
+                "rc-wall-rebar-boundary-horizontal-left-"
+            ),
+            "boundary-horizontal-right": (
+                "rc-wall-rebar-boundary-horizontal-right-"
+            ),
+            "web-vertical": "rc-wall-rebar-web-vertical-",
         }
         prefix = prefixes.get(target, "rc-wall-rebar")
         elements = [
@@ -28680,6 +28687,13 @@ class MainWindow(QMainWindow):
                 "right-back": "rc-wall-rebar-right-back-",
                 "right-center": "rc-wall-rebar-right-center-",
                 "web-horizontal": "rc-wall-rebar-web-horizontal-",
+                "boundary-horizontal-left": (
+                    "rc-wall-rebar-boundary-horizontal-left-"
+                ),
+                "boundary-horizontal-right": (
+                    "rc-wall-rebar-boundary-horizontal-right-"
+                ),
+                "web-vertical": "rc-wall-rebar-web-vertical-",
             }
             prefix = prefixes.get(group_key, "rc-wall-rebar")
             tags = {
