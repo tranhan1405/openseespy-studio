@@ -2287,10 +2287,11 @@ class ResultsPanel(QWidget):
                 component_combo = QComboBox()
                 component_combo.addItems(list(components))
                 component_combo.currentTextChanged.connect(
-                    lambda value, tab_title=title:
-                    self._shell_deformation_summary_component_changed(
-                        tab_title,
-                        value,
+                    lambda value, tab_title=title: (
+                        self._shell_deformation_summary_component_changed(
+                            tab_title,
+                            value,
+                        )
                     )
                 )
                 controls.addWidget(component_combo)
@@ -2300,8 +2301,9 @@ class ResultsPanel(QWidget):
                     "component on the active result scope."
                 )
                 apply_button.clicked.connect(
-                    lambda _checked=False, tab_title=title:
-                    self._display_shell_deformation_summary(tab_title)
+                    lambda _checked=False, tab_title=title: (
+                        self._display_shell_deformation_summary(tab_title)
+                    )
                 )
                 controls.addWidget(apply_button)
                 controls.addStretch(1)
