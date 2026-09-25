@@ -2277,7 +2277,6 @@ class RCWallWizard(QWizard):
             "horizontal_embedded_nodes": horizontal_embedded_nodes,
             "vertical_embedded_nodes": vertical_embedded_nodes,
             "mefi": rows,
-            "wall_elements": rows,
             "boundary_rebar": boundary_rebar,
             "horizontal_rebar": horizontal_rebar,
             "web_horizontal_rebar": web_horizontal_rebar,
@@ -2840,7 +2839,11 @@ class RCWallWizard(QWizard):
                 "<b>Model definition</b><br>"
                 f"Mode: {mode}<br>"
                 f"Formulation: {formulation}<br>"
-                f"Vertical elements: {rows}<br>"
+                + (
+                    f"Vertical MEFI elements: {rows}<br>"
+                    if formulation == "MEFI"
+                    else f"Vertical {formulation} elements: {rows}<br>"
+                )
                 f"Macro-fibers: {count} · web fiber width "
                 f"{web_width:g} {self.units.length}<br>"
                 f"Mapping: <code>{mapping}</code><br>"
