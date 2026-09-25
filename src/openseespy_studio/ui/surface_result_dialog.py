@@ -103,8 +103,9 @@ class SurfaceResultDialog(QDialog):
         self.location.addItem("Top (+z)", "top")
         self.location.addItem("Bottom (-z)", "bottom")
         self.location.setToolTip(
-            "For strain components, Top/Bottom derives ε(z)=ε0+zκ "
-            "at z=±h/2 using the Shell section thickness."
+            "For strain components, Top/Bottom follows OpenSees "
+            "plate-fiber kinematics ε(z)=ε0−zκ at z=±h/2 using the "
+            "Shell section thickness."
         )
 
         form.addRow("Tag:", self.tag)
