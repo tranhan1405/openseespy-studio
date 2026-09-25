@@ -2900,11 +2900,32 @@ class ModelViewport(QWidget):
                     start[2] -= layer_offset
                     end[2] -= layer_offset
 
-            elif group.startswith("rc-wall-rebar-web-horizontal-"):
-                tail = group.split(
-                    "rc-wall-rebar-web-horizontal-",
-                    1,
-                )[1]
+            elif (
+                group.startswith("rc-wall-rebar-web-horizontal-")
+                or group.startswith(
+                    "rc-wall-rebar-boundary-horizontal-left-"
+                )
+                or group.startswith(
+                    "rc-wall-rebar-boundary-horizontal-right-"
+                )
+            ):
+                if group.startswith("rc-wall-rebar-web-horizontal-"):
+                    tail = group.split(
+                        "rc-wall-rebar-web-horizontal-",
+                        1,
+                    )[1]
+                elif group.startswith(
+                    "rc-wall-rebar-boundary-horizontal-left-"
+                ):
+                    tail = group.split(
+                        "rc-wall-rebar-boundary-horizontal-left-",
+                        1,
+                    )[1]
+                else:
+                    tail = group.split(
+                        "rc-wall-rebar-boundary-horizontal-right-",
+                        1,
+                    )[1]
                 layer = tail.split("-", 1)[0]
                 if layer == "front":
                     start[2] += layer_offset
