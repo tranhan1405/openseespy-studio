@@ -342,7 +342,11 @@ class ElementDialog(_BaseDialog):
 
 
 class TrussDialog(_BaseDialog):
-    """Create an axial-only OpenSees Truss element."""
+    """Create or edit an axial-only OpenSees truss formulation."""
+
+    MATERIAL_TYPES = {"truss", "corotTruss"}
+    SECTION_TYPES = {"trussSection", "corotTrussSection"}
+    AXIAL_SECTION_TYPES = {"Elastic", "Fiber", "FiberInt"}
 
     def __init__(
         self,
@@ -351,26 +355,56 @@ class TrussDialog(_BaseDialog):
         node_j: int = 2,
         *,
         materials=None,
+        sections=None,
         units=None,
         default_area: float | None = None,
         new_material_callback=None,
+        new_section_callback=None,
+        element=None,
         parent=None,
     ):
-        super().__init__("Create Truss Element", parent)
+        super().__init__(
+            "Edit Truss Element" if element is not None else "Create Truss Element",
+            parent,
+        )
         self._materials = dict(materials or {})
+        self._sections = {
+            int(section_tag): section
+            for section_tag, section in dict(sections or {}).items()
+            if getattr(section, "section_type", "") in self.AXIAL_SECTION_TYPES
+        }
         self._new_material_callback = new_material_callback
+        self._new_section_callback = new_section_callback
         self.unit_system = UnitSystem.from_mapping(units)
 
-        self.tag = _tag_spin(tag)
-        self.node_i = _tag_spin(node_i)
-        self.node_j = _tag_spin(node_j)
+        self.tag = _tag_spin(getattr(element, "tag", tag))
+        if element is not None:
+            self.tag.setEnabled(False)
+        self.node_i = _tag_spin(getattr(element, "i", node_i))
+        self.node_j = _tag_spin(getattr(element, "j", node_j))
+
+        self.formulation = QComboBox()
+        self.formulation.addItem("Linear · Area + Material", "truss")
+        self.formulation.addItem(
+            "Corotational · Area + Material",
+            "corotTruss",
+        )
+        self.formulation.addItem("Linear · Section", "trussSection")
+        self.formulation.addItem(
+            "Corotational · Section",
+            "corotTrussSection",
+        )
+        initial_type = getattr(element, "element_type", "truss")
+        index = self.formulation.findData(initial_type)
+        self.formulation.setCurrentIndex(index if index >= 0 else 0)
 
         self.area = QDoubleSpinBox()
         self.area.setDecimals(9)
         self.area.setRange(1.0e-12, 1.0e18)
         if default_area is None:
             default_area = 1.0e-3 / (self.unit_system.length_to_m ** 2)
-        self.area.setValue(float(default_area))
+        element_area = float(getattr(element, "truss_area", 0.0) or 0.0)
+        self.area.setValue(element_area if element_area > 0.0 else float(default_area))
 
         self.material = QComboBox()
         self.material_new = QPushButton("New Material...")
@@ -382,28 +416,53 @@ class TrussDialog(_BaseDialog):
         material_row.setSpacing(4)
         material_row.addWidget(self.material, 1)
         material_row.addWidget(self.material_new)
-        self._refresh_material_choices()
+        self._refresh_material_choices(
+            getattr(element, "truss_material_tag", None)
+        )
+
+        self.section = QComboBox()
+        self.section_new = QPushButton("New Section...")
+        self.section_new.setEnabled(callable(self._new_section_callback))
+        self.section_new.clicked.connect(self._create_section_dependency)
+        self.section_holder = QWidget()
+        section_row = QHBoxLayout(self.section_holder)
+        section_row.setContentsMargins(0, 0, 0, 0)
+        section_row.setSpacing(4)
+        section_row.addWidget(self.section, 1)
+        section_row.addWidget(self.section_new)
+        self._refresh_section_choices(
+            getattr(element, "section_tag", None)
+        )
 
         self.group = QComboBox()
         self.group.setEditable(True)
         self.group.addItems(["truss", "brace", "tie", "bar"])
+        self.group.setCurrentText(getattr(element, "group", "truss"))
 
         self.rho = QDoubleSpinBox()
         self.rho.setDecimals(9)
         self.rho.setRange(0.0, 1.0e18)
-        self.rho.setValue(0.0)
+        self.rho.setValue(float(getattr(element, "mass_per_length", 0.0)))
 
         self.consistent_mass = QCheckBox("Use consistent mass matrix")
+        self.consistent_mass.setChecked(
+            bool(getattr(element, "consistent_mass", False))
+        )
         self.do_rayleigh = QCheckBox("Include in Rayleigh damping")
+        self.do_rayleigh.setChecked(
+            bool(getattr(element, "truss_do_rayleigh", False))
+        )
 
         self.form.addRow("Tag:", self.tag)
         self.form.addRow("Node I:", self.node_i)
         self.form.addRow("Node J:", self.node_j)
+        self.form.addRow("Formulation:", self.formulation)
         self.form.addRow(
             f"Area [{self.unit_system.length}²]:",
             self.area,
         )
         self.form.addRow("Uniaxial material:", self.material_holder)
+        self.form.addRow("Section:", self.section_holder)
         self.form.addRow("Group:", self.group)
         self.form.addRow(
             f"rho [{self.unit_system.mass_per_length_label}]:",
@@ -412,13 +471,15 @@ class TrussDialog(_BaseDialog):
         self.form.addRow("Mass:", self.consistent_mass)
         self.form.addRow("Rayleigh:", self.do_rayleigh)
 
-        note = QLabel(
-            "Truss is axial-only: it uses area + uniaxial material and "
-            "does not require a Section, geometric Transformation, or "
-            "beam Integration."
+        self.note = QLabel()
+        self.note.setWordWrap(True)
+        self.note.setStyleSheet(
+            "padding: 6px; background: #f3f6f9; color: #526476;"
         )
-        note.setWordWrap(True)
-        self.root.insertWidget(1, note)
+        self.root.insertWidget(1, self.note)
+
+        self.formulation.currentIndexChanged.connect(self._sync_formulation)
+        self._sync_formulation()
 
     def _refresh_material_choices(self, select_tag: int | None = None) -> None:
         current = self.material.currentData() if self.material.count() else None
@@ -438,6 +499,24 @@ class TrussDialog(_BaseDialog):
         elif self.material.count() == 2:
             self.material.setCurrentIndex(1)
 
+    def _refresh_section_choices(self, select_tag: int | None = None) -> None:
+        current = self.section.currentData() if self.section.count() else None
+        wanted = select_tag if select_tag is not None else current
+        self.section.clear()
+        self.section.addItem("Select Section...", None)
+        for section_tag in sorted(self._sections):
+            section = self._sections[section_tag]
+            self.section.addItem(
+                f"{section_tag} - {section.name} ({section.section_type})",
+                int(section_tag),
+            )
+        if wanted is not None:
+            index = self.section.findData(int(wanted))
+            if index >= 0:
+                self.section.setCurrentIndex(index)
+        elif self.section.count() == 2:
+            self.section.setCurrentIndex(1)
+
     def _create_material_dependency(self) -> None:
         if not callable(self._new_material_callback):
             return
@@ -447,25 +526,88 @@ class TrussDialog(_BaseDialog):
         self._materials[int(material.tag)] = material
         self._refresh_material_choices(int(material.tag))
 
-    def values(self):
-        material_tag = self.material.currentData()
-        if material_tag is None:
+    def _create_section_dependency(self) -> None:
+        if not callable(self._new_section_callback):
+            return
+        section = self._new_section_callback()
+        if section is None:
+            return
+        if getattr(section, "section_type", "") not in self.AXIAL_SECTION_TYPES:
             raise ValueError(
-                "Select a uniaxial material before creating the Truss element."
+                "TrussSection requires an Elastic, Fiber, or FiberInt section."
             )
+        self._sections[int(section.tag)] = section
+        self._refresh_section_choices(int(section.tag))
+
+    def _sync_formulation(self, *_args) -> None:
+        element_type = str(self.formulation.currentData())
+        section_based = element_type in self.SECTION_TYPES
+        self.area.setEnabled(not section_based)
+        self.material_holder.setEnabled(not section_based)
+        self.section_holder.setEnabled(section_based)
+        if section_based:
+            geometry = (
+                "corotational large-displacement"
+                if element_type == "corotTrussSection"
+                else "linear-geometry"
+            )
+            self.note.setText(
+                f"{element_type} is an axial-only {geometry} truss using "
+                "a Section response directly. Area and uniaxial material "
+                "are therefore not separate element inputs."
+            )
+        else:
+            geometry = (
+                "corotational large-displacement"
+                if element_type == "corotTruss"
+                else "linear-geometry"
+            )
+            self.note.setText(
+                f"{element_type} is an axial-only {geometry} truss using "
+                "cross-sectional area + uniaxial material. No Section or "
+                "geometric Transformation is required."
+            )
+
+    def values(self) -> dict[str, object]:
+        element_type = str(self.formulation.currentData())
         if self.node_i.value() == self.node_j.value():
             raise ValueError("Truss end nodes must be different.")
-        return (
-            self.tag.value(),
-            self.node_i.value(),
-            self.node_j.value(),
-            self.area.value(),
-            int(material_tag),
-            self.group.currentText().strip() or "truss",
-            self.rho.value(),
-            self.consistent_mass.isChecked(),
-            self.do_rayleigh.isChecked(),
-        )
+
+        material_tag = None
+        section_tag = None
+        area = 0.0
+        if element_type in self.MATERIAL_TYPES:
+            material_tag = self.material.currentData()
+            if material_tag is None:
+                raise ValueError(
+                    "Select a uniaxial material for the area/material truss."
+                )
+            area = float(self.area.value())
+        else:
+            section_tag = self.section.currentData()
+            if section_tag is None:
+                raise ValueError(
+                    "Select an Elastic, Fiber, or FiberInt section for "
+                    "the section-based truss."
+                )
+
+        return {
+            "tag": int(self.tag.value()),
+            "node_i": int(self.node_i.value()),
+            "node_j": int(self.node_j.value()),
+            "element_type": element_type,
+            "area": area,
+            "material_tag": (
+                None if material_tag is None else int(material_tag)
+            ),
+            "section_tag": (
+                None if section_tag is None else int(section_tag)
+            ),
+            "group": self.group.currentText().strip() or "truss",
+            "rho": float(self.rho.value()),
+            "consistent_mass": self.consistent_mass.isChecked(),
+            "do_rayleigh": self.do_rayleigh.isChecked(),
+        }
 
 
 class ElementFormulationDialog(_BaseDialog):
