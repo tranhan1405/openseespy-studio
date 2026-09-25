@@ -9,7 +9,7 @@ from .beam_loads import (
     resolve_self_weight_local,
 )
 from .units import UnitSystem
-from .model import SHELL_ELEMENT_TYPES, StructuralModel
+from .model import SHELL_ELEMENT_TYPES, TRUSS_ELEMENT_TYPES, StructuralModel
 from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 from .response_spectrum import build_period_grid
@@ -5388,7 +5388,7 @@ def to_openseespy(
             lines.append(args)
             continue
 
-        if e.element_type == "truss":
+        if e.element_type in TRUSS_ELEMENT_TYPES:
             if e.truss_area <= 0.0:
                 lines.append(
                     f"# ERROR: Truss element {tag} has non-positive area; "
@@ -5411,8 +5411,13 @@ def to_openseespy(
                 )
                 continue
 
+            command = (
+                "Truss"
+                if e.element_type == "truss"
+                else "corotTruss"
+            )
             args = (
-                "ops.element('Truss', "
+                f"ops.element('{command}', "
                 f"{tag}, {e.i}, {e.j}, {e.truss_area:g}, "
                 f"{e.truss_material_tag}"
             )
@@ -6063,7 +6068,7 @@ def to_openseespy(
                 truss_element_tags=sorted(
                     tag
                     for tag, element in model.elements.items()
-                    if element.element_type == "truss"
+                    if element.element_type in TRUSS_ELEMENT_TYPES
                 ),
                 shell_element_tags=shell_tags,
                 frame_history_tags=sorted(frame_history_tags),
