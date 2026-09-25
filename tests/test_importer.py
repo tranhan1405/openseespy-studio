@@ -290,6 +290,29 @@ ops.element('Truss', 9, 1, 2, 0.005, 3)
     assert 3 in result.project.materials
 
 
+def test_safe_import_preserves_corot_truss():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(1, 0.0, 0.0)
+ops.node(2, 0.0, 3.0)
+ops.uniaxialMaterial('Steel02', 3, 500.0e6, 200.0e9, 0.01, 20.0, 0.925, 0.15)
+ops.element('corotTruss', 9, 1, 2, 0.0008, 3)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="corot_truss.py",
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    element = result.project.model.elements[9]
+    assert element.element_type == "corotTruss"
+    assert element.truss_area == pytest.approx(0.0008)
+    assert element.truss_material_tag == 3
+
+
 def test_importer_rejects_frame_tag_already_used_by_connection():
     source = """
 import openseespy.opensees as ops
