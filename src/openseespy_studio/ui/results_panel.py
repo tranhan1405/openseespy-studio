@@ -2344,7 +2344,7 @@ class ResultsPanel(QWidget):
         def_host = QWidget()
         def_layout = QVBoxLayout(def_host)
         def_layout.setContentsMargins(3, 3, 3, 3)
-        self.shell_deformation_gp_table = QTableWidget(0, 10)
+        self.shell_deformation_gp_table = QTableWidget(0, 12)
         self.shell_deformation_gp_table.setHorizontalHeaderLabels(
             [
                 "Element",
@@ -2352,6 +2352,8 @@ class ResultsPanel(QWidget):
                 "Exx",
                 "Eyy",
                 "Gxy",
+                "ε1",
+                "ε2",
                 "Kxx",
                 "Kyy",
                 "Kxy",
@@ -7561,11 +7563,32 @@ class ResultsPanel(QWidget):
                     1,
                     QTableWidgetItem(str(gp_index)),
                 )
-                for component_index, value in enumerate(values):
+                principal = shell_principal_strains(values)
+                e1, e2 = principal if principal is not None else (
+                    math.nan,
+                    math.nan,
+                )
+                display_values = (
+                    values[0],
+                    values[1],
+                    values[2],
+                    e1,
+                    e2,
+                    values[3],
+                    values[4],
+                    values[5],
+                    values[6],
+                    values[7],
+                )
+                for component_index, value in enumerate(display_values):
                     self.shell_deformation_gp_table.setItem(
                         row_index,
                         component_index + 2,
-                        QTableWidgetItem(f"{value:.6g}"),
+                        QTableWidgetItem(
+                            f"{float(value):.6g}"
+                            if math.isfinite(float(value))
+                            else "-"
+                        ),
                     )
                 row_index += 1
 
