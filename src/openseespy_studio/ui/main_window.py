@@ -16363,11 +16363,11 @@ class MainWindow(QMainWindow):
         return int(node_i), int(node_j)
 
     def _create_catenary_cable(self) -> None:
-        if int(self.model.ndm) != 3 or int(self.model.ndf) not in {3, 6}:
+        if (int(self.model.ndm), int(self.model.ndf)) != (3, 3):
             QMessageBox.warning(
                 self,
                 "Create Catenary Cable",
-                "CatenaryCable requires a 3D model with ndf=3 or ndf=6.",
+                "CatenaryCable requires a 3D model with ndf=3.",
             )
             return
         nodes = self._special_default_nodes()
