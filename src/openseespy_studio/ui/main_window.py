@@ -18846,6 +18846,128 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _create_friction_model(self):
+        dialog = FrictionModelDialog(
+            next_tag=self.project.next_friction_model_tag(),
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return None
+        before = self.project.to_dict()
+        try:
+            model = dialog.friction_model()
+            self.project.add_friction_model(model)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Friction Model", str(exc))
+            return None
+        self._refresh_project_metadata(
+            f"Created {model.friction_type} friction model {model.tag}"
+        )
+        self._show_friction_model_properties(model.tag)
+        self._record_project_change(
+            f"Create friction model {model.tag}",
+            before,
+        )
+        return model
+
+    def _edit_friction_model(self, tag: int) -> None:
+        model = self.project.friction_models.get(int(tag))
+        if model is None:
+            return
+        dialog = FrictionModelDialog(
+            next_tag=model.tag,
+            units=self.project.units,
+            model=model,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.friction_model()
+            self.project.update_friction_model(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Friction Model", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Updated friction model {updated.tag}"
+        )
+        self._show_friction_model_properties(updated.tag)
+        self._record_project_change(
+            f"Edit friction model {tag}",
+            before,
+        )
+
+    def _delete_friction_model(self, tag: int) -> None:
+        model = self.project.friction_models.get(int(tag))
+        if model is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Friction Model",
+            f"Delete friction model {tag} ({model.name})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        before = self.project.to_dict()
+        try:
+            self.project.remove_friction_model(tag)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Delete Friction Model", str(exc))
+            return
+        self._refresh_project_metadata(f"Deleted friction model {tag}")
+        self._record_project_change(
+            f"Delete friction model {tag}",
+            before,
+        )
+
+    def _show_friction_model_properties(self, tag: int) -> None:
+        model = self.project.friction_models.get(int(tag))
+        if model is None:
+            return
+        p = model.parameters
+        rows = [
+            ("Tag", model.tag),
+            ("Name", model.name),
+            ("Type", model.friction_type),
+        ]
+        if model.friction_type == "Coulomb":
+            rows.append(("Friction coefficient μ", f"{float(p['mu']):g}"))
+        else:
+            unit_system = UnitSystem.from_mapping(self.project.units)
+            shown_rate = (
+                float(p["transRate"])
+                * unit_system.time_to_s
+                / unit_system.length_to_m
+            )
+            rows.extend([
+                ("Slow-velocity μ", f"{float(p['muSlow']):g}"),
+                ("Fast-velocity μ", f"{float(p['muFast']):g}"),
+                (
+                    f"Transition rate [{unit_system.time}/{unit_system.length}]",
+                    f"{shown_rate:g}",
+                ),
+            ])
+        users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type == "TripleFrictionPendulum"
+                and tag in {
+                    int(element.special_parameters[key])
+                    for key in ("frnTag1", "frnTag2", "frnTag3")
+                }
+            )
+        )
+        rows.append((
+            "Used by TFP elements",
+            ", ".join(map(str, users)) or "-",
+        ))
+        self.properties_panel.set_properties("Friction Model", rows)
+
     def _create_nd_material(self) -> None:
         dialog = NDMaterialDialog(
             next_tag=self.project.next_nd_material_tag(),
