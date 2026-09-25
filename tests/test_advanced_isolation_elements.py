@@ -70,7 +70,7 @@ def test_friction_models_round_trip_and_generation():
     script = _script(restored)
     assert "ops.frictionModel('Coulomb', 1, 0.05)" in script
     assert (
-        "ops.frictionModel('VelDependent', 2, 0.03, 0.08, 0.0025)"
+        "ops.frictionModel('VelDependent', 2, 0.03, 0.08, 2.5)"
         in script
     )
 
