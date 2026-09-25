@@ -11,6 +11,7 @@ from .model import (
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
+    SOLID_ELEMENT_TYPES,
     StructuralModel,
     Vec3,
 )
@@ -61,7 +62,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 45
+PROJECT_FORMAT_VERSION = 46
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -8581,6 +8582,14 @@ class ProjectDatabase:
 
         if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
             material_tag = element.continuum_material_tag
+            if material_tag is None or int(material_tag) not in self.nd_materials:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "an existing nDMaterial."
+                )
+
+        if element.element_type in SOLID_ELEMENT_TYPES:
+            material_tag = element.solid_material_tag
             if material_tag is None or int(material_tag) not in self.nd_materials:
                 raise ValueError(
                     f"{element.element_type} element {element_tag} requires "

@@ -13,6 +13,7 @@ from .model import (
     CONTINUUM_QUAD_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
+    SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
     StructuralModel,
 )
@@ -5432,6 +5433,38 @@ def to_openseespy(
                     f"'{e.continuum_type}', "
                     f"{e.continuum_material_tag})"
                 )
+            continue
+
+        if e.element_type in SOLID_ELEMENT_TYPES:
+            node_tags = e.node_tags()
+            if len(node_tags) != 8:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} is missing "
+                    "brick nodes; element not generated."
+                )
+                continue
+            if e.solid_material_tag is None:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} has no "
+                    "nDMaterial assigned; element not generated."
+                )
+                continue
+            if (
+                nd_materials is None
+                or int(e.solid_material_tag) not in nd_materials
+            ):
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} references "
+                    f"missing nDMaterial {e.solid_material_tag}; "
+                    "element not generated."
+                )
+                continue
+            nodes = ", ".join(str(int(value)) for value in node_tags)
+            b1, b2, b3 = e.solid_body_force
+            lines.append(
+                f"ops.element('{e.element_type}', {tag}, {nodes}, "
+                f"{e.solid_material_tag}, {b1:g}, {b2:g}, {b3:g})"
+            )
             continue
 
         if e.element_type in SHELL_ELEMENT_TYPES:

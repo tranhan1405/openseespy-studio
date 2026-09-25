@@ -82,6 +82,7 @@ from ..model import (
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
+    SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
     StructuralModel,
     classify_fixity,
@@ -181,6 +182,7 @@ from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
 from .continuum_dialog import ContinuumQuadDialog
+from .solid_dialog import SolidBrickDialog
 from .geometry_dialogs import (
     ElementDialog,
     ElementFormulationDialog,
@@ -2454,6 +2456,13 @@ class MainWindow(QMainWindow):
             "Create a FourNodeQuad, SSPquad, bbarQuad, or enhancedQuad continuum element",
         )
         self._make_action(
+            "solid_brick",
+            "3D Solid...",
+            "solid-brick",
+            self._create_solid_brick,
+            "Create an stdBrick, SSPbrick, or bbarBrick 8-node solid element",
+        )
+        self._make_action(
             "sketch_plane_offset",
             "Offset Plane...",
             "sketch-plane",
@@ -3037,6 +3046,7 @@ class MainWindow(QMainWindow):
         truss_menu.addAction(self.actions["truss_pick"])
         truss_menu.addAction(self.actions["truss_input"])
         geometry_menu.addAction(self.actions["continuum_quad"])
+        geometry_menu.addAction(self.actions["solid_brick"])
         geometry_menu.addAction(self.actions["surface_geometry"])
         geometry_menu.addSeparator()
         geometry_menu.addActions([
@@ -3614,7 +3624,12 @@ class MainWindow(QMainWindow):
             home,
             "FE Model",
             large=("node",),
-            small=("shell_input", "continuum_quad", "rc_wall_wizard"),
+            small=(
+                "shell_input",
+                "continuum_quad",
+                "solid_brick",
+                "rc_wall_wizard",
+            ),
             widgets=(frame_button, truss_button),
         )
         add_group(
@@ -5629,15 +5644,19 @@ class MainWindow(QMainWindow):
                     "shell-element"
                     if "shell" in element_type_lower
                     else (
-                        "continuum-quad"
-                        if "quad" in element_type_lower
+                        "solid-brick"
+                        if "brick" in element_type_lower
                         else (
-                            "frame"
-                            if any(
-                                token in element_type_lower
-                                for token in ("beam", "column")
+                            "continuum-quad"
+                            if "quad" in element_type_lower
+                            else (
+                                "frame"
+                                if any(
+                                    token in element_type_lower
+                                    for token in ("beam", "column")
+                                )
+                                else "element"
                             )
-                            else "element"
                         )
                     )
                 )
@@ -5884,15 +5903,19 @@ class MainWindow(QMainWindow):
                     "shell-element"
                     if "shell" in element_type_lower
                     else (
-                        "continuum-quad"
-                        if "quad" in element_type_lower
+                        "solid-brick"
+                        if "brick" in element_type_lower
                         else (
-                            "frame"
-                            if any(
-                                token in element_type_lower
-                                for token in ("beam", "column")
+                            "continuum-quad"
+                            if "quad" in element_type_lower
+                            else (
+                                "frame"
+                                if any(
+                                    token in element_type_lower
+                                    for token in ("beam", "column")
+                                )
+                                else "element"
                             )
-                            else "element"
                         )
                     )
                 )
@@ -10641,6 +10664,52 @@ class MainWindow(QMainWindow):
                         (
                             "Edit",
                             "Right-click element → Edit 2D Continuum Definition...",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in SOLID_ELEMENT_TYPES:
+                material = (
+                    self.project.nd_materials.get(
+                        int(element.solid_material_tag)
+                    )
+                    if element.solid_material_tag is not None
+                    else None
+                )
+                material_text = (
+                    f"{element.solid_material_tag} - {material.name} "
+                    f"({material.material_type})"
+                    if material is not None
+                    else (
+                        f"{element.solid_material_tag} (missing)"
+                        if element.solid_material_tag is not None
+                        else "Unassigned"
+                    )
+                )
+                b1, b2, b3 = element.solid_body_force
+                self.properties_panel.set_properties(
+                    "3D Solid Brick",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        (
+                            "Nodes",
+                            ", ".join(map(str, element.node_tags())),
+                        ),
+                        ("Topology", "8-node hexahedral solid"),
+                        ("nD Material", material_text),
+                        (
+                            "Body force",
+                            f"({float(b1):g}, {float(b2):g}, {float(b3):g})",
+                        ),
+                        ("Section", "Not used by 3D solid"),
+                        ("Transformation", "Not used by 3D solid"),
+                        ("Group", element.group),
+                        (
+                            "Edit",
+                            "Right-click element → Edit 3D Solid Definition...",
                         ),
                     ],
                     context={"kind": "element", "tag": int(tag)},
@@ -16249,6 +16318,151 @@ class MainWindow(QMainWindow):
 
         self._refresh_all(
             f"Updated {values['formulation']} continuum element {tag}"
+        )
+        self._show_entity_properties("element", tag)
+        self._record_project_change(
+            f"Edit {values['formulation']} {tag}",
+            before,
+        )
+
+    def _create_solid_brick(self) -> None:
+        """Create one direct 3-D eight-node continuum brick element."""
+        if (int(self.model.ndm), int(self.model.ndf)) != (3, 3):
+            QMessageBox.warning(
+                self,
+                "3D Solid Brick",
+                "stdBrick, SSPbrick, and bbarBrick require an OpenSees "
+                "3D/3DOF model (ndm=3, ndf=3).",
+            )
+            return
+        if not self._ensure_node_count(8, title="3D Solid Brick"):
+            return
+        if not self._ensure_prerequisite(
+            title="3D Solid Brick",
+            message=(
+                "A 3D solid element requires an nDMaterial. "
+                "Create one now?"
+            ),
+            action_label="Create nD Material Now...",
+            available=lambda: bool(self.project.nd_materials),
+            creator=self._create_nd_material,
+        ):
+            return
+
+        selected_nodes = [
+            int(tag)
+            for tag in sorted(self.selection.nodes)
+            if int(tag) in self.model.nodes
+        ]
+        dialog = SolidBrickDialog(
+            tag=self.project.next_element_tag(),
+            nodes=self.model.nodes,
+            nd_materials=self.project.nd_materials,
+            initial_nodes=selected_nodes[:8],
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "3D Solid Brick", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            if values["tag"] in self.project.connections:
+                raise ValueError(
+                    f"Element tag {values['tag']} is already used by "
+                    "a connection."
+                )
+            nodes = values["nodes"]
+            self.model.add_element(
+                values["tag"],
+                nodes[0],
+                nodes[1],
+                element_type=values["formulation"],
+                group="solid-3d",
+                k=nodes[2],
+                l=nodes[3],
+                m=nodes[4],
+                n=nodes[5],
+                p=nodes[6],
+                q=nodes[7],
+                solid_material_tag=values["material_tag"],
+                solid_body_force=values["body_force"],
+            )
+            self.project.validate_element_state(values["tag"])
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "3D Solid Brick", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Created {values['formulation']} {values['tag']}: nodes "
+            + ", ".join(map(str, values["nodes"]))
+            + " · nDMaterial "
+            + str(values["material_tag"])
+        )
+        self.selection.select("element", values["tag"], "replace")
+        self._record_project_change(
+            f"Create {values['formulation']} {values['tag']}",
+            before,
+        )
+
+    def _edit_solid_brick(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None or element.element_type not in SOLID_ELEMENT_TYPES:
+            return
+        dialog = SolidBrickDialog(
+            tag=element.tag,
+            nodes=self.model.nodes,
+            nd_materials=self.project.nd_materials,
+            element=element,
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit 3D Solid Brick", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            nodes = values["nodes"]
+            updated = type(element)(
+                tag=element.tag,
+                i=nodes[0],
+                j=nodes[1],
+                element_type=values["formulation"],
+                section_tag=None,
+                transf_tag=None,
+                group=element.group or "solid-3d",
+                k=nodes[2],
+                l=nodes[3],
+                m=nodes[4],
+                n=nodes[5],
+                p=nodes[6],
+                q=nodes[7],
+                solid_material_tag=values["material_tag"],
+                solid_body_force=values["body_force"],
+            )
+            self.model.elements[element.tag] = updated
+            self.project.validate_element_state(element.tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Edit 3D Solid Brick", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Updated {values['formulation']} solid element {tag}"
         )
         self._show_entity_properties("element", tag)
         self._record_project_change(
@@ -28970,6 +29184,8 @@ class MainWindow(QMainWindow):
             create_truss.triggered.connect(self._create_truss)
             create_shell = menu.addAction("New Shell Element...")
             create_shell.triggered.connect(self._create_shell)
+            create_solid = menu.addAction("New 3D Solid Brick...")
+            create_solid.triggered.connect(self._create_solid_brick)
             create_connection = menu.addAction(
                 "New Connection / Joint..."
             )
@@ -29001,6 +29217,8 @@ class MainWindow(QMainWindow):
             is_continuum_group = (
                 element_type in CONTINUUM_QUAD_ELEMENT_TYPES
             )
+            is_solid_group = element_type in SOLID_ELEMENT_TYPES
+            is_frame_group = element_type in FRAME_ELEMENT_TYPES
 
             if is_truss_group:
                 create = menu.addAction("New Truss...")
@@ -29011,6 +29229,9 @@ class MainWindow(QMainWindow):
             elif is_continuum_group:
                 create = menu.addAction("New 2D Continuum Quad...")
                 create.triggered.connect(self._create_continuum_quad)
+            elif is_solid_group:
+                create = menu.addAction("New 3D Solid Brick...")
+                create.triggered.connect(self._create_solid_brick)
             else:
                 create = menu.addAction("New Frame...")
                 create.triggered.connect(self._create_element)
@@ -29057,6 +29278,19 @@ class MainWindow(QMainWindow):
                             else None
                         )
                     )
+                elif is_solid_group:
+                    edit_solid = definition_menu.addAction(
+                        "Edit 3D Solid Definition..."
+                    )
+                    edit_solid.setEnabled(len(tags) == 1)
+                    edit_solid.triggered.connect(
+                        lambda checked=False,
+                        values=tuple(sorted(tags)): (
+                            self._edit_solid_brick(values[0])
+                            if len(values) == 1
+                            else None
+                        )
+                    )
                 else:
                     formulation = definition_menu.addAction(
                         "Element Formulation..."
@@ -29069,7 +29303,9 @@ class MainWindow(QMainWindow):
                     )
 
             assign = menu.addMenu("Assign")
-            assign.setEnabled(not is_continuum_group)
+            assign.setEnabled(
+                is_truss_group or is_shell_group or is_frame_group
+            )
             if is_truss_group:
                 material = assign.addAction("Material (Truss)...")
                 material.triggered.connect(
@@ -29109,7 +29345,7 @@ class MainWindow(QMainWindow):
                         )
                     )
 
-            if not is_truss_group:
+            if is_shell_group or is_frame_group:
                 load_menu = menu.addMenu("Loads")
                 if is_shell_group:
                     shell_pressure = load_menu.addAction(
@@ -29121,7 +29357,7 @@ class MainWindow(QMainWindow):
                             self._create_shell_pressure(),
                         )
                     )
-                else:
+                if is_frame_group:
                     beam_load = load_menu.addAction("Beam Load...")
                     beam_load.triggered.connect(
                         lambda checked=False, t=element_type: (
@@ -29467,6 +29703,10 @@ class MainWindow(QMainWindow):
                 element.element_type in SHELL_ELEMENT_TYPES
                 for element in selected_elements
             )
+            has_solid = any(
+                element.element_type in SOLID_ELEMENT_TYPES
+                for element in selected_elements
+            )
             has_truss_material = any(
                 element.element_type == "truss"
                 and element.truss_material_tag is not None
@@ -29487,7 +29727,11 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             if has_frame or (
                 self.model.elements[tag].element_type
-                in (SHELL_ELEMENT_TYPES | CONTINUUM_QUAD_ELEMENT_TYPES)
+                in (
+                    SHELL_ELEMENT_TYPES
+                    | CONTINUUM_QUAD_ELEMENT_TYPES
+                    | SOLID_ELEMENT_TYPES
+                )
             ):
                 definition_menu = menu.addMenu("Definition")
                 if (
@@ -29510,6 +29754,16 @@ class MainWindow(QMainWindow):
                     edit_continuum.triggered.connect(
                         lambda: self._edit_continuum_quad(tag)
                     )
+                elif (
+                    self.model.elements[tag].element_type
+                    in SOLID_ELEMENT_TYPES
+                ):
+                    edit_solid = definition_menu.addAction(
+                        "Edit 3D Solid Definition..."
+                    )
+                    edit_solid.triggered.connect(
+                        lambda: self._edit_solid_brick(tag)
+                    )
                 if has_frame:
                     formulation = definition_menu.addAction(
                         "Element Formulation..."
@@ -29519,6 +29773,7 @@ class MainWindow(QMainWindow):
                     )
 
             assign = menu.addMenu("Assign")
+            assign.setEnabled(has_truss or has_frame or has_shell)
             if has_truss:
                 material_action = assign.addAction("Material (Truss)...")
                 material_action.triggered.connect(

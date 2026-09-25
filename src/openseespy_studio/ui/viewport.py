@@ -44,6 +44,7 @@ from ..model import (
     EMBEDDED_ELEMENT_TYPES,
     QUAD_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
+    SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
     StructuralModel,
     classify_fixity,
@@ -1902,17 +1903,43 @@ class ModelViewport(QWidget):
         if self._selection_filter in {"all", "element"}:
             for tag in self._visible_element_tags():
                 element = self._model.elements[tag]
-                a = node_screen.get(element.i)
-                b = node_screen.get(element.j)
-                if a is None or b is None:
+                points = [
+                    node_screen.get(node_tag)
+                    for node_tag in element.node_tags()
+                ]
+                if not points or any(point is None for point in points):
                     continue
-                if crossing:
-                    selected = self._segment_intersects_rect(a, b, rect)
+                screen_points = [
+                    point for point in points if point is not None
+                ]
+                if len(screen_points) == 2:
+                    a, b = screen_points
+                    if crossing:
+                        selected = self._segment_intersects_rect(a, b, rect)
+                    else:
+                        selected = (
+                            self._point_inside_rect(a, rect)
+                            and self._point_inside_rect(b, rect)
+                        )
                 else:
-                    selected = (
-                        self._point_inside_rect(a, rect)
-                        and self._point_inside_rect(b, rect)
-                    )
+                    inside = [
+                        self._point_inside_rect(point, rect)
+                        for point in screen_points
+                    ]
+                    if crossing:
+                        xs = [point[0] for point in screen_points]
+                        ys = [point[1] for point in screen_points]
+                        selected = (
+                            any(inside)
+                            or (
+                                max(xs) >= rect.left()
+                                and min(xs) <= rect.right()
+                                and max(ys) >= rect.top()
+                                and min(ys) <= rect.bottom()
+                            )
+                        )
+                    else:
+                        selected = all(inside)
                 if selected:
                     elements.add(tag)
 
@@ -2241,7 +2268,9 @@ class ModelViewport(QWidget):
         if mode == "material":
             return "material", self._element_material_tag(element)
         return "uniform", (
-            "shell"
+            "solid"
+            if element.element_type in SOLID_ELEMENT_TYPES
+            else "shell"
             if element.element_type in QUAD_ELEMENT_TYPES
             else "column"
             if element.group == "column"
@@ -2260,6 +2289,8 @@ class ModelViewport(QWidget):
             return self._material_label(
                 None if value is None else int(value)
             )
+        if value == "solid":
+            return "Solid / Brick"
         if value == "shell":
             return "Shell / Surface"
         return "Column" if value == "column" else "Beam / Truss"
@@ -2279,6 +2310,8 @@ class ModelViewport(QWidget):
                     color = "#d64545"
                 elif element.group == "column":
                     color = "#687d90"
+                elif element.element_type in SOLID_ELEMENT_TYPES:
+                    color = "#91a4b2"
                 elif element.element_type in QUAD_ELEMENT_TYPES:
                     color = "#8fa3b5"
                 else:
@@ -2862,7 +2895,9 @@ class ModelViewport(QWidget):
         cell_tags: list[int] = []
         for tag in tags:
             element = model.elements.get(int(tag))
-            if element is None or element.element_type in QUAD_ELEMENT_TYPES:
+            if element is None or element.element_type in (
+                QUAD_ELEMENT_TYPES | SOLID_ELEMENT_TYPES
+            ):
                 continue
             node_i = model.nodes.get(element.i)
             node_j = model.nodes.get(element.j)
@@ -3074,6 +3109,52 @@ class ModelViewport(QWidget):
         )
         return mesh
 
+
+    @staticmethod
+    def _batched_solid_mesh(
+        model: StructuralModel,
+        tags,
+    ) -> object | None:
+        """Build eight-node brick surfaces as one pickable PolyData."""
+        points: list[tuple[float, float, float]] = []
+        faces: list[int] = []
+        cell_tags: list[int] = []
+        face_nodes = (
+            (0, 3, 2, 1),
+            (4, 5, 6, 7),
+            (0, 1, 5, 4),
+            (1, 2, 6, 5),
+            (2, 3, 7, 6),
+            (3, 0, 4, 7),
+        )
+        for tag in tags:
+            element = model.elements.get(int(tag))
+            if element is None or element.element_type not in SOLID_ELEMENT_TYPES:
+                continue
+            node_tags = element.node_tags()
+            if len(node_tags) != 8:
+                continue
+            nodes = [model.nodes.get(node_tag) for node_tag in node_tags]
+            if any(node is None for node in nodes):
+                continue
+            base = len(points)
+            points.extend(node.xyz for node in nodes if node is not None)
+            for face in face_nodes:
+                faces.extend((4, *(base + index for index in face)))
+                cell_tags.append(int(tag))
+        if not points:
+            return None
+        mesh = pv.PolyData(
+            np.asarray(points, dtype=float),
+            faces=np.asarray(faces, dtype=np.int64),
+            deep=True,
+        )
+        mesh.cell_data["element_tag"] = np.asarray(
+            cell_tags,
+            dtype=np.int64,
+        )
+        return mesh
+
     @staticmethod
     def _batched_tube_mesh(
         model: StructuralModel,
@@ -3087,7 +3168,9 @@ class ModelViewport(QWidget):
 
         for tag in tags:
             element = model.elements.get(int(tag))
-            if element is None or element.element_type in QUAD_ELEMENT_TYPES:
+            if element is None or element.element_type in (
+                QUAD_ELEMENT_TYPES | SOLID_ELEMENT_TYPES
+            ):
                 continue
             node_i = model.nodes.get(element.i)
             node_j = model.nodes.get(element.j)
@@ -3234,11 +3317,17 @@ class ModelViewport(QWidget):
             for tag in visible_tags
             if self._model.elements[tag].element_type in QUAD_ELEMENT_TYPES
         ]
+        solid_tags = [
+            tag
+            for tag in visible_tags
+            if self._model.elements[tag].element_type in SOLID_ELEMENT_TYPES
+        ]
+        surface_like_tags = set(shell_tags) | set(solid_tags)
         line_tags = [
             tag
             for tag in visible_tags
             if (
-                tag not in set(shell_tags)
+                tag not in surface_like_tags
                 and self._model.elements[tag].element_type
                 not in EMBEDDED_ELEMENT_TYPES
             )
@@ -3270,6 +3359,10 @@ class ModelViewport(QWidget):
             self._model,
             shell_tags,
         )
+        solid_mesh = self._batched_solid_mesh(
+            self._model,
+            solid_tags,
+        )
 
         reinforcement_mesh = self._batched_reinforcement_mesh(
             self._model,
@@ -3290,6 +3383,8 @@ class ModelViewport(QWidget):
                 combined["reinforcement"] = reinforcement_mesh
             if shell_mesh is not None:
                 combined["shell"] = shell_mesh
+            if solid_mesh is not None:
+                combined["solid"] = solid_mesh
             return combined
 
         if representation == "tube":
@@ -3314,6 +3409,8 @@ class ModelViewport(QWidget):
                 combined["reinforcement"] = reinforcement_mesh
             if shell_mesh is not None:
                 combined["shell"] = shell_mesh
+            if solid_mesh is not None:
+                combined["solid"] = solid_mesh
             return combined
 
         # Actual-section view remains geometry-driven for frame members.
@@ -3364,6 +3461,8 @@ class ModelViewport(QWidget):
             combined["reinforcement"] = reinforcement_mesh
         if shell_mesh is not None:
             combined["shell"] = shell_mesh
+        if solid_mesh is not None:
+            combined["solid"] = solid_mesh
         return combined
 
     def _fiber_material_points(
@@ -7145,6 +7244,38 @@ class ModelViewport(QWidget):
                 surface_meshes.append(surface)
                 continue
 
+            if element.element_type in SOLID_ELEMENT_TYPES:
+                if len(element_node_tags) != 8:
+                    continue
+                solid_points = []
+                solid_magnitudes = []
+                for node_tag in element_node_tags:
+                    point, magnitude = displaced(node_tag)
+                    solid_points.append(point)
+                    solid_magnitudes.append(magnitude)
+                faces = np.asarray(
+                    [
+                        4, 0, 3, 2, 1,
+                        4, 4, 5, 6, 7,
+                        4, 0, 1, 5, 4,
+                        4, 1, 2, 6, 5,
+                        4, 2, 3, 7, 6,
+                        4, 3, 0, 4, 7,
+                    ],
+                    dtype=np.int64,
+                )
+                surface = pv.PolyData(
+                    np.asarray(solid_points, dtype=float),
+                    faces=faces,
+                    deep=True,
+                )
+                surface.point_data["magnitude"] = np.asarray(
+                    solid_magnitudes,
+                    dtype=float,
+                )
+                surface_meshes.append(surface)
+                continue
+
             rendered_surface = False
             if representation == "actual_section":
                 section = (
@@ -8200,6 +8331,36 @@ class ModelViewport(QWidget):
                 )
                 continue
 
+            if element.element_type in SOLID_ELEMENT_TYPES:
+                if len(element_nodes) != 8:
+                    continue
+                values = [value_for(node_tag) for node_tag in element_nodes]
+                if any(value is None for value in values):
+                    continue
+                if any(
+                    self._model.nodes.get(node_tag) is None
+                    for node_tag in element_nodes
+                ):
+                    continue
+                base = len(quad_points)
+                quad_points.extend(
+                    point_for(node_tag)
+                    for node_tag in element_nodes
+                )
+                quad_scalars.extend(float(value) for value in values)
+                for face in (
+                    (0, 3, 2, 1),
+                    (4, 5, 6, 7),
+                    (0, 1, 5, 4),
+                    (1, 2, 6, 5),
+                    (2, 3, 7, 6),
+                    (3, 0, 4, 7),
+                ):
+                    quad_faces.extend(
+                        (4, *(base + index for index in face))
+                    )
+                continue
+
             if len(element_nodes) < 2:
                 continue
             node_i, node_j = element_nodes[:2]
@@ -9049,6 +9210,34 @@ class ModelViewport(QWidget):
                     element_faces.extend(
                         (4, index, index + 1, index + 2, index + 3)
                     )
+                    continue
+
+                if element.element_type in SOLID_ELEMENT_TYPES:
+                    if (
+                        len(node_tags) != 8
+                        or any(
+                            node_tag not in self._model.nodes
+                            for node_tag in node_tags
+                        )
+                    ):
+                        continue
+                    index = len(element_points)
+                    element_points.extend(
+                        self._model.nodes[node_tag].xyz
+                        for node_tag in node_tags
+                    )
+                    element_node_tags.extend(node_tags)
+                    for face in (
+                        (0, 3, 2, 1),
+                        (4, 5, 6, 7),
+                        (0, 1, 5, 4),
+                        (1, 2, 6, 5),
+                        (2, 3, 7, 6),
+                        (3, 0, 4, 7),
+                    ):
+                        element_faces.extend(
+                            (4, *(index + offset for offset in face))
+                        )
                     continue
 
                 if (

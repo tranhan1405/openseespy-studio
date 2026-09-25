@@ -25,6 +25,7 @@ CONTINUUM_QUAD_ELEMENT_TYPES = {
     "bbarQuad",
     "enhancedQuad",
 }
+SOLID_ELEMENT_TYPES = {"stdBrick", "SSPbrick", "bbarBrick"}
 TRUSS_ELEMENT_TYPES = {"truss", "corotTruss"}
 EMBEDDED_ELEMENT_TYPES = {"ASDEmbeddedNodeElement"}
 QUAD_ELEMENT_TYPES = (
@@ -35,6 +36,7 @@ QUAD_ELEMENT_TYPES = (
 SUPPORTED_ELEMENT_TYPES = (
     FRAME_ELEMENT_TYPES
     | QUAD_ELEMENT_TYPES
+    | SOLID_ELEMENT_TYPES
     | TRUSS_ELEMENT_TYPES
     | EMBEDDED_ELEMENT_TYPES
 )
@@ -230,6 +232,12 @@ class Element:
     continuum_pressure: float = 0.0
     continuum_density: float = 0.0
     continuum_body_force: tuple[float, float] = (0.0, 0.0)
+    m: int | None = None
+    n: int | None = None
+    p: int | None = None
+    q: int | None = None
+    solid_material_tag: int | None = None
+    solid_body_force: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
     @property
     def is_shell(self) -> bool:
@@ -247,7 +255,20 @@ class Element:
     def is_continuum_quad(self) -> bool:
         return self.element_type in CONTINUUM_QUAD_ELEMENT_TYPES
 
+    @property
+    def is_solid(self) -> bool:
+        return self.element_type in SOLID_ELEMENT_TYPES
+
     def node_tags(self) -> tuple[int, ...]:
+        if self.is_solid:
+            tail = (self.k, self.l, self.m, self.n, self.p, self.q)
+            if any(value is None for value in tail):
+                return (self.i, self.j)
+            return (
+                self.i,
+                self.j,
+                *(int(value) for value in tail if value is not None),
+            )
         if self.is_quad or self.is_embedded:
             if self.k is None or self.l is None:
                 return (self.i, self.j)
@@ -377,7 +398,23 @@ class Element:
                     "Shell local X vector cannot be zero."
                 )
             self.shell_local_x = values
-        if self.is_quad or self.is_embedded:
+        if self.is_solid:
+            tail = (self.k, self.l, self.m, self.n, self.p, self.q)
+            if any(value is None for value in tail):
+                raise ValueError(
+                    f"{self.element_type} requires eight node tags."
+                )
+            self.k = _strict_int(self.k, "Element K-node tag")
+            self.l = _strict_int(self.l, "Element L-node tag")
+            self.m = _strict_int(self.m, "Element M-node tag")
+            self.n = _strict_int(self.n, "Element N-node tag")
+            self.p = _strict_int(self.p, "Element P-node tag")
+            self.q = _strict_int(self.q, "Element Q-node tag")
+            if len(set(self.node_tags())) != 8:
+                raise ValueError(
+                    f"{self.element_type} requires eight distinct node tags."
+                )
+        elif self.is_quad or self.is_embedded:
             if self.k is None or self.l is None:
                 raise ValueError(
                     f"{self.element_type} requires four node tags."
@@ -388,9 +425,17 @@ class Element:
                 raise ValueError(
                     f"{self.element_type} requires four distinct node tags."
                 )
+            self.m = None
+            self.n = None
+            self.p = None
+            self.q = None
         else:
             self.k = None
             self.l = None
+            self.m = None
+            self.n = None
+            self.p = None
+            self.q = None
 
         if not self.is_shell:
             self.shell_corotational = False
@@ -513,10 +558,38 @@ class Element:
             self.continuum_density = 0.0
             self.continuum_body_force = (0.0, 0.0)
 
+        self.solid_body_force = tuple(
+            float(value) for value in self.solid_body_force
+        )
+        if self.is_solid:
+            if self.solid_material_tag is None:
+                raise ValueError(
+                    f"{self.element_type} requires an nDMaterial tag."
+                )
+            self.solid_material_tag = _strict_int(
+                self.solid_material_tag,
+                "3D solid nDMaterial tag",
+            )
+            if self.solid_material_tag <= 0:
+                raise ValueError(
+                    "3D solid nDMaterial tag must be positive."
+                )
+            if len(self.solid_body_force) != 3 or any(
+                not math.isfinite(value)
+                for value in self.solid_body_force
+            ):
+                raise ValueError(
+                    "3D solid body force needs three finite values."
+                )
+        else:
+            self.solid_material_tag = None
+            self.solid_body_force = (0.0, 0.0, 0.0)
+
         uses_section_reference = self.element_type not in (
             TRUSS_ELEMENT_TYPES
             | EMBEDDED_ELEMENT_TYPES
             | CONTINUUM_QUAD_ELEMENT_TYPES
+            | SOLID_ELEMENT_TYPES
             | {"MEFI"}
         )
         uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
@@ -541,7 +614,7 @@ class Element:
                 else int(self.transf_tag)
             )
         )
-        if self.is_quad or self.is_embedded:
+        if self.is_quad or self.is_embedded or self.is_solid:
             self.transf_tag = None
 
         if self.element_type in FRAME_ELEMENT_TYPES and self.integration_type not in {
@@ -712,6 +785,14 @@ class StructuralModel:
         continuum_pressure: float = 0.0,
         continuum_density: float = 0.0,
         continuum_body_force: tuple[float, float] | list[float] = (0.0, 0.0),
+        m: int | None = None,
+        n: int | None = None,
+        p: int | None = None,
+        q: int | None = None,
+        solid_material_tag: int | None = None,
+        solid_body_force: tuple[float, float, float] | list[float] = (
+            0.0, 0.0, 0.0
+        ),
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -726,8 +807,22 @@ class StructuralModel:
         is_shell = element_type in SHELL_ELEMENT_TYPES
         is_quad = element_type in QUAD_ELEMENT_TYPES
         is_embedded = element_type in EMBEDDED_ELEMENT_TYPES
+        is_solid = element_type in SOLID_ELEMENT_TYPES
         raw_nodes = [i, j]
-        if is_quad or is_embedded:
+        if is_solid:
+            tail = (k, l, m, n, p, q)
+            if any(value is None for value in tail):
+                raise ValueError(
+                    f"{element_type} element {tag} requires eight nodes."
+                )
+            k = _strict_int(k, "Element K-node tag")
+            l = _strict_int(l, "Element L-node tag")
+            m = _strict_int(m, "Element M-node tag")
+            n = _strict_int(n, "Element N-node tag")
+            p = _strict_int(p, "Element P-node tag")
+            q = _strict_int(q, "Element Q-node tag")
+            raw_nodes.extend([k, l, m, n, p, q])
+        elif is_quad or is_embedded:
             if k is None or l is None:
                 raise ValueError(
                     f"{element_type} element {tag} requires four nodes."
@@ -736,6 +831,11 @@ class StructuralModel:
             l = _strict_int(l, "Element L-node tag")
             raw_nodes.extend([k, l])
         if len(set(raw_nodes)) != len(raw_nodes):
+            if is_solid:
+                raise ValueError(
+                    f"{element_type} element {tag} requires eight distinct "
+                    "node tags."
+                )
             if is_quad or is_embedded:
                 raise ValueError(
                     f"{element_type} element {tag} requires four distinct "
@@ -755,6 +855,11 @@ class StructuralModel:
                 f"{element_type} requires a 3D/6DOF model; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
+        if is_solid and (self.ndm, self.ndf) != (3, 3):
+            raise ValueError(
+                f"{element_type} requires ndm=3/ndf=3; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
         if is_embedded and (
             int(self.ndm) != 2 or int(self.ndf) not in {2, 3}
         ):
@@ -770,6 +875,54 @@ class StructuralModel:
                 f"{element_type} requires ndm=2/ndf=2; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
+        if is_solid:
+            points = [
+                self.nodes[node_tag].xyz
+                for node_tag in (i, j, k, l, m, n, p, q)
+            ]
+            natural = (
+                (-1.0, -1.0, -1.0),
+                (1.0, -1.0, -1.0),
+                (1.0, 1.0, -1.0),
+                (-1.0, 1.0, -1.0),
+                (-1.0, -1.0, 1.0),
+                (1.0, -1.0, 1.0),
+                (1.0, 1.0, 1.0),
+                (-1.0, 1.0, 1.0),
+            )
+            jacobian = [[0.0] * 3 for _ in range(3)]
+            for point, signs in zip(points, natural):
+                for row in range(3):
+                    for col in range(3):
+                        jacobian[row][col] += (
+                            float(point[row]) * signs[col] / 8.0
+                        )
+            det_j = (
+                jacobian[0][0] * (
+                    jacobian[1][1] * jacobian[2][2]
+                    - jacobian[1][2] * jacobian[2][1]
+                )
+                - jacobian[0][1] * (
+                    jacobian[1][0] * jacobian[2][2]
+                    - jacobian[1][2] * jacobian[2][0]
+                )
+                + jacobian[0][2] * (
+                    jacobian[1][0] * jacobian[2][1]
+                    - jacobian[1][1] * jacobian[2][0]
+                )
+            )
+            spans = [
+                max(float(point[axis]) for point in points)
+                - min(float(point[axis]) for point in points)
+                for axis in range(3)
+            ]
+            scale = max(max(spans), 1.0)
+            if det_j <= scale ** 3 * 1.0e-12:
+                raise ValueError(
+                    f"{element_type} requires a non-degenerate, positively "
+                    "oriented eight-node brick ordering."
+                )
+
         if element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
             points = [
                 self.nodes[node_tag].xyz
@@ -860,6 +1013,12 @@ class StructuralModel:
             continuum_pressure=continuum_pressure,
             continuum_density=continuum_density,
             continuum_body_force=tuple(continuum_body_force),
+            m=m,
+            n=n,
+            p=p,
+            q=q,
+            solid_material_tag=solid_material_tag,
+            solid_body_force=tuple(solid_body_force),
         )
         self.elements[tag] = ele
         return ele
@@ -1363,6 +1522,28 @@ class StructuralModel:
                     continuum_pressure=source.continuum_pressure,
                     continuum_density=source.continuum_density,
                     continuum_body_force=source.continuum_body_force,
+                    m=(
+                        node_map[source.m]
+                        if source.m is not None
+                        else None
+                    ),
+                    n=(
+                        node_map[source.n]
+                        if source.n is not None
+                        else None
+                    ),
+                    p=(
+                        node_map[source.p]
+                        if source.p is not None
+                        else None
+                    ),
+                    q=(
+                        node_map[source.q]
+                        if source.q is not None
+                        else None
+                    ),
+                    solid_material_tag=source.solid_material_tag,
+                    solid_body_force=source.solid_body_force,
                 )
                 created_elements.add(new_tag)
 
@@ -1428,6 +1609,12 @@ class StructuralModel:
                     "continuum_pressure": element.continuum_pressure,
                     "continuum_density": element.continuum_density,
                     "continuum_body_force": list(element.continuum_body_force),
+                    "m": element.m,
+                    "n": element.n,
+                    "p": element.p,
+                    "q": element.q,
+                    "solid_material_tag": element.solid_material_tag,
+                    "solid_body_force": list(element.solid_body_force),
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -1543,6 +1730,14 @@ class StructuralModel:
                 float(item.get("continuum_pressure", 0.0)),
                 float(item.get("continuum_density", 0.0)),
                 tuple(item.get("continuum_body_force", (0.0, 0.0))),
+                m=item.get("m"),
+                n=item.get("n"),
+                p=item.get("p"),
+                q=item.get("q"),
+                solid_material_tag=item.get("solid_material_tag"),
+                solid_body_force=tuple(
+                    item.get("solid_body_force", (0.0, 0.0, 0.0))
+                ),
             )
 
         return model
