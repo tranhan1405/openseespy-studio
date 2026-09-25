@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 import math
 
+from .material_library import load_verified_material_library
 from .project import (
     MaterialData,
     NDMaterialData,
@@ -37,6 +38,8 @@ class RCWallSpec:
     macro_shear_material_tag: int | None = None
     macro_web_fsam_tag: int | None = None
     macro_boundary_fsam_tag: int | None = None
+    macro_thick_mod: float = 0.63
+    macro_poisson: float = 0.25
 
     # Benchmark-inspired constitutive inputs, stored in SI stress units.
     steel_E: float = 200.0e9
@@ -156,6 +159,97 @@ def _next_tags(store: dict[int, object], count: int) -> list[int]:
             tags.append(candidate)
         candidate += 1
     return tags
+
+
+_RW_A20_LIBRARY_RECORDS = {
+    "steel_x": "opensees-mefi-rwa20-steel-x-steel02",
+    "steel_y_web": "opensees-mefi-rwa20-steel-y-web-steel02",
+    "steel_y_boundary": "opensees-mefi-rwa20-steel-y-boundary-steel02",
+    "concrete_web": "opensees-mefi-rwa20-unconfined-concrete02",
+    "concrete_boundary": "opensees-mefi-rwa20-confined-concrete02",
+}
+
+
+def _rw_a20_source_metadata(
+    role: str,
+    parameters: dict[str, float],
+) -> dict[str, object]:
+    """Attach verified RW-A20 provenance, marking user edits explicitly."""
+    record_id = _RW_A20_LIBRARY_RECORDS[str(role)]
+    record = next(
+        (
+            item
+            for item in load_verified_material_library()
+            if item.id == record_id
+        ),
+        None,
+    )
+    if record is None:
+        return {}
+    source = record.source_metadata()
+    modified = [
+        key
+        for key, expected in record.parameters_si.items()
+        if (
+            key not in parameters
+            or not math.isclose(
+                float(parameters[key]),
+                float(expected),
+                rel_tol=1.0e-9,
+                abs_tol=max(1.0e-12, abs(float(expected)) * 1.0e-12),
+            )
+        )
+    ]
+    if modified:
+        source["status"] = "modified_from_verified"
+        source["modified_parameters"] = modified
+    return source
+
+
+def _rw_a20_steel02_parameters(
+    *,
+    fy: float,
+    e0: float,
+    b: float,
+) -> dict[str, float]:
+    return {
+        "Fy": float(fy),
+        "E0": float(e0),
+        "b": float(b),
+        "R0": 20.0,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.0,
+        "a2": 1.0,
+        "a3": 0.0,
+        "a4": 1.0,
+    }
+
+
+def _rw_a20_concrete02_parameters(
+    spec: RCWallSpec,
+    *,
+    boundary: bool,
+) -> dict[str, float]:
+    if boundary:
+        return {
+            "fpc": float(spec.concrete_fc_boundary),
+            "epsc0": float(spec.concrete_eps_boundary),
+            "fpcu": float(spec.concrete_fcu_boundary),
+            "epsU": float(spec.concrete_epsu_boundary),
+            "lambda": float(spec.concrete_lambda),
+            "ft": float(spec.concrete_ft),
+            "Ets": float(spec.concrete_ets_boundary),
+        }
+    return {
+        "fpc": float(spec.concrete_fc_web),
+        "epsc0": float(spec.concrete_eps_web),
+        "fpcu": float(spec.concrete_fcu_web),
+        "epsU": float(spec.concrete_epsu_web),
+        "lambda": float(spec.concrete_lambda),
+        "ft": float(spec.concrete_ft),
+        "Ets": float(spec.concrete_ets_web),
+    }
 
 
 def _single_bar_area(diameter: float) -> float:
@@ -1029,22 +1123,34 @@ def build_rc_wall_macro_2d(
 
         created = _next_tags(project.materials, 4)
         web_steel, boundary_steel, web_concrete, boundary_concrete = created
-        steel_common = {
-            "E0": float(spec.steel_E),
-            "R0": 20.0,
-            "cR1": 0.925,
-            "cR2": 0.15,
-        }
+        web_steel_parameters = _rw_a20_steel02_parameters(
+            fy=spec.steel_fy_web,
+            e0=spec.steel_E,
+            b=spec.steel_by_web,
+        )
+        boundary_steel_parameters = _rw_a20_steel02_parameters(
+            fy=spec.steel_fy_boundary,
+            e0=spec.steel_E,
+            b=spec.steel_by_boundary,
+        )
+        web_concrete_parameters = _rw_a20_concrete02_parameters(
+            spec,
+            boundary=False,
+        )
+        boundary_concrete_parameters = _rw_a20_concrete02_parameters(
+            spec,
+            boundary=True,
+        )
         project.add_material(
             MaterialData(
                 web_steel,
                 f"{spec.name} · MVLEM Steel Web",
                 "Steel02",
-                parameters={
-                    **steel_common,
-                    "Fy": float(spec.steel_fy_web),
-                    "b": float(spec.steel_by_web),
-                },
+                parameters=web_steel_parameters,
+                source=_rw_a20_source_metadata(
+                    "steel_y_web",
+                    web_steel_parameters,
+                ),
             )
         )
         project.add_material(
@@ -1052,11 +1158,11 @@ def build_rc_wall_macro_2d(
                 boundary_steel,
                 f"{spec.name} · MVLEM Steel Boundary",
                 "Steel02",
-                parameters={
-                    **steel_common,
-                    "Fy": float(spec.steel_fy_boundary),
-                    "b": float(spec.steel_by_boundary),
-                },
+                parameters=boundary_steel_parameters,
+                source=_rw_a20_source_metadata(
+                    "steel_y_boundary",
+                    boundary_steel_parameters,
+                ),
             )
         )
         project.add_material(
@@ -1064,15 +1170,11 @@ def build_rc_wall_macro_2d(
                 web_concrete,
                 f"{spec.name} · MVLEM Concrete Web",
                 "Concrete02",
-                parameters={
-                    "fpc": float(spec.concrete_fc_web),
-                    "epsc0": float(spec.concrete_eps_web),
-                    "fpcu": float(spec.concrete_fcu_web),
-                    "epsU": float(spec.concrete_epsu_web),
-                    "lambda": float(spec.concrete_lambda),
-                    "ft": float(spec.concrete_ft),
-                    "Ets": float(spec.concrete_ets_web),
-                },
+                parameters=web_concrete_parameters,
+                source=_rw_a20_source_metadata(
+                    "concrete_web",
+                    web_concrete_parameters,
+                ),
             )
         )
         project.add_material(
@@ -1080,15 +1182,11 @@ def build_rc_wall_macro_2d(
                 boundary_concrete,
                 f"{spec.name} · MVLEM Concrete Boundary",
                 "Concrete02",
-                parameters={
-                    "fpc": float(spec.concrete_fc_boundary),
-                    "epsc0": float(spec.concrete_eps_boundary),
-                    "fpcu": float(spec.concrete_fcu_boundary),
-                    "epsU": float(spec.concrete_epsu_boundary),
-                    "lambda": float(spec.concrete_lambda),
-                    "ft": float(spec.concrete_ft),
-                    "Ets": float(spec.concrete_ets_boundary),
-                },
+                parameters=boundary_concrete_parameters,
+                source=_rw_a20_source_metadata(
+                    "concrete_boundary",
+                    boundary_concrete_parameters,
+                ),
             )
         )
         material_tags = list(created)
@@ -1252,22 +1350,36 @@ def build_rc_wall(
     material_tags = _next_tags(project.materials, 5)
     sx, syw, syb, c_web, c_bound = material_tags
 
-    steel_common = {
-        "E0": float(spec.steel_E),
-        "R0": 20.0,
-        "cR1": 0.925,
-        "cR2": 0.15,
-    }
+    sx_parameters = _rw_a20_steel02_parameters(
+        fy=spec.steel_fx,
+        e0=spec.steel_E,
+        b=spec.steel_bx,
+    )
+    syw_parameters = _rw_a20_steel02_parameters(
+        fy=spec.steel_fy_web,
+        e0=spec.steel_E,
+        b=spec.steel_by_web,
+    )
+    syb_parameters = _rw_a20_steel02_parameters(
+        fy=spec.steel_fy_boundary,
+        e0=spec.steel_E,
+        b=spec.steel_by_boundary,
+    )
+    web_concrete_parameters = _rw_a20_concrete02_parameters(
+        spec,
+        boundary=False,
+    )
+    boundary_concrete_parameters = _rw_a20_concrete02_parameters(
+        spec,
+        boundary=True,
+    )
     project.add_material(
         MaterialData(
             sx,
             f"{spec.name} · Steel X",
             "Steel02",
-            parameters={
-                **steel_common,
-                "Fy": float(spec.steel_fx),
-                "b": float(spec.steel_bx),
-            },
+            parameters=sx_parameters,
+            source=_rw_a20_source_metadata("steel_x", sx_parameters),
         )
     )
     project.add_material(
@@ -1275,11 +1387,8 @@ def build_rc_wall(
             syw,
             f"{spec.name} · Steel Y Web",
             "Steel02",
-            parameters={
-                **steel_common,
-                "Fy": float(spec.steel_fy_web),
-                "b": float(spec.steel_by_web),
-            },
+            parameters=syw_parameters,
+            source=_rw_a20_source_metadata("steel_y_web", syw_parameters),
         )
     )
     project.add_material(
@@ -1287,11 +1396,11 @@ def build_rc_wall(
             syb,
             f"{spec.name} · Steel Y Boundary",
             "Steel02",
-            parameters={
-                **steel_common,
-                "Fy": float(spec.steel_fy_boundary),
-                "b": float(spec.steel_by_boundary),
-            },
+            parameters=syb_parameters,
+            source=_rw_a20_source_metadata(
+                "steel_y_boundary",
+                syb_parameters,
+            ),
         )
     )
     project.add_material(
@@ -1299,15 +1408,11 @@ def build_rc_wall(
             c_web,
             f"{spec.name} · Concrete Web",
             "Concrete02",
-            parameters={
-                "fpc": float(spec.concrete_fc_web),
-                "epsc0": float(spec.concrete_eps_web),
-                "fpcu": float(spec.concrete_fcu_web),
-                "epsU": float(spec.concrete_epsu_web),
-                "lambda": float(spec.concrete_lambda),
-                "ft": float(spec.concrete_ft),
-                "Ets": float(spec.concrete_ets_web),
-            },
+            parameters=web_concrete_parameters,
+            source=_rw_a20_source_metadata(
+                "concrete_web",
+                web_concrete_parameters,
+            ),
         )
     )
     project.add_material(
@@ -1315,15 +1420,11 @@ def build_rc_wall(
             c_bound,
             f"{spec.name} · Concrete Boundary",
             "Concrete02",
-            parameters={
-                "fpc": float(spec.concrete_fc_boundary),
-                "epsc0": float(spec.concrete_eps_boundary),
-                "fpcu": float(spec.concrete_fcu_boundary),
-                "epsU": float(spec.concrete_epsu_boundary),
-                "lambda": float(spec.concrete_lambda),
-                "ft": float(spec.concrete_ft),
-                "Ets": float(spec.concrete_ets_boundary),
-            },
+            parameters=boundary_concrete_parameters,
+            source=_rw_a20_source_metadata(
+                "concrete_boundary",
+                boundary_concrete_parameters,
+            ),
         )
     )
 
