@@ -2313,6 +2313,9 @@ class ResultsPanel(QWidget):
         self.shell_strain_component.addItem("Gxy", "Gxy")
         self.shell_strain_component.addItem("ε1 (max principal)", "E1")
         self.shell_strain_component.addItem("ε2 (min principal)", "E2")
+        self.shell_strain_component.currentIndexChanged.connect(
+            self._shell_strain_controls_changed
+        )
         strain_controls.addWidget(self.shell_strain_component)
 
         strain_controls.addWidget(QLabel("Location:"))
@@ -2323,6 +2326,9 @@ class ResultsPanel(QWidget):
         self.shell_strain_location.setToolTip(
             "Top/Bottom strains are derived from membrane strain + z × "
             "curvature using the assigned Shell section thickness."
+        )
+        self.shell_strain_location.currentIndexChanged.connect(
+            self._shell_strain_controls_changed
         )
         strain_controls.addWidget(self.shell_strain_location)
 
@@ -2408,11 +2414,33 @@ class ResultsPanel(QWidget):
 
 
     def _display_shell_strain(self) -> None:
+        component = str(self.shell_strain_component.currentData())
+        location = str(self.shell_strain_location.currentData())
+        scope = sorted(self._active_shell_element_scope)
+        if (
+            self._active_solution_kind == "ShellDeformation"
+            and self._motion_display_frame_count > 0
+        ):
+            source_index = self._motion_source_index(
+                self._motion_frame_index
+            )
+            self.shell_deformation_frame_requested.emit(
+                int(source_index),
+                component,
+                location,
+                scope,
+            )
+            return
         self.shell_deformation_requested.emit(
-            str(self.shell_strain_component.currentData()),
-            str(self.shell_strain_location.currentData()),
-            sorted(self._active_shell_element_scope),
+            component,
+            location,
+            scope,
         )
+
+    def _shell_strain_controls_changed(self, *_args) -> None:
+        if self._active_solution_kind != "ShellDeformation":
+            return
+        self._display_shell_strain()
 
     def _display_shell_displacement(self) -> None:
         self.shell_displacement_requested.emit(
