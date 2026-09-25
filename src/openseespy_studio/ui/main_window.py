@@ -11178,7 +11178,12 @@ class MainWindow(QMainWindow):
                             f"Force tolerance [{unit_system.force}]",
                             f"{unit_system.force_from_n(float(p['fTol'])):g}",
                         ),
-                        ("Initially active", "Yes" if int(p["cFlag"]) else "No"),
+                        (
+                            "Initial contact state",
+                            "Open / no contact assumed"
+                            if int(p["cFlag"])
+                            else "Contact assumed",
+                        ),
                     ])
                     if element.element_type == "BeamContact2D":
                         rows.append((
