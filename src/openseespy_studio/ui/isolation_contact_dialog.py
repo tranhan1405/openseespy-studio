@@ -644,6 +644,7 @@ class ContactElementDialog(_ScrollableDialog):
         nd2 = "ContactMaterial2D"
         nd3 = "ContactMaterial3D"
         self.nd_material = QComboBox()
+        self.nd_material.addItem("Select contact material...", None)
         for nd_tag, mat in sorted(self.nd_materials.items()):
             if mat.material_type in {nd2, nd3}:
                 self.nd_material.addItem(
@@ -724,26 +725,119 @@ class ContactElementDialog(_ScrollableDialog):
         self.kind.currentIndexChanged.connect(self._sync_kind)
         self.auto_lambda.toggled.connect(self._sync_kind)
         self._sync_kind()
-        self.note.setText(
-            "Contact/interface elements are FE elements, not FEWIZ Connection "
-            "objects. BeamContact uses mixed node DOFs: 2D masters 3DOF with "
-            "2DOF contact/Lagrange nodes; 3D masters 6DOF with 3DOF "
-            "contact/Lagrange nodes."
-        )
 
-    def _fill_node_combo(self, combo: QComboBox):
+    def _fill_node_combo(
+        self,
+        combo: QComboBox,
+        *,
+        allowed_ndf: int | None = None,
+    ):
         combo.addItem("Select node...", None)
         for tag, node in sorted(self.nodes.items()):
+            if allowed_ndf is not None and int(node.ndf) != int(allowed_ndf):
+                continue
             combo.addItem(
                 f"{tag} · ndf={int(node.ndf)} · "
                 f"({node.xyz[0]:g}, {node.xyz[1]:g}, {node.xyz[2]:g})",
                 int(tag),
             )
 
+    def _refilter_node_combo(
+        self,
+        combo: QComboBox,
+        *,
+        allowed_ndf: int,
+    ) -> None:
+        selected = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        self._fill_node_combo(combo, allowed_ndf=allowed_ndf)
+        if selected is not None:
+            index = combo.findData(int(selected))
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+
+    def _refilter_nd_materials(self, kind: str) -> None:
+        selected = self.nd_material.currentData()
+        expected = (
+            "ContactMaterial2D"
+            if kind.endswith("2D")
+            else "ContactMaterial3D"
+        )
+        self.nd_material.blockSignals(True)
+        self.nd_material.clear()
+        self.nd_material.addItem(f"Select {expected}...", None)
+        for nd_tag, material in sorted(self.nd_materials.items()):
+            if material.material_type != expected:
+                continue
+            self.nd_material.addItem(
+                f"{nd_tag} - {material.name} ({material.material_type})",
+                int(nd_tag),
+            )
+        if selected is not None:
+            index = self.nd_material.findData(int(selected))
+            if index >= 0:
+                self.nd_material.setCurrentIndex(index)
+        self.nd_material.blockSignals(False)
+
     def _sync_kind(self, *_args):
         kind = str(self.kind.currentData())
         beam = kind.startswith("BeamContact")
         is2d = kind.endswith("2D")
+
+        if beam:
+            master_ndf = 3 if is2d else 6
+            contact_ndf = 2 if is2d else 3
+            self._refilter_node_combo(
+                self.node_i,
+                allowed_ndf=master_ndf,
+            )
+            self._refilter_node_combo(
+                self.node_j,
+                allowed_ndf=master_ndf,
+            )
+            self._refilter_node_combo(
+                self.node_k,
+                allowed_ndf=contact_ndf,
+            )
+            self._refilter_node_combo(
+                self.node_l,
+                allowed_ndf=contact_ndf,
+            )
+            self._refilter_nd_materials(kind)
+            self.note.setText(
+                f"{kind} requires master nodes with ndf={master_ndf} and "
+                f"contact/Lagrange nodes with ndf={contact_ndf}. "
+                "Only compatible nodes and contact nD materials are shown. "
+                "Auto Lagrange creates a free node at node K coordinates."
+            )
+        else:
+            contact_ndf = 2 if is2d else 3
+            self._refilter_node_combo(
+                self.node_i,
+                allowed_ndf=contact_ndf,
+            )
+            self._refilter_node_combo(
+                self.node_j,
+                allowed_ndf=contact_ndf,
+            )
+            self._refilter_node_combo(
+                self.node_k,
+                allowed_ndf=contact_ndf,
+            )
+            self._refilter_node_combo(
+                self.node_l,
+                allowed_ndf=contact_ndf,
+            )
+            self._refilter_nd_materials(kind)
+            self.note.setText(
+                f"{kind} requires two translational nodes with "
+                f"ndf={contact_ndf}. Only compatible nodes are shown. "
+                "This contact formulation has a non-symmetric tangent, so "
+                "use a non-symmetric equation-system solver."
+            )
+
         self.node_k.setEnabled(beam)
         self.auto_lambda.setEnabled(beam)
         self.node_l.setEnabled(beam and not self.auto_lambda.isChecked())
@@ -776,11 +870,15 @@ class ContactElementDialog(_ScrollableDialog):
             raise ValueError("Contact element node tags must be different.")
         u = self.units
         if kind == "zeroLengthContact2D":
+            nx = self.nx.value()
+            ny = self.ny.value()
+            if nx * nx + ny * ny <= 1.0e-24:
+                raise ValueError("2D contact normal cannot be zero.")
             params = {
                 "Kn": self.kn.value() * u.force_to_n / u.length_to_m,
                 "Kt": self.kt.value() * u.force_to_n / u.length_to_m,
                 "mu": self.mu.value(),
-                "normal": (self.nx.value(), self.ny.value()),
+                "normal": (nx, ny),
             }
             return self.tag.value(), kind, (i, j, None, None), params, False
         if kind == "zeroLengthContact3D":
