@@ -1012,9 +1012,13 @@ def build_rc_wall(
         0.0,
         float(spec.rho_x_web) - web_horizontal_discrete_rho_x,
     )
+    boundary_horizontal_discrete_rho_x = (
+        _boundary_horizontal_discrete_ratio(spec)
+    )
     boundary_smeared_rho_x = max(
         0.0,
-        float(spec.rho_x_boundary) - web_horizontal_discrete_rho_x,
+        float(spec.rho_x_boundary)
+        - boundary_horizontal_discrete_rho_x,
     )
     project.add_nd_material(
         NDMaterialData(
@@ -1143,18 +1147,56 @@ def build_rc_wall(
 
     reinforcement_element_tags: list[int] = []
     web_horizontal_element_tags: list[int] = []
+    boundary_horizontal_element_tags: list[int] = []
+    horizontal_embedded_node_tags: list[int] = []
+    horizontal_embedded_coupling_element_tags: list[int] = []
     web_vertical_node_tags: list[int] = []
     web_vertical_element_tags: list[int] = []
     embedded_coupling_element_tags: list[int] = []
     reinforcement_selection_name = ""
-    if str(spec.reinforcement_mode).strip().lower() == "hybrid":
+
+    if _discrete_system_enabled(spec):
         bar_area = _boundary_bar_area(spec)
         next_rebar_tag = project.next_element_tag()
+        next_node_tag = model.next_node_tag()
+        penalty = _embedded_penalty(spec)
 
-        # Each longitudinal bar receives its own FE element chain. In the
-        # current 2D MEFI formulation all bars in one boundary still share
-        # the same host edge nodes, which is mechanically equivalent for
-        # in-plane axial response while preserving per-bar identity/results.
+        def _next_free_element_tag() -> int:
+            nonlocal next_rebar_tag
+            while (
+                next_rebar_tag in model.elements
+                or next_rebar_tag in project.connections
+            ):
+                next_rebar_tag += 1
+            tag = next_rebar_tag
+            next_rebar_tag += 1
+            return tag
+
+        def _add_embedded_coupling(
+            constrained_node: int,
+            retained: tuple[int, int, int],
+            group: str,
+        ) -> int:
+            tag = _next_free_element_tag()
+            model.add_element(
+                tag,
+                constrained_node,
+                retained[0],
+                element_type="ASDEmbeddedNodeElement",
+                group=group,
+                k=retained[1],
+                l=retained[2],
+                embedded_penalty=float(penalty),
+                embedded_constrain_rotation=True,
+            )
+            embedded_coupling_element_tags.append(tag)
+            return tag
+
+        # Boundary longitudinal reinforcement remains on the two MEFI edge
+        # chains. Multiple bars are separate truss elements with identical
+        # in-plane strain, while the viewport separates front/back bars
+        # schematically. Fully-discrete mode auto-sizes each bar area so the
+        # complete boundary rho-y target is carried by these trusses.
         for side in (0, 1):
             side_name = "left" if side == 0 else "right"
             for layer_name, layer_count in _boundary_layer_layout(spec):
@@ -1164,15 +1206,11 @@ def build_rc_wall(
                         f"b{bar_index + 1:02d}of{layer_count:02d}"
                     )
                     for row in range(rows):
-                        while (
-                            next_rebar_tag in model.elements
-                            or next_rebar_tag in project.connections
-                        ):
-                            next_rebar_tag += 1
+                        tag = _next_free_element_tag()
                         i = node_tags[2 * row + side]
                         j = node_tags[2 * (row + 1) + side]
                         model.add_element(
-                            next_rebar_tag,
+                            tag,
                             i,
                             j,
                             element_type=str(spec.boundary_truss_type),
@@ -1180,27 +1218,135 @@ def build_rc_wall(
                             truss_area=float(bar_area),
                             truss_material_tag=int(syb),
                         )
-                        reinforcement_element_tags.append(next_rebar_tag)
-                        next_rebar_tag += 1
+                        reinforcement_element_tags.append(tag)
 
-        # Horizontal web steel is safe to discretize only on internal MEFI
-        # rows because these bars can share the existing concrete nodes.
-        if str(spec.web_horizontal_mode).strip().lower() == "mesh_aligned":
-            web_bar_area = _single_bar_area(
-                spec.web_horizontal_bar_diameter
-            )
+        if _fully_discrete(spec):
+            # Fully-discrete horizontal steel is split into left-boundary,
+            # web, and right-boundary segments. Interface nodes are embedded
+            # into the MEFI host so rho-x can differ between web and boundary
+            # zones without leaving any smeared steel behind.
+            web_bar_area = _web_horizontal_bar_area(spec)
+            boundary_horizontal_area = _boundary_horizontal_bar_area(spec)
+            layers = _web_horizontal_layer_layout(spec)
+
+            for row in range(1, rows):
+                host_row = row - 1
+                retained = (
+                    node_tags[2 * host_row],
+                    node_tags[2 * (host_row + 1) + 1],
+                    node_tags[2 * (host_row + 1)],
+                )
+                y = (
+                    float(spec.origin_y)
+                    + float(spec.height) * row / rows
+                )
+
+                left_interface = next_node_tag
+                next_node_tag += 1
+                right_interface = next_node_tag
+                next_node_tag += 1
+                model.add_node(
+                    left_interface,
+                    float(spec.origin_x) + float(spec.boundary_width),
+                    y,
+                    0.0,
+                )
+                model.add_node(
+                    right_interface,
+                    (
+                        float(spec.origin_x)
+                        + float(spec.width)
+                        - float(spec.boundary_width)
+                    ),
+                    y,
+                    0.0,
+                )
+                horizontal_embedded_node_tags.extend(
+                    [left_interface, right_interface]
+                )
+
+                left_coupling = _add_embedded_coupling(
+                    left_interface,
+                    retained,
+                    (
+                        "rc-wall-embedded-coupling-horizontal-left-"
+                        f"r{row:02d}"
+                    ),
+                )
+                right_coupling = _add_embedded_coupling(
+                    right_interface,
+                    retained,
+                    (
+                        "rc-wall-embedded-coupling-horizontal-right-"
+                        f"r{row:02d}"
+                    ),
+                )
+                horizontal_embedded_coupling_element_tags.extend(
+                    [left_coupling, right_coupling]
+                )
+
+                left_edge = node_tags[2 * row]
+                right_edge = node_tags[2 * row + 1]
+                for layer_name in layers:
+                    tag = _next_free_element_tag()
+                    model.add_element(
+                        tag,
+                        left_edge,
+                        left_interface,
+                        element_type=str(spec.boundary_truss_type),
+                        group=(
+                            "rc-wall-rebar-boundary-horizontal-left-"
+                            f"{layer_name}-r{row:02d}"
+                        ),
+                        truss_area=float(boundary_horizontal_area),
+                        truss_material_tag=int(sx),
+                    )
+                    reinforcement_element_tags.append(tag)
+                    boundary_horizontal_element_tags.append(tag)
+
+                    tag = _next_free_element_tag()
+                    model.add_element(
+                        tag,
+                        left_interface,
+                        right_interface,
+                        element_type=str(spec.boundary_truss_type),
+                        group=(
+                            "rc-wall-rebar-web-horizontal-"
+                            f"{layer_name}-r{row:02d}"
+                        ),
+                        truss_area=float(web_bar_area),
+                        truss_material_tag=int(sx),
+                    )
+                    reinforcement_element_tags.append(tag)
+                    web_horizontal_element_tags.append(tag)
+
+                    tag = _next_free_element_tag()
+                    model.add_element(
+                        tag,
+                        right_interface,
+                        right_edge,
+                        element_type=str(spec.boundary_truss_type),
+                        group=(
+                            "rc-wall-rebar-boundary-horizontal-right-"
+                            f"{layer_name}-r{row:02d}"
+                        ),
+                        truss_area=float(boundary_horizontal_area),
+                        truss_material_tag=int(sx),
+                    )
+                    reinforcement_element_tags.append(tag)
+                    boundary_horizontal_element_tags.append(tag)
+
+        elif str(spec.web_horizontal_mode).strip().lower() == "mesh_aligned":
+            # Hybrid mode keeps the legacy full-width mesh-aligned bars.
+            web_bar_area = _web_horizontal_bar_area(spec)
             layers = _web_horizontal_layer_layout(spec)
             for row in range(1, rows):
                 i = node_tags[2 * row]
                 j = node_tags[2 * row + 1]
                 for layer_name in layers:
-                    while (
-                        next_rebar_tag in model.elements
-                        or next_rebar_tag in project.connections
-                    ):
-                        next_rebar_tag += 1
+                    tag = _next_free_element_tag()
                     model.add_element(
-                        next_rebar_tag,
+                        tag,
                         i,
                         j,
                         element_type=str(spec.boundary_truss_type),
@@ -1211,18 +1357,16 @@ def build_rc_wall(
                         truss_area=float(web_bar_area),
                         truss_material_tag=int(sx),
                     )
-                    reinforcement_element_tags.append(next_rebar_tag)
-                    web_horizontal_element_tags.append(next_rebar_tag)
-                    next_rebar_tag += 1
+                    reinforcement_element_tags.append(tag)
+                    web_horizontal_element_tags.append(tag)
 
-        if str(spec.web_vertical_mode).strip().lower() == "embedded":
+        if (
+            _fully_discrete(spec)
+            or str(spec.web_vertical_mode).strip().lower() == "embedded"
+        ):
             positions = _web_vertical_positions(spec)
             layers = _web_vertical_layer_names(spec)
-            vertical_area = _single_bar_area(
-                spec.web_vertical_bar_diameter
-            )
-            penalty = _embedded_penalty(spec)
-            next_node_tag = model.next_node_tag()
+            vertical_area = _web_vertical_bar_area(spec)
 
             for layer_name in layers:
                 for bar_index, local_x in enumerate(positions):
@@ -1243,9 +1387,6 @@ def build_rc_wall(
                         web_vertical_node_tags.append(node_tag)
                         chain_nodes.append(node_tag)
 
-                        # Split each MEFI quad along LL -> UR. Base nodes use
-                        # the lower triangle; all other row-boundary nodes use
-                        # the upper triangle of the row immediately below.
                         if grid_row == 0:
                             host_row = 0
                             retained = (
@@ -1261,39 +1402,20 @@ def build_rc_wall(
                                 node_tags[2 * (host_row + 1)],
                             )
 
-                        while (
-                            next_rebar_tag in model.elements
-                            or next_rebar_tag in project.connections
-                        ):
-                            next_rebar_tag += 1
-                        model.add_element(
-                            next_rebar_tag,
+                        _add_embedded_coupling(
                             node_tag,
-                            retained[0],
-                            element_type="ASDEmbeddedNodeElement",
-                            group=(
+                            retained,
+                            (
                                 "rc-wall-embedded-coupling-web-vertical-"
                                 f"{layer_name}-b{bar_index + 1:02d}-"
                                 f"n{grid_row:02d}"
                             ),
-                            k=retained[1],
-                            l=retained[2],
-                            embedded_penalty=float(penalty),
-                            embedded_constrain_rotation=True,
                         )
-                        embedded_coupling_element_tags.append(
-                            next_rebar_tag
-                        )
-                        next_rebar_tag += 1
 
                     for row in range(rows):
-                        while (
-                            next_rebar_tag in model.elements
-                            or next_rebar_tag in project.connections
-                        ):
-                            next_rebar_tag += 1
+                        tag = _next_free_element_tag()
                         model.add_element(
-                            next_rebar_tag,
+                            tag,
                             chain_nodes[row],
                             chain_nodes[row + 1],
                             element_type=str(spec.boundary_truss_type),
@@ -1304,9 +1426,8 @@ def build_rc_wall(
                             truss_area=float(vertical_area),
                             truss_material_tag=int(syw),
                         )
-                        reinforcement_element_tags.append(next_rebar_tag)
-                        web_vertical_element_tags.append(next_rebar_tag)
-                        next_rebar_tag += 1
+                        reinforcement_element_tags.append(tag)
+                        web_vertical_element_tags.append(tag)
 
     selection_set_names = (
         _unique_selection_name(project, f"{spec.name} · Base"),
