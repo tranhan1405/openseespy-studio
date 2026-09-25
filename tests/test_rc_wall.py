@@ -12,10 +12,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QDialog, QWizard
 
 from openseespy_studio.generator import build_mefi_crack_specs, to_openseespy
-from openseespy_studio.project import AnalysisSettingsData, ProjectDatabase
+from openseespy_studio.project import (\n    AnalysisSettingsData,\n    MaterialData,\n    NDMaterialData,\n    ProjectDatabase,\n)
 from openseespy_studio.rc_wall import (
     RCWallSpec,
     build_rc_wall,
+    build_rc_wall_macro_2d,
     rc_wall_reinforcement_summary,
 )
 import openseespy_studio.ui.main_window as main_window_module
@@ -1793,3 +1794,142 @@ def test_rc_wall_qaction_trigger_generates_wall_in_real_mainwindow(monkeypatch):
         window.close()
         window.deleteLater()
         _APP.processEvents()
+
+def test_unified_wall_builder_creates_stacked_mvlem_from_wizard_geometry():
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(
+            1,
+            "Wall shear spring",
+            "Elastic",
+            parameters={"E": 1.0e9},
+        )
+    )
+    spec = RCWallSpec(
+        width=1.20,
+        height=3.00,
+        thickness=0.20,
+        boundary_width=0.20,
+        vertical_elements=3,
+        macro_fibers=6,
+        formulation="MVLEM",
+        macro_center_ratio=0.4,
+        macro_shear_material_tag=1,
+        replace_geometry=True,
+        name="MVLEM Wizard Wall",
+    )
+
+    result = build_rc_wall_macro_2d(project, spec)
+
+    assert len(result.node_tags) == 4
+    assert len(result.element_tags) == 3
+    assert len(result.material_tags) == 4
+    assert result.section_tags == []
+    assert all(
+        project.model.elements[tag].element_type == "MVLEM"
+        for tag in result.element_tags
+    )
+    first = project.model.elements[result.element_tags[0]]
+    assert first.wall_widths == pytest.approx(
+        (0.20, 0.20, 0.20, 0.20, 0.20, 0.20)
+    )
+    assert first.wall_rhos[0] == pytest.approx(spec.rho_y_boundary)
+    assert first.wall_rhos[-1] == pytest.approx(spec.rho_y_boundary)
+    assert all(
+        value == pytest.approx(spec.rho_y_web)
+        for value in first.wall_rhos[1:-1]
+    )
+    assert first.wall_shear_tag == 1
+    assert len(result.selection_set_names) == 3
+    assert not [
+        issue
+        for issue in validate_project(project)
+        if issue.severity == "ERROR"
+    ]
+
+
+def test_unified_wall_builder_creates_stacked_sfi_mvlem_with_fsam_mapping():
+    project = ProjectDatabase()
+    project.add_material(MaterialData(1, "Steel X", "Steel02"))
+    project.add_material(MaterialData(2, "Steel Y", "Steel02"))
+    project.add_material(MaterialData(3, "Concrete CM", "ConcreteCM"))
+    for tag, name, rou_x, rou_y in (
+        (1, "FSAM Web", 0.0027, 0.0027),
+        (2, "FSAM Boundary", 0.0082, 0.0323),
+    ):
+        project.add_nd_material(
+            NDMaterialData(
+                tag,
+                name,
+                "FSAM",
+                parameters={
+                    "rho": 0.0,
+                    "sX": 1,
+                    "sY": 2,
+                    "conc": 3,
+                    "rouX": rou_x,
+                    "rouY": rou_y,
+                    "nu": 0.35,
+                    "alfadow": 0.005,
+                },
+            )
+        )
+
+    spec = RCWallSpec(
+        width=1.20,
+        height=3.00,
+        thickness=0.20,
+        boundary_width=0.20,
+        vertical_elements=2,
+        macro_fibers=5,
+        formulation="SFI_MVLEM",
+        macro_center_ratio=0.4,
+        macro_web_fsam_tag=1,
+        macro_boundary_fsam_tag=2,
+        replace_geometry=True,
+        name="SFI Wizard Wall",
+    )
+
+    result = build_rc_wall_macro_2d(project, spec)
+
+    assert len(result.node_tags) == 3
+    assert len(result.element_tags) == 2
+    assert result.material_tags == []
+    assert result.nd_material_tags == [1, 2]
+    first = project.model.elements[result.element_tags[0]]
+    assert first.element_type == "SFI_MVLEM"
+    assert first.wall_nd_material_tags == (2, 1, 1, 1, 2)
+    assert first.wall_rhos == ()
+    assert first.wall_shear_tag is None
+    assert not [
+        issue
+        for issue in validate_project(project)
+        if issue.severity == "ERROR"
+    ]
+
+
+def test_unified_wall_wizard_exposes_all_four_formulations():
+    wizard = RCWallWizard(ProjectDatabase())
+    try:
+        values = {
+            str(wizard.formulation.itemData(index))
+            for index in range(wizard.formulation.count())
+        }
+        assert values == {"MEFI", "MVLEM", "SFI_MVLEM", "MVLEM_3D"}
+        wizard.formulation.setCurrentIndex(
+            wizard.formulation.findData("MVLEM")
+        )
+        assert wizard.macro_center_ratio.isEnabled()
+        assert wizard.macro_shear_material.isEnabled()
+        assert not wizard.reinforcement_mode.isEnabled()
+
+        wizard.formulation.setCurrentIndex(
+            wizard.formulation.findData("SFI_MVLEM")
+        )
+        assert wizard.macro_web_fsam.isEnabled()
+        assert wizard.macro_boundary_fsam.isEnabled()
+        assert not wizard.macro_shear_material.isEnabled()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+
