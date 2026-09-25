@@ -276,6 +276,37 @@ def mesh_line_geometry(
             raise ValueError(
                 "Frame line requires a valid Geometric Transformation."
             )
+        section = project.sections[int(line.section_tag)]
+        transformation = project.transformations[
+            int(line.transformation_tag)
+        ]
+        if (
+            line.element_type
+            in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
+            and section.section_type != "Elastic"
+        ):
+            raise ValueError(
+                f"{line.element_type} Line recipe requires an Elastic Section."
+            )
+        if line.element_type == "dispBeamColumnInt":
+            if (int(project.model.ndm), int(project.model.ndf)) != (2, 3):
+                raise ValueError(
+                    "dispBeamColumnInt Line recipe requires an ndm=2/ndf=3 model."
+                )
+            if section.section_type != "FiberInt":
+                raise ValueError(
+                    "dispBeamColumnInt Line recipe requires a FiberInt Section."
+                )
+            if transformation.transformation_type != "LinearInt":
+                raise ValueError(
+                    "dispBeamColumnInt Line recipe requires a LinearInt "
+                    "Geometric Transformation."
+                )
+        elif transformation.transformation_type == "LinearInt":
+            raise ValueError(
+                "LinearInt Geometric Transformation is reserved for "
+                "dispBeamColumnInt Line recipes."
+            )
     elif line.element_family == "Truss":
         if (
             line.material_tag is None
@@ -359,6 +390,7 @@ def mesh_line_geometry(
                     consistent_mass=line.consistent_mass,
                     truss_do_rayleigh=line.do_rayleigh,
                 )
+            project.validate_element_state(element_tag)
             element_tags.append(element_tag)
 
         line.generated_node_tags = list(node_tags)
