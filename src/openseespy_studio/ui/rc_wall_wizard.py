@@ -2136,7 +2136,31 @@ class RCWallWizard(QWizard):
                 self.reinforcement_mode.currentData()
             )
             reinforcement_text = "Smeared reinforcement only"
-            if reinforcement_mode == "hybrid":
+            if reinforcement_mode == "fully_discrete":
+                spec = self.data()
+                summary = rc_wall_reinforcement_summary(spec)
+                reinforcement_text = (
+                    "<b>Fully Discrete</b> · RCLMS steel ratios = 0<br>"
+                    f"Boundary Y: {self.boundary_bar_count.value()} bars/zone · "
+                    f"equiv. Ø"
+                    f"{float(summary['boundary_equivalent_diameter']):g} "
+                    f"{self.units.length}<br>"
+                    f"Web Y: {len(summary['web_vertical_positions'])} "
+                    f"bars/layer · equiv. Ø"
+                    f"{float(summary['web_vertical_equivalent_diameter']):g} "
+                    f"{self.units.length} · "
+                    f"s≈{float(summary['web_vertical_actual_spacing']):g} "
+                    f"{self.units.length}<br>"
+                    f"Horizontal: "
+                    f"{int(summary['horizontal_line_count'])} row(s) · "
+                    f"web equiv. Ø"
+                    f"{float(summary['web_horizontal_equivalent_diameter']):g} · "
+                    f"boundary equiv. Ø"
+                    f"{float(summary['boundary_horizontal_equivalent_diameter']):g} "
+                    f"{self.units.length}<br>"
+                    "All target ρx/ρy represented by discrete bars."
+                )
+            elif reinforcement_mode == "hybrid":
                 diameter = float(self.boundary_bar_diameter.value())
                 bars = int(self.boundary_bar_count.value())
                 discrete_area = bars * math.pi * diameter * diameter / 4.0
@@ -2199,8 +2223,10 @@ class RCWallWizard(QWizard):
                 f"{counts['embedded_nodes']} embedded steel)<br>"
                 f"MEFI elements: {counts['mefi']}<br>"
                 f"Boundary bar elements: {counts['boundary_rebar']}<br>"
-                f"Horizontal web bar elements: "
-                f"{counts['horizontal_rebar']}<br>"
+                f"Horizontal bar elements: "
+                f"{counts['horizontal_rebar']} "
+                f"({counts['web_horizontal_rebar']} web + "
+                f"{counts['boundary_horizontal_rebar']} boundary)<br>"
                 f"Vertical web bar elements: "
                 f"{counts['vertical_rebar']}<br>"
                 f"Embedded coupling helpers: "
@@ -2216,14 +2242,20 @@ class RCWallWizard(QWizard):
 
             truss_text = (
                 self.boundary_truss_type.currentText()
-                if reinforcement_mode == "hybrid"
+                if reinforcement_mode in {"hybrid", "fully_discrete"}
                 else "—"
             )
             self.preview_material_summary.setText(
                 "<b>Materials & Sections</b><br>"
                 "Uniaxial: Steel02 ×3 · Concrete02 ×2<br>"
                 "nD: OrthotropicRAConcrete ×2 · "
-                "SmearedSteelDoubleLayer ×2<br>"
+                "SmearedSteelDoubleLayer ×2"
+                + (
+                    " (ratios = 0)"
+                    if reinforcement_mode == "fully_discrete"
+                    else ""
+                )
+                + "<br>"
                 "Sections: RCLMS Web (1 layer) · "
                 "RCLMS Boundary (2 layers)<br>"
                 f"Discrete reinforcement formulation: {truss_text}<br>"
@@ -2243,8 +2275,12 @@ class RCWallWizard(QWizard):
             selection_text = "Base · Top · MEFI"
             if counts["discrete_rebar"]:
                 selection_text += " · Reinforcement"
+            if counts["horizontal_rebar"]:
+                selection_text += " · Horizontal Bars"
+            if counts["vertical_rebar"]:
+                selection_text += " · Vertical Web Bars"
             if counts["embedded_coupling"]:
-                selection_text += " · Vertical Web Bars · Embedded Coupling"
+                selection_text += " · Embedded Coupling"
             self.preview_selection_summary.setText(
                 "<b>Selections & Boundary Conditions</b><br>"
                 f"Named selections: {selection_text}<br>"
@@ -2267,6 +2303,7 @@ class RCWallWizard(QWizard):
                     "boundary": "Boundary / reinforcement",
                     "web_rebar": "Web reinforcement",
                     "web_vertical": "Embedded vertical reinforcement",
+                    "fully_discrete": "Fully discrete reinforcement",
                     "domain": "Project domain",
                 }
                 self.preview_validation_status.setText(
@@ -2309,7 +2346,17 @@ class RCWallWizard(QWizard):
                 "Named selections: Base · Top · MEFI"
                 + (" · Reinforcement" if counts["discrete_rebar"] else "")
                 + (
-                    " · Vertical Web Bars · Embedded Coupling"
+                    " · Horizontal Bars"
+                    if counts["horizontal_rebar"]
+                    else ""
+                )
+                + (
+                    " · Vertical Web Bars"
+                    if counts["vertical_rebar"]
+                    else ""
+                )
+                + (
+                    " · Embedded Coupling"
                     if counts["embedded_coupling"]
                     else ""
                 )
