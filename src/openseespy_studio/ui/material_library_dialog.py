@@ -50,7 +50,7 @@ class MaterialLibraryDialog(QDialog):
         parent=None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("SARE Material Library · Verified Sources")
+        self.setWindowTitle("FEWIZ Material Library · Verified Sources")
         self.resize(1120, 760)
         self._next_tag = int(next_tag)
         self._units = UnitSystem.from_mapping(units)
