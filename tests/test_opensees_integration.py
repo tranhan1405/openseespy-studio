@@ -2990,3 +2990,101 @@ def test_section_based_trusses_construct_in_real_opensees(tmp_path: Path):
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+
+def test_generated_friction_bearings_construct_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.model = StructuralModel("friction-bearing-smoke", ndm=2, ndf=3)
+    project.model.add_node(1, 0.0, 0.0)
+    project.model.add_node(2, 0.0, 0.20)
+    project.model.add_node(3, 0.0, 0.40)
+    project.add_material(
+        MaterialData(
+            1,
+            "Axial",
+            "Elastic",
+            parameters={"E": 1.0e8},
+        )
+    )
+    project.add_material(
+        MaterialData(
+            2,
+            "Rotation",
+            "Elastic",
+            parameters={"E": 1.0e8},
+        )
+    )
+    project.add_friction_model(
+        FrictionModelData(
+            1,
+            "PTFE",
+            "Coulomb",
+            {"mu": 0.05},
+        )
+    )
+    project.model.add_element(
+        10,
+        1,
+        2,
+        element_type="flatSliderBearing",
+        group="isolation",
+        special_parameters={
+            "frn_model_tag": 1,
+            "kInit": 2.0e7,
+            "p_mat_tag": 1,
+            "mz_mat_tag": 2,
+        },
+    )
+    project.model.add_element(
+        11,
+        2,
+        3,
+        element_type="singleFPBearing",
+        group="isolation",
+        special_parameters={
+            "frn_model_tag": 1,
+            "Reff": 2.5,
+            "kInit": 3.0e7,
+            "p_mat_tag": 1,
+            "mz_mat_tag": 2,
+        },
+    )
+
+    project.validate_element_state(10)
+    project.validate_element_state(11)
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        nd_materials=project.nd_materials,
+        friction_models=project.friction_models,
+        units=project.units,
+    )
+    assert "# ERROR:" not in script
+    assert "ops.frictionModel('Coulomb', 1, 0.05)" in script
+    assert "ops.element('flatSliderBearing', 10" in script
+    assert "ops.element('singleFPBearing', 11" in script
+
+    script_path = tmp_path / "friction-bearing-smoke.py"
+    script_path.write_text(
+        script + "\nprint('FRICTION_BEARINGS_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "FRICTION_BEARINGS_OK" in completed.stdout
