@@ -1367,6 +1367,37 @@ class _Importer:
                 f"Element tag {tag} is already used by a connection."
             )
 
+        if kind == "ASDEmbeddedNodeElement":
+            if len(args) < 6:
+                raise ValueError(
+                    "ASDEmbeddedNodeElement needs constrained node and "
+                    "three retained nodes."
+                )
+            nk = int(args[4])
+            nl = int(args[5])
+            rest = list(args[6:])
+            penalty_value = self.flag_value(rest, "-K", None)
+            penalty_pa = (
+                UnitSystem.from_mapping(
+                    self.project.units
+                ).stress_to_pa(float(penalty_value))
+                if penalty_value is not None
+                else None
+            )
+            self.project.model.add_element(
+                tag,
+                ni,
+                nj,
+                element_type="ASDEmbeddedNodeElement",
+                group="embedded-coupling",
+                k=nk,
+                l=nl,
+                embedded_penalty=penalty_pa,
+                embedded_constrain_rotation="-rot" in rest,
+            )
+            self.count("Elements")
+            return
+
         if kind == "MEFI":
             if len(args) < 11:
                 raise ValueError(
