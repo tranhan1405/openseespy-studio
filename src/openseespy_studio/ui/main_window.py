@@ -5503,6 +5503,7 @@ class MainWindow(QMainWindow):
         message: str = "",
         *,
         sync_viewport_display: bool = True,
+        refresh_tree: bool = True,
     ) -> None:
         if sync_viewport_display:
             self._sync_viewport_display_data(refresh=True)
@@ -5518,7 +5519,8 @@ class MainWindow(QMainWindow):
             self.project.sections,
             self.project.transformations,
         )
-        self._refresh_tree()
+        if refresh_tree:
+            self._refresh_tree()
         self._sync_analysis_ribbon_cpu_controls()
         try:
             generated_script = self._generate_project_script()
@@ -10577,9 +10579,23 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self._refresh_all(
-            f"Updated {kind} {tag}: {property_id}"
-        )
+        message = f"Updated {kind} {tag}: {property_id}"
+        if kind in {"material", "section", "transformation"}:
+            # These edits change reusable properties but normally do not change
+            # FE topology. Let the viewport decide whether its current display
+            # mode actually needs a rebuild (actual section / color-by modes)
+            # instead of unconditionally clearing and redrawing the whole scene.
+            self._sync_viewport_display_data(refresh=True)
+            self._refresh_project_metadata(
+                message,
+                sync_viewport_display=False,
+                refresh_tree=property_id in {
+                    "name",
+                    "transformation_type",
+                },
+            )
+        else:
+            self._refresh_all(message)
         self._record_project_change(
             f"Edit {kind} {tag} property {property_id}",
             before,
