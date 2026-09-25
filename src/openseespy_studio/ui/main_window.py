@@ -89,6 +89,8 @@ from ..model import (
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
+    TRUSS_MATERIAL_ELEMENT_TYPES,
+    TRUSS_SECTION_ELEMENT_TYPES,
     WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
     classify_fixity,
@@ -10324,6 +10326,15 @@ class MainWindow(QMainWindow):
                                 "Shell elements require a shell-compatible "
                                 "section."
                             )
+                        if (
+                            element.element_type in TRUSS_SECTION_ELEMENT_TYPES
+                            and section.section_type
+                            not in {"Elastic", "Fiber", "FiberInt"}
+                        ):
+                            raise ValueError(
+                                "Section-based trusses require an Elastic, "
+                                "Fiber, or FiberInt section."
+                            )
                     element.section_tag = section_tag
                 elif property_id == "transf_tag":
                     transf_tag = None if value is None else int(value)
@@ -11404,43 +11415,89 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-            if element.element_type == "truss":
-                material_text = "Unassigned"
-                if element.truss_material_tag is not None:
-                    material = self.project.materials.get(
-                        element.truss_material_tag
-                    )
-                    material_text = (
-                        f"{element.truss_material_tag} - {material.name}"
-                        if material is not None
-                        else f"{element.truss_material_tag} (missing)"
-                    )
-                material_choices = [("Unassigned", None)]
-                material_choices.extend(
-                    (
-                        f"{material_tag} - {material.name} "
-                        f"({material.material_type})",
-                        int(material_tag),
-                    )
-                    for material_tag, material in sorted(
-                        self.project.materials.items()
-                    )
+            if element.element_type in TRUSS_ELEMENT_TYPES:
+                section_based = (
+                    element.element_type in TRUSS_SECTION_ELEMENT_TYPES
                 )
-                self.properties_panel.set_properties(
-                    "Truss Element",
-                    [
-                        ("Tag", tag),
-                        ("Type", "truss"),
-                        ("Nodes", f"{element.i}, {element.j}"),
+                rows = [
+                    ("Tag", tag),
+                    ("Type", element.element_type),
+                    ("Nodes", f"{element.i}, {element.j}"),
+                    (
+                        "Group",
+                        element.group,
+                        {
+                            "id": "group",
+                            "editable": True,
+                            "kind": "text",
+                        },
+                    ),
+                ]
+
+                if section_based:
+                    section_text = "Unassigned"
+                    if element.section_tag is not None:
+                        section = self.project.sections.get(
+                            int(element.section_tag)
+                        )
+                        section_text = (
+                            f"{element.section_tag} - {section.name}"
+                            if section is not None
+                            else f"{element.section_tag} (missing)"
+                        )
+                    section_choices = [("Unassigned", None)]
+                    section_choices.extend(
                         (
-                            "Group",
-                            element.group,
+                            f"{section_tag} - {section.name} "
+                            f"({section.section_type})",
+                            int(section_tag),
+                        )
+                        for section_tag, section in sorted(
+                            self.project.sections.items()
+                        )
+                        if section.section_type
+                        in {"Elastic", "Fiber", "FiberInt"}
+                    )
+                    rows.append(
+                        (
+                            "Section",
+                            section_text,
                             {
-                                "id": "group",
+                                "id": "section_tag",
                                 "editable": True,
-                                "kind": "text",
+                                "kind": "choice",
+                                "current": element.section_tag,
+                                "choices": section_choices,
                             },
-                        ),
+                        )
+                    )
+                    rows.extend([
+                        ("Area", "Defined by Section"),
+                        ("Material", "Defined by Section"),
+                    ])
+                else:
+                    material_text = "Unassigned"
+                    if element.truss_material_tag is not None:
+                        material = self.project.materials.get(
+                            element.truss_material_tag
+                        )
+                        material_text = (
+                            f"{element.truss_material_tag} - {material.name}"
+                            if material is not None
+                            else f"{element.truss_material_tag} (missing)"
+                        )
+                    material_choices = [("Unassigned", None)]
+                    material_choices.extend(
+                        (
+                            f"{material_tag} - {material.name} "
+                            f"({material.material_type})",
+                            int(material_tag),
+                        )
+                        for material_tag, material in sorted(
+                            self.project.materials.items()
+                        )
+                    )
+                    rows.extend([
                         (
                             "Area",
                             f"{element.truss_area:g}",
@@ -11461,56 +11518,56 @@ class MainWindow(QMainWindow):
                                 "choices": material_choices,
                             },
                         ),
-                        ("Section", "Not used by Truss"),
-                        ("Transformation", "Not used by Truss"),
+                        ("Section", "Not used by this formulation"),
+                    ])
+
+                rows.extend([
+                    ("Transformation", "Not used by Truss"),
+                    (
+                        "Mass / length (rho)",
+                        f"{element.mass_per_length:g}",
+                        {
+                            "id": "mass_per_length",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                    (
+                        "Mass matrix",
                         (
-                            "Mass / length (rho)",
-                            f"{element.mass_per_length:g}",
-                            {
-                                "id": "mass_per_length",
-                                "editable": True,
-                                "kind": "float",
-                            },
+                            "Consistent"
+                            if element.consistent_mass
+                            else "Lumped"
                         ),
-                        (
-                            "Mass matrix",
-                            (
-                                "Consistent"
-                                if element.consistent_mass
-                                else "Lumped"
-                            ),
-                            {
-                                "id": "consistent_mass",
-                                "editable": True,
-                                "kind": "choice",
-                                "current": bool(element.consistent_mass),
-                                "choices": [
-                                    ("Lumped", False),
-                                    ("Consistent", True),
-                                ],
-                            },
-                        ),
-                        (
-                            "Rayleigh damping",
-                            (
-                                "On"
-                                if element.truss_do_rayleigh
-                                else "Off"
-                            ),
-                            {
-                                "id": "truss_do_rayleigh",
-                                "editable": True,
-                                "kind": "choice",
-                                "current": bool(
-                                    element.truss_do_rayleigh
-                                ),
-                                "choices": [
-                                    ("Off", False),
-                                    ("On", True),
-                                ],
-                            },
-                        ),
-                    ],
+                        {
+                            "id": "consistent_mass",
+                            "editable": True,
+                            "kind": "choice",
+                            "current": bool(element.consistent_mass),
+                            "choices": [
+                                ("Lumped", False),
+                                ("Consistent", True),
+                            ],
+                        },
+                    ),
+                    (
+                        "Rayleigh damping",
+                        "On" if element.truss_do_rayleigh else "Off",
+                        {
+                            "id": "truss_do_rayleigh",
+                            "editable": True,
+                            "kind": "choice",
+                            "current": bool(element.truss_do_rayleigh),
+                            "choices": [
+                                ("Off", False),
+                                ("On", True),
+                            ],
+                        },
+                    ),
+                ])
+                self.properties_panel.set_properties(
+                    "Truss Element",
+                    rows,
                     context={"kind": "element", "tag": int(tag)},
                 )
                 return
@@ -16174,7 +16231,7 @@ class MainWindow(QMainWindow):
 
     def _assign_truss_material_to_selection(self) -> None:
         if not any(
-            element.element_type == "truss"
+            element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
             for element in self.model.elements.values()
         ):
             if not self._ensure_prerequisite(
@@ -16185,7 +16242,7 @@ class MainWindow(QMainWindow):
                 ),
                 action_label="Create Truss Now...",
                 available=lambda: any(
-                    element.element_type == "truss"
+                    element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
                     for element in self.model.elements.values()
                 ),
                 creator=self._create_truss,
@@ -16200,7 +16257,7 @@ class MainWindow(QMainWindow):
             tag
             for tag in element_tags
             if tag in self.model.elements
-            and self.model.elements[tag].element_type == "truss"
+            and self.model.elements[tag].element_type in TRUSS_MATERIAL_ELEMENT_TYPES
         }
         if not truss_tags:
             QMessageBox.information(
@@ -16275,7 +16332,7 @@ class MainWindow(QMainWindow):
             tag
             for tag in element_tags
             if tag in self.model.elements
-            and self.model.elements[tag].element_type == "truss"
+            and self.model.elements[tag].element_type in TRUSS_MATERIAL_ELEMENT_TYPES
         }
         if not truss_tags:
             QMessageBox.information(
@@ -16489,17 +16546,6 @@ class MainWindow(QMainWindow):
             title="Create Truss Element",
         ):
             return
-        if not self._ensure_prerequisite(
-            title="Create Truss Element",
-            message=(
-                "A Truss requires a uniaxial Material for its axial "
-                "constitutive response. Create the Material now?"
-            ),
-            action_label="Create Material Now...",
-            available=lambda: bool(self.project.materials),
-            creator=self._create_material,
-        ):
-            return
 
         selected_nodes = sorted(self.selection.nodes)
         node_i = (
@@ -16522,26 +16568,18 @@ class MainWindow(QMainWindow):
             node_i=node_i,
             node_j=node_j,
             materials=self.project.materials,
+            sections=self.project.sections,
             units=self.project.units,
             default_area=self._default_truss_area(),
             new_material_callback=self._create_material_dependency,
+            new_section_callback=self._create_section_dependency,
             parent=self,
         )
         if not dialog.exec():
             return
 
         try:
-            (
-                tag,
-                i,
-                j,
-                area,
-                material_tag,
-                group,
-                rho,
-                consistent_mass,
-                do_rayleigh,
-            ) = dialog.values()
+            values = dialog.values()
         except ValueError as exc:
             QMessageBox.warning(
                 self,
@@ -16552,36 +16590,109 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         try:
+            tag = int(values["tag"])
             if tag in self.project.connections:
                 raise ValueError(
                     f"Element tag {tag} is already used by a connection."
                 )
             self.model.add_element(
                 tag,
-                i,
-                j,
-                element_type="truss",
-                group=group,
-                mass_per_length=rho,
-                consistent_mass=consistent_mass,
-                truss_area=area,
-                truss_material_tag=material_tag,
-                truss_do_rayleigh=do_rayleigh,
+                int(values["node_i"]),
+                int(values["node_j"]),
+                element_type=str(values["element_type"]),
+                section_tag=values["section_tag"],
+                group=str(values["group"]),
+                mass_per_length=float(values["rho"]),
+                consistent_mass=bool(values["consistent_mass"]),
+                truss_area=float(values["area"]),
+                truss_material_tag=values["material_tag"],
+                truss_do_rayleigh=bool(values["do_rayleigh"]),
             )
-        except ValueError as exc:
+            self.project.validate_element_state(tag)
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(
                 self,
                 "Create Truss Element",
                 str(exc),
             )
+            self._refresh_all()
+            return
+
+        dependency = (
+            f"section {values['section_tag']}"
+            if values["section_tag"] is not None
+            else (
+                f"A={float(values['area']):g} · "
+                f"material {values['material_tag']}"
+            )
+        )
+        self._refresh_all(
+            f"Created {values['element_type']} {tag}: "
+            f"node {values['node_i']} → {values['node_j']} · {dependency}"
+        )
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(
+            f"Create {values['element_type']} {tag}",
+            before,
+        )
+
+    def _edit_truss(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None or element.element_type not in TRUSS_ELEMENT_TYPES:
+            return
+
+        dialog = TrussDialog(
+            int(element.tag),
+            node_i=int(element.i),
+            node_j=int(element.j),
+            materials=self.project.materials,
+            sections=self.project.sections,
+            units=self.project.units,
+            default_area=self._default_truss_area(),
+            new_material_callback=self._create_material_dependency,
+            new_section_callback=self._create_section_dependency,
+            element=element,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit Truss Element", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            self.model.elements.pop(int(tag), None)
+            self.model.add_element(
+                int(tag),
+                int(values["node_i"]),
+                int(values["node_j"]),
+                element_type=str(values["element_type"]),
+                section_tag=values["section_tag"],
+                group=str(values["group"]),
+                mass_per_length=float(values["rho"]),
+                consistent_mass=bool(values["consistent_mass"]),
+                truss_area=float(values["area"]),
+                truss_material_tag=values["material_tag"],
+                truss_do_rayleigh=bool(values["do_rayleigh"]),
+            )
+            self.project.validate_element_state(int(tag))
+        except (TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Edit Truss Element", str(exc))
+            self._refresh_all()
             return
 
         self._refresh_all(
-            f"Created Truss {tag}: node {i} → {j} · "
-            f"A={area:g} · material {material_tag}"
+            f"Updated Truss {tag} → {values['element_type']}"
         )
-        self.selection.select("element", tag, "replace")
-        self._record_project_change(f"Create Truss {tag}", before)
+        self.selection.select("element", int(tag), "replace")
+        self._record_project_change(f"Edit Truss {tag}", before)
 
     def _special_default_nodes(self) -> tuple[int, int] | None:
         if not self._ensure_node_count(2, title="Create Special Element"):
@@ -31252,7 +31363,15 @@ class MainWindow(QMainWindow):
                 if element_tag in self.model.elements
             ]
             has_truss = any(
-                element.element_type == "truss"
+                element.element_type in TRUSS_ELEMENT_TYPES
+                for element in selected_elements
+            )
+            has_material_truss = any(
+                element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
+                for element in selected_elements
+            )
+            has_section_truss = any(
+                element.element_type in TRUSS_SECTION_ELEMENT_TYPES
                 for element in selected_elements
             )
             has_frame = any(
@@ -31268,13 +31387,17 @@ class MainWindow(QMainWindow):
                 for element in selected_elements
             )
             has_truss_material = any(
-                element.element_type == "truss"
+                element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
                 and element.truss_material_tag is not None
                 for element in selected_elements
             )
             has_section_assignment = any(
                 element.element_type
-                in (FRAME_ELEMENT_TYPES | SHELL_ELEMENT_TYPES)
+                in (
+                    FRAME_ELEMENT_TYPES
+                    | SHELL_ELEMENT_TYPES
+                    | TRUSS_SECTION_ELEMENT_TYPES
+                )
                 and element.section_tag is not None
                 for element in selected_elements
             )
@@ -31296,10 +31419,21 @@ class MainWindow(QMainWindow):
                     | {"elastomericBearingPlasticity"}
                     | {"LeadRubberX", "TripleFrictionPendulum"}
                     | CONTACT_ELEMENT_TYPES
+                    | TRUSS_ELEMENT_TYPES
                 )
             ):
                 definition_menu = menu.addMenu("Definition")
                 if (
+                    self.model.elements[tag].element_type
+                    in TRUSS_ELEMENT_TYPES
+                ):
+                    edit_truss = definition_menu.addAction(
+                        "Edit Truss Definition..."
+                    )
+                    edit_truss.triggered.connect(
+                        lambda: self._edit_truss(tag)
+                    )
+                elif (
                     self.model.elements[tag].element_type
                     in SHELL_ELEMENT_TYPES
                 ):
@@ -31382,20 +31516,21 @@ class MainWindow(QMainWindow):
 
             assign = menu.addMenu("Assign")
             assign.setEnabled(has_truss or has_frame or has_shell)
-            if has_truss:
+            if has_material_truss:
                 material_action = assign.addAction("Material (Truss)...")
                 material_action.triggered.connect(
                     self._assign_truss_material_to_selection
                 )
-            if has_frame or has_shell:
+            if has_frame or has_shell or has_section_truss:
+                shell_only = (
+                    has_shell and not has_frame and not has_section_truss
+                )
                 section_action = assign.addAction(
-                    "Shell Section..."
-                    if has_shell and not has_frame
-                    else "Section..."
+                    "Shell Section..." if shell_only else "Section..."
                 )
                 section_action.triggered.connect(
                     self._assign_shell_section_to_selection
-                    if has_shell and not has_frame
+                    if shell_only
                     else self._assign_section_to_selection
                 )
             if has_frame:
