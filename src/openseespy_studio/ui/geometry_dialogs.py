@@ -162,18 +162,18 @@ class ElementDialog(_BaseDialog):
         self.form.addRow("Integration points:", self.integration_points)
         self.form.addRow("Center of rotation cRot:", self.center_rotation)
 
+        self.formulation_note = QLabel()
+        self.formulation_note.setWordWrap(True)
+        self.formulation_note.setStyleSheet(
+            "padding: 6px; background: #f3f6f9; color: #526476;"
+        )
+        self.root.insertWidget(1, self.formulation_note)
+
         self._populate_transformations()
         self.element_type.currentTextChanged.connect(
             self._sync_formulation_controls
         )
         self._sync_formulation_controls(self.element_type.currentText())
-
-        note = QLabel(
-            "Frame creates a solver-ready structural member. "
-            "Section and geometric transformation are assigned at creation."
-        )
-        note.setWordWrap(True)
-        self.root.insertWidget(1, note)
 
     def _create_section_dependency(self) -> None:
         if not callable(self._new_section_callback):
@@ -258,6 +258,30 @@ class ElementDialog(_BaseDialog):
         self.center_rotation.setEnabled(interaction)
         self._populate_sections(element_type)
         self._populate_transformations()
+
+        if interaction:
+            self.formulation_note.setText(
+                "Flexure-shear interaction formulation. Requires a FiberInt "
+                "section and LinearInt transformation. Integration points and "
+                "cRot are direct dispBeamColumnInt parameters; no separate "
+                "beamIntegration tag is used."
+            )
+        elif element_type == "ElasticTimoshenkoBeam":
+            self.formulation_note.setText(
+                "Elastic Timoshenko beam with shear deformation. Use an "
+                "Elastic section containing E, G and shear areas Avy/Avz "
+                "as required by the model dimension."
+            )
+        elif element_type == "elasticBeamColumn":
+            self.formulation_note.setText(
+                "Elastic Euler-Bernoulli beam-column. Shear deformation is "
+                "not included; use ElasticTimoshenkoBeam when it matters."
+            )
+        else:
+            self.formulation_note.setText(
+                "Distributed-plasticity beam-column. Assign a compatible "
+                "section and geometric transformation before analysis."
+            )
 
     def values(self):
         section_tag = self.section.currentData()
@@ -489,12 +513,12 @@ class ElementFormulationDialog(_BaseDialog):
         self.form.addRow("", self.consistent_mass)
         self.form.addRow("Center of rotation cRot:", self.center_rotation)
 
-        note = QLabel(
-            "Lobatto places integration points at the member ends and is "
-            "the common distributed-plasticity choice for forceBeamColumn."
+        self.formulation_note = QLabel()
+        self.formulation_note.setWordWrap(True)
+        self.formulation_note.setStyleSheet(
+            "padding: 6px; background: #f3f6f9; color: #526476;"
         )
-        note.setWordWrap(True)
-        self.root.insertWidget(1, note)
+        self.root.insertWidget(1, self.formulation_note)
 
         self.element_type.currentTextChanged.connect(self._sync)
         self._sync(self.element_type.currentText())
@@ -518,6 +542,35 @@ class ElementFormulationDialog(_BaseDialog):
         if not mass_matrix_supported:
             self.consistent_mass.setChecked(False)
         self.center_rotation.setEnabled(interaction)
+
+        if interaction:
+            self.formulation_note.setText(
+                "dispBeamColumnInt is a 2D flexure-shear interaction "
+                "formulation. It uses FiberInt + LinearInt, with cRot and "
+                "the integration-point count stored directly on the element."
+            )
+        elif element_type == "ElasticTimoshenkoBeam":
+            self.formulation_note.setText(
+                "ElasticTimoshenkoBeam includes shear deformation; section "
+                "shear properties must be defined in the assigned Elastic "
+                "section."
+            )
+        elif element_type == "forceBeamColumn":
+            self.formulation_note.setText(
+                "forceBeamColumn uses the selected beam integration rule. "
+                "Lobatto is the common distributed-plasticity choice because "
+                "it places integration points at the member ends."
+            )
+        elif element_type == "dispBeamColumn":
+            self.formulation_note.setText(
+                "dispBeamColumn uses the selected beam integration rule and "
+                "supports a consistent mass matrix."
+            )
+        else:
+            self.formulation_note.setText(
+                "elasticBeamColumn is the Euler-Bernoulli elastic frame "
+                "formulation; shear deformation is neglected."
+            )
 
     def values(self) -> dict[str, object]:
         return {
