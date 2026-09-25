@@ -502,6 +502,101 @@ def test_rc_wall_analysis_script_captures_mefi_panel_strain_history():
 
 
 
+def test_rc_wall_hybrid_shared_node_rebar_has_no_duplicate_geometry_warning():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    build_rc_wall(
+        project,
+        RCWallSpec(
+            width=1220.0,
+            height=2209.8,
+            thickness=152.4,
+            boundary_width=228.6,
+            vertical_elements=7,
+            macro_fibers=8,
+            boundary_unconfined_thickness=50.8,
+            boundary_confined_thickness=101.6,
+            reinforcement_mode="hybrid",
+            boundary_bar_count=4,
+            boundary_bar_diameter=16.0,
+            boundary_cover=30.0,
+            boundary_layer_mode="front_back",
+            web_horizontal_mode="mesh_aligned",
+            web_horizontal_bar_diameter=8.0,
+            web_horizontal_layer_mode="front_back",
+        ),
+    )
+
+    duplicate_warnings = [
+        issue
+        for issue in validate_project(project)
+        if (
+            issue.severity == "WARNING"
+            and issue.category == "Geometry"
+            and "duplicates the node pair" in issue.message
+        )
+    ]
+
+    assert duplicate_warnings == []
+
+
+def test_rc_wall_repeated_same_bar_segment_still_warns_as_duplicate():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    result = build_rc_wall(
+        project,
+        RCWallSpec(
+            width=1220.0,
+            height=2209.8,
+            thickness=152.4,
+            boundary_width=228.6,
+            vertical_elements=7,
+            macro_fibers=8,
+            boundary_unconfined_thickness=50.8,
+            boundary_confined_thickness=101.6,
+            reinforcement_mode="hybrid",
+            boundary_bar_count=4,
+            boundary_bar_diameter=16.0,
+            boundary_cover=30.0,
+            boundary_layer_mode="front_back",
+        ),
+    )
+
+    source = project.model.elements[result.reinforcement_element_tags[0]]
+    duplicate_tag = project.next_element_tag()
+    project.model.add_element(
+        duplicate_tag,
+        source.i,
+        source.j,
+        element_type=source.element_type,
+        group=source.group,
+        truss_area=source.truss_area,
+        truss_material_tag=source.truss_material_tag,
+    )
+
+    warnings = [
+        issue
+        for issue in validate_project(project)
+        if (
+            issue.severity == "WARNING"
+            and issue.category == "Geometry"
+            and issue.entity_tag == duplicate_tag
+        )
+    ]
+
+    assert len(warnings) == 1
+    assert "reinforcement identity" in warnings[0].message
+    assert "repeated reinforcement segment" in warnings[0].suggestion
+
+
 def test_rc_wall_passes_core_model_validation():
     project, _result = _benchmark_project()
 
