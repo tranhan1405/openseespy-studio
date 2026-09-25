@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -49,6 +50,10 @@ class RCWallPreview(QWidget):
         self.fibers = 3
         self.reinforcement_mode = "smeared"
         self.boundary_bars = 0
+        self.boundary_layer_mode = "front_back"
+        self.boundary_cover = 0.0
+        self.web_horizontal_mode = "smeared"
+        self.web_horizontal_layer_mode = "front_back"
         self.setMinimumHeight(190)
 
     def set_wall(
@@ -61,6 +66,10 @@ class RCWallPreview(QWidget):
         fibers: int,
         reinforcement_mode: str = "smeared",
         boundary_bars: int = 0,
+        boundary_layer_mode: str = "front_back",
+        boundary_cover: float = 0.0,
+        web_horizontal_mode: str = "smeared",
+        web_horizontal_layer_mode: str = "front_back",
     ) -> None:
         self.width_value = max(float(width), 1.0e-12)
         self.height_value = max(float(height), 1.0e-12)
@@ -69,6 +78,10 @@ class RCWallPreview(QWidget):
         self.fibers = max(int(fibers), 3)
         self.reinforcement_mode = str(reinforcement_mode)
         self.boundary_bars = max(int(boundary_bars), 0)
+        self.boundary_layer_mode = str(boundary_layer_mode)
+        self.boundary_cover = max(float(boundary_cover), 0.0)
+        self.web_horizontal_mode = str(web_horizontal_mode)
+        self.web_horizontal_layer_mode = str(web_horizontal_layer_mode)
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -140,41 +153,80 @@ class RCWallPreview(QWidget):
             )
 
         if self.reinforcement_mode == "hybrid" and self.boundary_bars:
-            # Discrete boundary reinforcement is intentionally shown as
-            # explicit red bars. Cap the preview count so very dense layouts
-            # remain legible while the numerical input keeps the true count.
-            preview_bars = min(self.boundary_bars, 12)
-            painter.setPen(QPen(QColor("#d64545"), 2.2))
-            inset = max(boundary_px * 0.12, 2.0)
-            usable = max(boundary_px - 2.0 * inset, 1.0)
-            for bar in range(preview_bars):
-                fraction = (
-                    0.5
-                    if preview_bars == 1
-                    else bar / (preview_bars - 1)
-                )
-                x_left = left + inset + usable * fraction
-                x_right = left + wall_w - boundary_px + inset + usable * fraction
-                painter.drawLine(
-                    int(x_left), int(top),
-                    int(x_left), int(top + wall_h),
-                )
-                painter.drawLine(
-                    int(x_right), int(top),
-                    int(x_right), int(top + wall_h),
-                )
+            # Elevation preview: individual boundary bars are shown explicitly.
+            # Front/back bars are separated schematically by line style because
+            # the physical model is a 2D MEFI wall.
+            cover_px = min(
+                max(self.boundary_cover * scale, 0.0),
+                max(boundary_px * 0.40, 0.0),
+            )
+            usable = max(boundary_px - 2.0 * cover_px, 1.0)
 
-            # Blue guide lines communicate that the web steel remains a
-            # smeared RCLMS field rather than individually meshed bars.
-            painter.setPen(QPen(QColor("#2f80c9"), 1.0))
-            web_left = left + boundary_px
-            web_right = left + wall_w - boundary_px
-            for index in range(1, 6):
-                y = top + wall_h * index / 6.0
-                painter.drawLine(
-                    int(web_left), int(y),
-                    int(web_right), int(y),
+            layer_layout = (
+                (("front", self.boundary_bars // 2),
+                 ("back", self.boundary_bars // 2))
+                if self.boundary_layer_mode == "front_back"
+                else (("center", self.boundary_bars),)
+            )
+            for layer_index, (layer_name, layer_count) in enumerate(
+                layer_layout
+            ):
+                preview_bars = min(max(layer_count, 0), 12)
+                if preview_bars <= 0:
+                    continue
+                pen = QPen(
+                    QColor("#d64545" if layer_name != "back" else "#9f2f2f"),
+                    2.2,
                 )
+                if layer_name == "back":
+                    pen.setStyle(Qt.PenStyle.DashLine)
+                painter.setPen(pen)
+                layer_shift = 2.0 * layer_index
+                for bar in range(preview_bars):
+                    fraction = (
+                        0.5
+                        if preview_bars == 1
+                        else bar / (preview_bars - 1)
+                    )
+                    x_left = (
+                        left + cover_px + usable * fraction + layer_shift
+                    )
+                    x_right = (
+                        left + wall_w - boundary_px
+                        + cover_px + usable * fraction - layer_shift
+                    )
+                    painter.drawLine(
+                        int(x_left), int(top),
+                        int(x_left), int(top + wall_h),
+                    )
+                    painter.drawLine(
+                        int(x_right), int(top),
+                        int(x_right), int(top + wall_h),
+                    )
+
+            if self.web_horizontal_mode == "mesh_aligned":
+                # Only internal MEFI node rows are valid perfect-bond locations
+                # before embedded/interpolation coupling is implemented.
+                pen = QPen(QColor("#2f80c9"), 1.8)
+                if self.web_horizontal_layer_mode == "front_back":
+                    pen.setStyle(Qt.PenStyle.DashDotLine)
+                painter.setPen(pen)
+                for row in range(1, self.rows):
+                    y = top + wall_h * row / self.rows
+                    painter.drawLine(
+                        int(left), int(y), int(left + wall_w), int(y)
+                    )
+            else:
+                # Smeared web reinforcement remains a light guide field.
+                painter.setPen(QPen(QColor("#9bb7d1"), 1.0))
+                web_left = left + boundary_px
+                web_right = left + wall_w - boundary_px
+                for index in range(1, 6):
+                    y = top + wall_h * index / 6.0
+                    painter.drawLine(
+                        int(web_left), int(y),
+                        int(web_right), int(y),
+                    )
 
         painter.setPen(QPen(QColor("#26394c"), 2.2))
         painter.drawLine(
@@ -422,6 +474,37 @@ class RCWallWizard(QWizard):
         self.boundary_bar_count.setRange(1, 200)
         self.boundary_bar_count.setValue(4)
         self.boundary_bar_diameter = _double(16.0, 1.0e-9)
+        self.boundary_layer_mode = QComboBox()
+        self.boundary_layer_mode.addItem(
+            "Front + Back faces",
+            "front_back",
+        )
+        self.boundary_layer_mode.addItem(
+            "Single centerline layer",
+            "single",
+        )
+        self.boundary_cover = _double(30.0, 0.0)
+
+        self.web_horizontal_mode = QComboBox()
+        self.web_horizontal_mode.addItem(
+            "Smeared in RCLMS",
+            "smeared",
+        )
+        self.web_horizontal_mode.addItem(
+            "Discrete · MEFI mesh-aligned rows",
+            "mesh_aligned",
+        )
+        self.web_horizontal_bar_diameter = _double(8.0, 1.0e-9)
+        self.web_horizontal_layer_mode = QComboBox()
+        self.web_horizontal_layer_mode.addItem(
+            "Front + Back faces",
+            "front_back",
+        )
+        self.web_horizontal_layer_mode.addItem(
+            "Single centerline layer",
+            "single",
+        )
+
         self.boundary_truss_type = QComboBox()
         self.boundary_truss_type.addItem("CorotTruss", "corotTruss")
         self.boundary_truss_type.addItem("Truss", "truss")
@@ -446,18 +529,38 @@ class RCWallWizard(QWizard):
             f"Boundary bar diameter [{self.units.length}]:",
             self.boundary_bar_diameter,
         )
+        form.addRow("Boundary layers:", self.boundary_layer_mode)
+        form.addRow(
+            f"Boundary clear cover [{self.units.length}]:",
+            self.boundary_cover,
+        )
+        form.addRow(
+            "Horizontal web steel:",
+            self.web_horizontal_mode,
+        )
+        form.addRow(
+            f"Horizontal bar diameter [{self.units.length}]:",
+            self.web_horizontal_bar_diameter,
+        )
+        form.addRow(
+            "Horizontal layers:",
+            self.web_horizontal_layer_mode,
+        )
         form.addRow(
             "Discrete element formulation:",
             self.boundary_truss_type,
         )
 
         note = QLabel(
-            "Hybrid V1 moves part of boundary vertical steel from the "
-            "smeared RCLMS ratio into discrete Truss/CorotTruss elements. "
-            "The discrete bars share the MEFI edge nodes (perfect bond), and "
-            "SARE automatically subtracts their area from boundary rho-y to "
-            "avoid double-counting. V1 is edge-lumped: one truss line per "
-            "boundary represents the total selected bar area."
+            "Hybrid creates one FE chain per boundary longitudinal bar, so "
+            "bars have individual element tags and results. In the current "
+            "2D MEFI formulation the physical bars still share each boundary "
+            "edge node chain (perfect bond); front/back and cover are shown "
+            "schematically in the viewport. Horizontal web bars can also be "
+            "discretized on existing internal MEFI node rows, with their rho-x "
+            "automatically removed from the smeared RCLMS steel. Vertical web "
+            "bars remain smeared until embedded/interpolation coupling is "
+            "implemented."
         )
         note.setWordWrap(True)
         note.setStyleSheet(
@@ -476,6 +579,8 @@ class RCWallWizard(QWizard):
             self.rho_y_boundary,
             self.boundary_bar_count,
             self.boundary_bar_diameter,
+            self.boundary_cover,
+            self.web_horizontal_bar_diameter,
         ):
             widget.valueChanged.connect(
                 lambda _value: self._mark_custom()
@@ -486,13 +591,34 @@ class RCWallWizard(QWizard):
         self.boundary_truss_type.currentIndexChanged.connect(
             lambda _index: self._mark_custom()
         )
+        self.boundary_layer_mode.currentIndexChanged.connect(
+            lambda _index: self._reinforcement_layout_changed()
+        )
+        self.web_horizontal_mode.currentIndexChanged.connect(
+            lambda _index: self._reinforcement_layout_changed()
+        )
+        self.web_horizontal_layer_mode.currentIndexChanged.connect(
+            lambda _index: self._reinforcement_layout_changed()
+        )
         self.boundary_bar_count.valueChanged.connect(
             lambda _value: self._update_preview()
         )
         self.boundary_bar_diameter.valueChanged.connect(
             lambda _value: self._update_preview()
         )
+        self.boundary_cover.valueChanged.connect(
+            lambda _value: self._update_preview()
+        )
+        self.web_horizontal_bar_diameter.valueChanged.connect(
+            lambda _value: self._update_preview()
+        )
         self.rho_y_boundary.valueChanged.connect(
+            lambda _value: self._update_reinforcement_info()
+        )
+        self.rho_x_web.valueChanged.connect(
+            lambda _value: self._update_reinforcement_info()
+        )
+        self.rho_x_boundary.valueChanged.connect(
             lambda _value: self._update_reinforcement_info()
         )
         self._sync_reinforcement_mode()
@@ -503,13 +629,26 @@ class RCWallWizard(QWizard):
         self._mark_custom()
         self._sync_reinforcement_mode()
 
+    def _reinforcement_layout_changed(self) -> None:
+        self._mark_custom()
+        self._sync_reinforcement_mode()
+
     def _sync_reinforcement_mode(self) -> None:
         enabled = (
             str(self.reinforcement_mode.currentData()) == "hybrid"
         )
         self.boundary_bar_count.setEnabled(enabled)
         self.boundary_bar_diameter.setEnabled(enabled)
+        self.boundary_layer_mode.setEnabled(enabled)
+        self.boundary_cover.setEnabled(enabled)
         self.boundary_truss_type.setEnabled(enabled)
+        self.web_horizontal_mode.setEnabled(enabled)
+        horizontal_enabled = (
+            enabled
+            and self.web_horizontal_mode.currentData() == "mesh_aligned"
+        )
+        self.web_horizontal_bar_diameter.setEnabled(horizontal_enabled)
+        self.web_horizontal_layer_mode.setEnabled(horizontal_enabled)
         self._update_reinforcement_info()
         self._update_preview()
         self._update_review()
@@ -525,26 +664,114 @@ class RCWallWizard(QWizard):
 
         count = int(self.boundary_bar_count.value())
         diameter = float(self.boundary_bar_diameter.value())
+        cover = float(self.boundary_cover.value())
         boundary = float(self.boundary_width.value())
         thickness = float(self.thickness.value())
-        area = count * math.pi * diameter * diameter / 4.0
+        bar_area = math.pi * diameter * diameter / 4.0
+        area = count * bar_area
         gross = boundary * thickness
         discrete_ratio = area / gross if gross > 0.0 else 0.0
         total_ratio = float(self.rho_y_boundary.value()) / 100.0
         remaining = total_ratio - discrete_ratio
 
-        warning = ""
+        layer_mode = str(self.boundary_layer_mode.currentData())
+        per_layer = (
+            count // 2 if layer_mode == "front_back" else count
+        )
+        clear_span = max(
+            boundary - 2.0 * cover - diameter,
+            0.0,
+        )
+        spacing = (
+            clear_span / (per_layer - 1)
+            if per_layer > 1
+            else 0.0
+        )
+
+        warning_parts: list[str] = []
         if remaining < -1.0e-12:
-            warning = (
-                "<br><b style='color:#b42318'>Discrete steel exceeds total "
-                "boundary rho-y.</b>"
+            warning_parts.append(
+                "Discrete boundary steel exceeds total boundary rho-y."
             )
+        if layer_mode == "front_back" and count % 2:
+            warning_parts.append(
+                "Front/back layout requires an even total boundary bar count."
+            )
+        if 2.0 * cover + diameter > boundary + 1.0e-12:
+            warning_parts.append(
+                "Cover + bar diameter do not fit the boundary-zone width."
+            )
+        if (
+            layer_mode == "front_back"
+            and 2.0 * cover + diameter > thickness + 1.0e-12
+        ):
+            warning_parts.append(
+                "Cover + bar diameter do not fit through wall thickness."
+            )
+
+        horizontal_text = "Horizontal web steel: smeared"
+        if self.web_horizontal_mode.currentData() == "mesh_aligned":
+            h_diameter = float(self.web_horizontal_bar_diameter.value())
+            h_area = math.pi * h_diameter * h_diameter / 4.0
+            h_layers = (
+                2
+                if self.web_horizontal_layer_mode.currentData()
+                == "front_back"
+                else 1
+            )
+            h_lines = max(int(self.vertical_elements.value()) - 1, 0)
+            h_rho = (
+                h_lines * h_layers * h_area
+                / (
+                    float(self.height.value())
+                    * thickness
+                )
+                if float(self.height.value()) > 0.0 and thickness > 0.0
+                else 0.0
+            )
+            web_remaining = (
+                float(self.rho_x_web.value()) / 100.0 - h_rho
+            )
+            boundary_x_remaining = (
+                float(self.rho_x_boundary.value()) / 100.0 - h_rho
+            )
+            if web_remaining < -1.0e-12 or boundary_x_remaining < -1.0e-12:
+                warning_parts.append(
+                    "Discrete horizontal bars exceed available rho-x."
+                )
+            mesh_spacing = (
+                float(self.height.value())
+                / max(int(self.vertical_elements.value()), 1)
+            )
+            horizontal_text = (
+                f"Horizontal discrete: {h_lines} internal rows × "
+                f"{h_layers} layer(s) × Ø{h_diameter:g}; "
+                f"mesh spacing ≈ {mesh_spacing:g} {self.units.length}; "
+                f"ρx,discrete = {100.0 * h_rho:.4g}%"
+            )
+
+        warning = "".join(
+            f"<br><b style='color:#b42318'>{message}</b>"
+            for message in warning_parts
+        )
+        layer_label = (
+            "Front + Back"
+            if layer_mode == "front_back"
+            else "Single centerline"
+        )
         self.reinforcement_info.setText(
             f"<b>Each boundary zone</b><br>"
-            f"As,discrete = {area:g} {self.units.length}² "
+            f"As,bar = {bar_area:g} {self.units.length}² · "
+            f"As,total = {area:g} {self.units.length}² "
             f"({count} × Ø{diameter:g})<br>"
-            f"ρy,discrete = {100.0 * discrete_ratio:.4g}%<br>"
-            f"ρy,smeared remaining = {100.0 * max(remaining, 0.0):.4g}%"
+            f"Layers = {layer_label} · bars/layer = {per_layer}<br>"
+            f"Clear cover = {cover:g} {self.units.length} · "
+            f"center spacing ≈ {spacing:g} {self.units.length}<br>"
+            f"ρy,discrete = {100.0 * discrete_ratio:.4g}% · "
+            f"ρy,smeared remaining = "
+            f"{100.0 * max(remaining, 0.0):.4g}%<br>"
+            f"{horizontal_text}<br>"
+            "<i>Vertical web bars remain smeared until embedded coupling.</i>"
             + warning
         )
 
@@ -621,6 +848,26 @@ class RCWallWizard(QWizard):
                 if hasattr(self, "boundary_bar_count")
                 else 0
             ),
+            boundary_layer_mode=(
+                str(self.boundary_layer_mode.currentData())
+                if hasattr(self, "boundary_layer_mode")
+                else "front_back"
+            ),
+            boundary_cover=(
+                float(self.boundary_cover.value())
+                if hasattr(self, "boundary_cover")
+                else 0.0
+            ),
+            web_horizontal_mode=(
+                str(self.web_horizontal_mode.currentData())
+                if hasattr(self, "web_horizontal_mode")
+                else "smeared"
+            ),
+            web_horizontal_layer_mode=(
+                str(self.web_horizontal_layer_mode.currentData())
+                if hasattr(self, "web_horizontal_layer_mode")
+                else "front_back"
+            ),
         )
         self._update_reinforcement_info()
 
@@ -663,6 +910,25 @@ class RCWallWizard(QWizard):
             self.reinforcement_mode.blockSignals(False)
         self.boundary_bar_count.setValue(4)
         self.boundary_bar_diameter.setValue(self._from_mm(16.0))
+        self.boundary_cover.setValue(self._from_mm(30.0))
+        front_back_index = self.boundary_layer_mode.findData("front_back")
+        if front_back_index >= 0:
+            self.boundary_layer_mode.blockSignals(True)
+            self.boundary_layer_mode.setCurrentIndex(front_back_index)
+            self.boundary_layer_mode.blockSignals(False)
+        smeared_horizontal = self.web_horizontal_mode.findData("smeared")
+        if smeared_horizontal >= 0:
+            self.web_horizontal_mode.blockSignals(True)
+            self.web_horizontal_mode.setCurrentIndex(smeared_horizontal)
+            self.web_horizontal_mode.blockSignals(False)
+        self.web_horizontal_bar_diameter.setValue(self._from_mm(8.0))
+        horizontal_layers = self.web_horizontal_layer_mode.findData(
+            "front_back"
+        )
+        if horizontal_layers >= 0:
+            self.web_horizontal_layer_mode.blockSignals(True)
+            self.web_horizontal_layer_mode.setCurrentIndex(horizontal_layers)
+            self.web_horizontal_layer_mode.blockSignals(False)
         corot_index = self.boundary_truss_type.findData("corotTruss")
         if corot_index >= 0:
             self.boundary_truss_type.blockSignals(True)
@@ -727,6 +993,19 @@ class RCWallWizard(QWizard):
             ),
             boundary_truss_type=str(
                 self.boundary_truss_type.currentData()
+            ),
+            boundary_layer_mode=str(
+                self.boundary_layer_mode.currentData()
+            ),
+            boundary_cover=float(self.boundary_cover.value()),
+            web_horizontal_mode=str(
+                self.web_horizontal_mode.currentData()
+            ),
+            web_horizontal_bar_diameter=float(
+                self.web_horizontal_bar_diameter.value()
+            ),
+            web_horizontal_layer_mode=str(
+                self.web_horizontal_layer_mode.currentData()
             ),
             boundary_unconfined_thickness=unconfined,
             boundary_confined_thickness=confined,
@@ -806,10 +1085,10 @@ class RCWallWizard(QWizard):
                 if self.reinforcement_mode.currentData() == "hybrid":
                     diameter = float(self.boundary_bar_diameter.value())
                     count = int(self.boundary_bar_count.value())
-                    gross = (
-                        float(self.boundary_width.value())
-                        * float(self.thickness.value())
-                    )
+                    cover = float(self.boundary_cover.value())
+                    boundary = float(self.boundary_width.value())
+                    thickness = float(self.thickness.value())
+                    gross = boundary * thickness
                     discrete_ratio = (
                         count * math.pi * diameter * diameter / 4.0 / gross
                     )
@@ -822,6 +1101,64 @@ class RCWallWizard(QWizard):
                             "rho-y. Reduce bar count/diameter or increase "
                             "boundary rho-y."
                         )
+                    if (
+                        self.boundary_layer_mode.currentData() == "front_back"
+                        and count % 2
+                    ):
+                        raise ValueError(
+                            "Front/back boundary layout requires an even "
+                            "total bar count."
+                        )
+                    if 2.0 * cover + diameter > boundary + 1.0e-12:
+                        raise ValueError(
+                            "Boundary cover and bar diameter do not fit "
+                            "the boundary-zone width."
+                        )
+                    if (
+                        self.boundary_layer_mode.currentData() == "front_back"
+                        and 2.0 * cover + diameter > thickness + 1.0e-12
+                    ):
+                        raise ValueError(
+                            "Boundary cover and bar diameter do not fit "
+                            "through the wall thickness."
+                        )
+                    if (
+                        self.web_horizontal_mode.currentData()
+                        == "mesh_aligned"
+                    ):
+                        h_d = float(
+                            self.web_horizontal_bar_diameter.value()
+                        )
+                        h_layers = (
+                            2
+                            if self.web_horizontal_layer_mode.currentData()
+                            == "front_back"
+                            else 1
+                        )
+                        h_lines = max(
+                            int(self.vertical_elements.value()) - 1,
+                            0,
+                        )
+                        h_rho = (
+                            h_lines
+                            * h_layers
+                            * math.pi
+                            * h_d
+                            * h_d
+                            / 4.0
+                            / (
+                                float(self.height.value())
+                                * thickness
+                            )
+                        )
+                        if h_rho > min(
+                            float(self.rho_x_web.value()) / 100.0,
+                            float(self.rho_x_boundary.value()) / 100.0,
+                        ) + 1.0e-12:
+                            raise ValueError(
+                                "Discrete horizontal bars exceed available "
+                                "rho-x in the web or boundary zone."
+                            )
             else:
                 self.data()
         except ValueError as exc:
@@ -871,11 +1208,25 @@ class RCWallWizard(QWizard):
                     0.0,
                     float(self.rho_y_boundary.value()) - discrete_rho,
                 )
+                layer_label = (
+                    "front/back"
+                    if self.boundary_layer_mode.currentData()
+                    == "front_back"
+                    else "single layer"
+                )
+                horizontal_label = (
+                    " + mesh-aligned horizontal bars"
+                    if self.web_horizontal_mode.currentData()
+                    == "mesh_aligned"
+                    else ""
+                )
                 reinforcement_text = (
-                    f"Hybrid · {bars} × Ø{diameter:g} per boundary zone "
-                    f"→ discrete rho-y {discrete_rho:.3g}% + "
-                    f"smeared remainder {remaining:.3g}% · "
+                    f"Hybrid · {bars} individual Ø{diameter:g} bars per "
+                    f"boundary zone ({layer_label}) → discrete rho-y "
+                    f"{discrete_rho:.3g}% + smeared remainder "
+                    f"{remaining:.3g}% · "
                     f"{self.boundary_truss_type.currentText()}"
+                    f"{horizontal_label}"
                 )
 
             text = (
@@ -895,7 +1246,7 @@ class RCWallWizard(QWizard):
                 "5 uniaxial materials → 4 nD materials → "
                 "2 RCLMS sections → MEFI wall mesh"
                 + (
-                    " + discrete boundary truss lines"
+                    " + individual discrete reinforcement bars"
                     if reinforcement_mode == "hybrid"
                     else ""
                 )
