@@ -16,6 +16,7 @@ from .model import (
     CONTACT_TWO_NODE_ELEMENT_TYPES,
     CONTINUUM_QUAD_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
+    FRICTION_BEARING_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
@@ -5649,6 +5650,55 @@ def to_openseespy(
                 + f", {w:g}, {uy:g}, {kvt:g}, {min_fv:g}, "
                 f"{float(p['tol']):g})"
             )
+            continue
+
+        if e.element_type in FRICTION_BEARING_ELEMENT_TYPES:
+            p = e.special_parameters
+            unit_system = UnitSystem.from_mapping(units)
+            k_init = (
+                float(p["kInit"])
+                * unit_system.length_to_m
+                / unit_system.force_to_n
+            )
+            args = (
+                f"ops.element('{e.element_type}', "
+                f"{tag}, {e.i}, {e.j}, {int(p['frn_model_tag'])}, "
+            )
+            if e.element_type == "singleFPBearing":
+                args += (
+                    f"{unit_system.length_from_m(float(p['Reff'])):g}, "
+                )
+            args += (
+                f"{k_init:g}, '-P', {int(p['p_mat_tag'])}"
+            )
+            if int(model.ndm) == 3:
+                args += (
+                    f", '-T', {int(p['t_mat_tag'])}, "
+                    f"'-My', {int(p['my_mat_tag'])}"
+                )
+            args += f", '-Mz', {int(p['mz_mat_tag'])}"
+            orientation = p.get("orientation")
+            if orientation is not None:
+                args += ", '-orient', " + ", ".join(
+                    f"{float(value):g}" for value in orientation
+                )
+            if abs(float(p["shearDist"])) > 1.0e-12:
+                args += f", '-shearDist', {float(p['shearDist']):g}"
+            if bool(p["doRayleigh"]):
+                args += ", '-doRayleigh'"
+            if float(p["mass"]) > 0.0:
+                mass = float(p["mass"]) / unit_system.mass_unit_kg
+                args += f", '-mass', {mass:g}"
+            if (
+                int(p["maxIter"]) != 20
+                or abs(float(p["tol"]) - 1.0e-8) > 1.0e-16
+            ):
+                args += (
+                    f", '-iter', {int(p['maxIter'])}, "
+                    f"{float(p['tol']):g}"
+                )
+            args += ")"
+            lines.append(args)
             continue
 
         if e.element_type == "elastomericBearingPlasticity":
