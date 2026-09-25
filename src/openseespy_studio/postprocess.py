@@ -68,6 +68,40 @@ NODAL_MAGNITUDE_COMPONENTS: dict[str, tuple[int, ...]] = {
 }
 
 
+def shell_surface_strains(
+    values: Sequence[float],
+    z: float = 0.0,
+) -> tuple[float, float, float] | None:
+    """Return in-plane strains at shell coordinate z.
+
+    The generalized shell deformation vector is interpreted as
+    [Exx, Eyy, Gxy, Kxx, Kyy, Kxy, ...].  Positive z follows the shell
+    section local normal, so Top uses +h/2 and Bottom uses -h/2.
+    """
+    if len(values) < 6:
+        return None
+    try:
+        exx = float(values[0])
+        eyy = float(values[1])
+        gxy = float(values[2])
+        kxx = float(values[3])
+        kyy = float(values[4])
+        kxy = float(values[5])
+        z_value = float(z)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not all(
+        math.isfinite(value)
+        for value in (exx, eyy, gxy, kxx, kyy, kxy, z_value)
+    ):
+        return None
+    return (
+        exx + z_value * kxx,
+        eyy + z_value * kyy,
+        gxy + z_value * kxy,
+    )
+
+
 def shell_principal_strains(
     values: Sequence[float],
 ) -> tuple[float, float] | None:
