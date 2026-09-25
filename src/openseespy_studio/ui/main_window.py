@@ -86,6 +86,7 @@ from ..model import (
     CONTACT_TWO_NODE_ELEMENT_TYPES,
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
+    FRICTION_BEARING_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
@@ -197,6 +198,7 @@ from .special_element_dialog import (
 )
 from .isolation_contact_dialog import (
     ContactElementDialog,
+    FrictionBearingDialog,
     FrictionModelDialog,
     LeadRubberXDialog,
     TripleFrictionPendulumDialog,
@@ -2506,6 +2508,13 @@ class MainWindow(QMainWindow):
             "Create an elastomericBearingPlasticity isolation element",
         )
         self._make_action(
+            "friction_bearing",
+            "Friction Bearing...",
+            "spring",
+            self._create_friction_bearing,
+            "Create a flatSliderBearing or singleFPBearing isolation element",
+        )
+        self._make_action(
             "lead_rubber_x",
             "Lead Rubber X...",
             "spring",
@@ -3720,6 +3729,7 @@ class MainWindow(QMainWindow):
             small=(
                 "catenary_cable",
                 "elastomeric_bearing",
+                "friction_bearing",
                 "lead_rubber_x",
                 "triple_friction_pendulum",
                 "contact_element",
@@ -11221,6 +11231,81 @@ class MainWindow(QMainWindow):
                 )
                 return
 
+            if element.element_type in FRICTION_BEARING_ELEMENT_TYPES:
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                friction_tag = int(p["frn_model_tag"])
+                friction = self.project.friction_models.get(friction_tag)
+                k_init = (
+                    float(p["kInit"])
+                    * unit_system.length_to_m
+                    / unit_system.force_to_n
+                )
+                mass = float(p["mass"]) / unit_system.mass_unit_kg
+                material_rows = [
+                    ("Axial (-P)", p.get("p_mat_tag")),
+                ]
+                if int(self.model.ndm) == 3:
+                    material_rows.extend([
+                        ("Torsion (-T)", p.get("t_mat_tag")),
+                        ("Moment-y (-My)", p.get("my_mat_tag")),
+                    ])
+                material_rows.append(("Moment-z (-Mz)", p.get("mz_mat_tag")))
+                rows = [
+                    ("Tag", tag),
+                    ("Type", element.element_type),
+                    ("Nodes", f"{element.i}, {element.j}"),
+                    ("Group", element.group),
+                    (
+                        "Friction model",
+                        (
+                            f"{friction_tag} - {friction.name}"
+                            if friction is not None
+                            else f"{friction_tag} (missing)"
+                        ),
+                    ),
+                    (
+                        f"Initial shear stiffness "
+                        f"[{unit_system.force}/{unit_system.length}]",
+                        f"{k_init:g}",
+                    ),
+                ]
+                if element.element_type == "singleFPBearing":
+                    rows.append((
+                        f"Effective radius Reff [{unit_system.length}]",
+                        f"{unit_system.length_from_m(float(p['Reff'])):g}",
+                    ))
+                rows.extend(
+                    (label, "-" if value is None else int(value))
+                    for label, value in material_rows
+                )
+                rows.extend([
+                    ("Shear-distance ratio", f"{float(p['shearDist']):g}"),
+                    (
+                        f"Element mass [{unit_system.mass_label}]",
+                        f"{mass:g}",
+                    ),
+                    (
+                        "Rayleigh damping",
+                        "Included" if bool(p["doRayleigh"]) else "Excluded",
+                    ),
+                    (
+                        "Local iteration",
+                        f"{int(p['maxIter'])} @ tol={float(p['tol']):g}",
+                    ),
+                    (
+                        "Edit",
+                        "Double-click element or use Definition → "
+                        "Edit Friction Bearing...",
+                    ),
+                ])
+                self.properties_panel.set_properties(
+                    "Friction Bearing",
+                    rows,
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
             if element.element_type == "LeadRubberX":
                 p = element.special_parameters
                 unit_system = UnitSystem.from_mapping(self.project.units)
@@ -16933,6 +17018,142 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _create_friction_bearing(self) -> None:
+        signature = (int(self.model.ndm), int(self.model.ndf))
+        if signature not in {(2, 3), (3, 6)}:
+            QMessageBox.warning(
+                self,
+                "Create Friction Bearing",
+                "flatSliderBearing / singleFPBearing require 2D/3DOF "
+                "or 3D/6DOF.",
+            )
+            return
+        if not self._ensure_prerequisite(
+            title="Create Friction Bearing",
+            message=(
+                "A friction bearing requires uniaxial materials for its "
+                "non-sliding directions. Create a Material now?"
+            ),
+            action_label="Create Material Now...",
+            available=lambda: bool(self.project.materials),
+            creator=self._create_material,
+        ):
+            return
+        if not self._ensure_prerequisite(
+            title="Create Friction Bearing",
+            message=(
+                "A friction bearing requires a reusable Friction Model. "
+                "Create one now?"
+            ),
+            action_label="Create Friction Model Now...",
+            available=lambda: bool(self.project.friction_models),
+            creator=self._create_friction_model,
+        ):
+            return
+        nodes = self._special_default_nodes()
+        if nodes is None:
+            return
+        dialog = FrictionBearingDialog(
+            tag=self.project.next_element_tag(),
+            node_i=nodes[0],
+            node_j=nodes[1],
+            ndm=self.model.ndm,
+            materials=self.project.materials,
+            friction_models=self.project.friction_models,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            tag, i, j, element_type, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Friction Bearing", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type=element_type,
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Create Friction Bearing", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(f"Created {element_type} {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(
+            f"Create {element_type} {tag}",
+            before,
+        )
+
+    def _edit_friction_bearing(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if (
+            element is None
+            or element.element_type not in FRICTION_BEARING_ELEMENT_TYPES
+        ):
+            return
+        dialog = FrictionBearingDialog(
+            tag=element.tag,
+            node_i=element.i,
+            node_j=element.j,
+            ndm=self.model.ndm,
+            materials=self.project.materials,
+            friction_models=self.project.friction_models,
+            units=self.project.units,
+            element=element,
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            _tag, i, j, element_type, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit Friction Bearing", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            self.model.elements.pop(int(tag))
+            self.model.add_element(
+                int(tag),
+                i,
+                j,
+                element_type=element_type,
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(int(tag))
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Edit Friction Bearing", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(f"Updated {element_type} {tag}")
+        self.selection.select("element", int(tag), "replace")
+        self._show_entity_properties("element", int(tag))
+        self._record_project_change(
+            f"Edit friction bearing {tag}",
+            before,
+        )
+
     def _create_lead_rubber_x(self) -> None:
         if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
             QMessageBox.warning(
@@ -19249,7 +19470,7 @@ class MainWindow(QMainWindow):
                     f"{shown_rate:g}",
                 ),
             ])
-        users = sorted(
+        tfp_users = sorted(
             element.tag
             for element in self.model.elements.values()
             if (
@@ -19260,10 +19481,24 @@ class MainWindow(QMainWindow):
                 }
             )
         )
-        rows.append((
-            "Used by TFP elements",
-            ", ".join(map(str, users)) or "-",
-        ))
+        bearing_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in FRICTION_BEARING_ELEMENT_TYPES
+                and int(element.special_parameters["frn_model_tag"]) == tag
+            )
+        )
+        rows.extend([
+            (
+                "Used by TFP elements",
+                ", ".join(map(str, tfp_users)) or "-",
+            ),
+            (
+                "Used by friction bearings",
+                ", ".join(map(str, bearing_users)) or "-",
+            ),
+        ])
         self.properties_panel.set_properties("Friction Model", rows)
 
     def _create_nd_material(self) -> None:
@@ -30901,6 +31136,9 @@ class MainWindow(QMainWindow):
             is_bearing_group = (
                 element_type == "elastomericBearingPlasticity"
             )
+            is_friction_bearing_group = (
+                element_type in FRICTION_BEARING_ELEMENT_TYPES
+            )
             is_advanced_bearing_group = element_type in {
                 "LeadRubberX",
                 "TripleFrictionPendulum",
@@ -30928,6 +31166,9 @@ class MainWindow(QMainWindow):
             elif is_bearing_group:
                 create = menu.addAction("New Elastomeric Bearing...")
                 create.triggered.connect(self._create_elastomeric_bearing)
+            elif is_friction_bearing_group:
+                create = menu.addAction("New Friction Bearing...")
+                create.triggered.connect(self._create_friction_bearing)
             elif is_advanced_bearing_group:
                 if element_type == "LeadRubberX":
                     create = menu.addAction("New LeadRubberX...")
@@ -31010,6 +31251,17 @@ class MainWindow(QMainWindow):
                             self._edit_special_element(values[0])
                             if len(values) == 1
                             else None
+                        )
+                    )
+                elif is_friction_bearing_group:
+                    edit_friction = definition_menu.addAction(
+                        "Edit Friction Bearing..."
+                    )
+                    edit_friction.setEnabled(len(tags) == 1)
+                    edit_friction.triggered.connect(
+                        lambda checked=False, values=tuple(sorted(tags)): (
+                            self._edit_friction_bearing(values[0])
+                            if len(values) == 1 else None
                         )
                     )
                 elif is_advanced_bearing_group:
@@ -31498,6 +31750,7 @@ class MainWindow(QMainWindow):
                     | WALL_MACRO_ELEMENT_TYPES
                     | CABLE_ELEMENT_TYPES
                     | {"elastomericBearingPlasticity"}
+                    | FRICTION_BEARING_ELEMENT_TYPES
                     | {"LeadRubberX", "TripleFrictionPendulum"}
                     | CONTACT_ELEMENT_TYPES
                     | TRUSS_ELEMENT_TYPES
@@ -31553,6 +31806,16 @@ class MainWindow(QMainWindow):
                     )
                     edit_wall.triggered.connect(
                         lambda: self._edit_wall_macro_element(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in FRICTION_BEARING_ELEMENT_TYPES
+                ):
+                    edit_friction = definition_menu.addAction(
+                        "Edit Friction Bearing..."
+                    )
+                    edit_friction.triggered.connect(
+                        lambda: self._edit_friction_bearing(tag)
                     )
                 elif (
                     self.model.elements[tag].element_type
@@ -33905,6 +34168,11 @@ class MainWindow(QMainWindow):
                 )
             ):
                 self._edit_special_element(int(value))
+            elif (
+                element is not None
+                and element.element_type in FRICTION_BEARING_ELEMENT_TYPES
+            ):
+                self._edit_friction_bearing(int(value))
             elif (
                 element is not None
                 and element.element_type
