@@ -1493,7 +1493,7 @@ class RCWallWizard(QWizard):
         )
         layout.addWidget(self.review)
 
-        warning = QLabel(
+        self.preview_note = QLabel(
             "Preview is generated from the current wizard inputs before the "
             "project is modified. Boundary and mesh-aligned horizontal bars "
             "use shared-node perfect bond. Embedded vertical web bars use "
@@ -1501,11 +1501,11 @@ class RCWallWizard(QWizard):
             "ASDEmbeddedNodeElement; front/back separation remains schematic "
             "in this 2D wall model."
         )
-        warning.setWordWrap(True)
-        warning.setStyleSheet(
+        self.preview_note.setWordWrap(True)
+        self.preview_note.setStyleSheet(
             "padding: 8px; background: #fff7e0; color: #7a5600;"
         )
-        layout.addWidget(warning)
+        layout.addWidget(self.preview_note)
         self.addPage(page)
 
     def _mark_custom(self) -> None:
@@ -1576,6 +1576,55 @@ class RCWallWizard(QWizard):
             self.macro_boundary_fsam.setEnabled(is_sfi)
         if hasattr(self, "macro_dependency_note"):
             self.macro_dependency_note.setVisible(not is_mefi)
+
+        if hasattr(self, "preview_legend"):
+            if is_mefi:
+                self.preview_legend.setText(
+                    "<b>Legend</b> · "
+                    "<span style='color:#8fa3b5'>■</span> Concrete / web · "
+                    "<span style='color:#7897b5'>■</span> Boundary zone · "
+                    "<span style='color:#d64545'>━</span> Boundary bars · "
+                    "<span style='color:#2f80c9'>━</span> Horizontal bars · "
+                    "<span style='color:#188977'>━</span> Embedded bars · "
+                    "<span style='color:#26394c'>━</span> MEFI mesh"
+                )
+            elif is_3d:
+                self.preview_legend.setText(
+                    "<b>Legend</b> · Boundary/Web macro-fibers · "
+                    "<span style='color:#f28c00'>━</span> "
+                    "MVLEM_3D panel guide · four-node panels"
+                )
+            else:
+                self.preview_legend.setText(
+                    "<b>Legend</b> · Boundary/Web macro-fibers · "
+                    "<span style='color:#f28c00'>┄</span> "
+                    "macro-element centerline + nodes"
+                )
+
+        if hasattr(self, "preview_note"):
+            if is_mefi:
+                self.preview_note.setText(
+                    "MEFI/RCLMS preview includes detailed reinforcement. "
+                    "Embedded vertical bars use ASDEmbeddedNodeElement; "
+                    "front/back separation remains schematic in 2D."
+                )
+            elif is_sfi:
+                self.preview_note.setText(
+                    "SFI_MVLEM uses a centerline macro-element stack. "
+                    "Boundary and web fibers reference existing FSAM "
+                    "nDMaterials; no RCLMS/discrete-bar objects are generated."
+                )
+            elif is_3d:
+                self.preview_note.setText(
+                    "MVLEM_3D uses four nodes per wall panel row in a "
+                    "3D/6DOF domain. Fiber widths, thicknesses, steel ratios "
+                    "and material mapping are shared across the vertical stack."
+                )
+            else:
+                self.preview_note.setText(
+                    "MVLEM uses a centerline macro-element stack with "
+                    "Concrete02/Steel02 fibers and one existing shear material."
+                )
 
     def _preset_changed(self, *_args) -> None:
         if self.preset.currentData() == "rw-a20":
@@ -2434,6 +2483,63 @@ class RCWallWizard(QWizard):
             for _key, message in self._preview_validation_items()
         ]
 
+    def _rw_a20_material_status_html(
+        self,
+        *,
+        include_steel_x: bool,
+    ) -> str:
+        stress = self._stress_store
+        checks: list[tuple[str, bool]] = []
+        if include_steel_x:
+            checks.append((
+                "Steel X",
+                math.isclose(stress(self.steel_E.value()), 200.0e9, rel_tol=1e-9)
+                and math.isclose(stress(self.fy_x.value()), 469.93e6, rel_tol=1e-9),
+            ))
+        checks.extend([
+            (
+                "Steel Y web",
+                math.isclose(stress(self.steel_E.value()), 200.0e9, rel_tol=1e-9)
+                and math.isclose(
+                    stress(self.fy_y_web.value()), 409.71e6, rel_tol=1e-9
+                ),
+            ),
+            (
+                "Steel Y boundary",
+                math.isclose(stress(self.steel_E.value()), 200.0e9, rel_tol=1e-9)
+                and math.isclose(
+                    stress(self.fy_y_boundary.value()), 429.78e6, rel_tol=1e-9
+                ),
+            ),
+            (
+                "Concrete web",
+                math.isclose(
+                    stress(self.fc_web.value()), 47.09e6, rel_tol=1e-9
+                )
+                and math.isclose(
+                    float(self.eps_web.value()), -0.00232, rel_tol=1e-9
+                ),
+            ),
+            (
+                "Concrete boundary",
+                math.isclose(
+                    stress(self.fc_boundary.value()), 53.78e6, rel_tol=1e-9
+                )
+                and math.isclose(
+                    float(self.eps_boundary.value()), -0.00397, rel_tol=1e-9
+                ),
+            ),
+        ])
+        return "<br>".join(
+            f"{name}: "
+            + (
+                "<span style='color:#22763b'>✓ Verified RW-A20</span>"
+                if exact
+                else "<span style='color:#a15c00'>Modified from verified</span>"
+            )
+            for name, exact in checks
+        )
+
     def _update_review(self) -> None:
         if not hasattr(self, "review"):
             return
@@ -2492,7 +2598,7 @@ class RCWallWizard(QWizard):
                     f"{self.units.length}<br>"
                     "All target ρx/ρy represented by discrete bars."
                 )
-            elif reinforcement_mode == "hybrid":
+            elif formulation == "MEFI" and reinforcement_mode == "hybrid":
                 diameter = float(self.boundary_bar_diameter.value())
                 bars = int(self.boundary_bar_count.value())
                 discrete_area = bars * math.pi * diameter * diameter / 4.0
@@ -2608,6 +2714,10 @@ class RCWallWizard(QWizard):
                     "Sections: RCLMS Web (1 layer) · "
                     "RCLMS Boundary (2 layers)<br>"
                     f"Discrete reinforcement formulation: {truss_text}<br>"
+                    + self._rw_a20_material_status_html(
+                        include_steel_x=True
+                    )
+                    + "<br>"
                     + (
                         "Coupling: ASDEmbeddedNodeElement · "
                         f"penalty factor "
@@ -2629,8 +2739,10 @@ class RCWallWizard(QWizard):
                     "<b>Materials & Dependencies</b><br>"
                     "Generated: Steel02 web/boundary + "
                     "Concrete02 web/boundary<br>"
-                    "Provenance: RW-A20 verified preset when unchanged; "
-                    "edited values marked modified-from-verified<br>"
+                    + self._rw_a20_material_status_html(
+                        include_steel_x=False
+                    )
+                    + "<br>"
                     f"Shear: {self.macro_shear_material.currentText()}<br>"
                     f"CoR c = {self.macro_center_ratio.value():g} · "
                     f"density = {self.macro_density.value():g}"
