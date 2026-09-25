@@ -1166,23 +1166,31 @@ class ResultsPanel(QWidget):
             return
 
         if kind == "ShellDisplacement":
-            component = str(options.get("component", "|U|"))
-            index = self.shell_disp_component.findText(component)
-            if index >= 0:
-                self.shell_disp_component.setCurrentIndex(index)
+            self.shell_disp_component.blockSignals(True)
+            self.shell_disp_scale.blockSignals(True)
+            self.shell_disp_display.blockSignals(True)
             try:
-                self.shell_disp_scale.setValue(
-                    float(options.get("scale", 10.0))
+                component = str(options.get("component", "|U|"))
+                index = self.shell_disp_component.findText(component)
+                if index >= 0:
+                    self.shell_disp_component.setCurrentIndex(index)
+                try:
+                    self.shell_disp_scale.setValue(
+                        float(options.get("scale", 10.0))
+                    )
+                except (TypeError, ValueError):
+                    self.shell_disp_scale.setValue(10.0)
+                display_mode = str(
+                    options.get("display_mode", "deformed_only")
                 )
-            except (TypeError, ValueError):
-                self.shell_disp_scale.setValue(10.0)
-            display_mode = str(
-                options.get("display_mode", "deformed_only")
-            )
-            index = self.shell_disp_display.findData(display_mode)
-            self.shell_disp_display.setCurrentIndex(
-                index if index >= 0 else 0
-            )
+                index = self.shell_disp_display.findData(display_mode)
+                self.shell_disp_display.setCurrentIndex(
+                    index if index >= 0 else 0
+                )
+            finally:
+                self.shell_disp_component.blockSignals(False)
+                self.shell_disp_scale.blockSignals(False)
+                self.shell_disp_display.blockSignals(False)
             self._active_shell_element_scope = {
                 int(tag)
                 for tag in options.get("_element_scope", [])
@@ -2179,7 +2187,7 @@ class ResultsPanel(QWidget):
 
         displacement_controls.addWidget(QLabel("Scale:"))
         self.shell_disp_scale = QDoubleSpinBox()
-        self.shell_disp_scale.setRange(0.0, 1.0e6)
+        self.shell_disp_scale.setRange(0.001, 1.0e6)
         self.shell_disp_scale.setDecimals(3)
         self.shell_disp_scale.setSingleStep(0.5)
         self.shell_disp_scale.setValue(10.0)
