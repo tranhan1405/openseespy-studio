@@ -224,9 +224,18 @@ def test_rc_wall_hybrid_boundary_rebar_deducts_smeared_ratio():
     for tag in result.reinforcement_element_tags:
         element = project.model.elements[tag]
         assert element.element_type == "corotTruss"
-        assert element.group == "rc-wall-rebar"
+        assert element.group.startswith("rc-wall-rebar-")
         assert element.truss_area == pytest.approx(discrete_area)
         assert element.truss_material_tag == boundary_material_tag
+
+    assert {
+        project.model.elements[tag].group
+        for tag in left_tags
+    } == {"rc-wall-rebar-left"}
+    assert {
+        project.model.elements[tag].group
+        for tag in right_tags
+    } == {"rc-wall-rebar-right"}
 
     first_left = project.model.elements[left_tags[0]]
     first_right = project.model.elements[right_tags[0]]
@@ -532,6 +541,32 @@ def test_rc_wall_wizard_custom_mode_and_origin_roundtrip():
         dialog.close()
         dialog.deleteLater()
         _APP.processEvents()
+
+
+def test_rc_wall_gui_exposes_reinforcement_tree_and_display_controls():
+    tree_source = inspect.getsource(MainWindow._refresh_tree)
+    selection_source = inspect.getsource(MainWindow._tree_selection_changed)
+    root_source = inspect.getsource(MainWindow._show_tree_root_properties)
+    group_source = inspect.getsource(
+        MainWindow._show_reinforcement_group_properties
+    )
+    viewport_source = inspect.getsource(
+        viewport_module.ModelViewport._combined_element_meshes
+    )
+    display_source = inspect.getsource(
+        viewport_module.ModelViewport._show_display_options_menu
+    )
+
+    assert '"reinforcement_root"' in tree_source
+    assert '"reinforcement_group"' in tree_source
+    assert "Boundary Bars · Left" in tree_source
+    assert "Boundary Bars · Right" in tree_source
+    assert "rc-wall-rebar" in selection_source
+    assert "Discrete Reinforcement" in root_source
+    assert "Perfect Bond" in group_source
+    assert '"reinforcement"' in viewport_source
+    assert "reinforcement_size" in viewport_source
+    assert "Discrete reinforcement" in display_source
 
 
 def test_rc_wall_wizard_hybrid_mode_roundtrip():
