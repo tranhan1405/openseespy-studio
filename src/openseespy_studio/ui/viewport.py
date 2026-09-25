@@ -50,6 +50,7 @@ from ..postprocess import (
     component_end_resultants,
     nodal_result_scalar,
     shell_principal_strains,
+    shell_surface_strains,
 )
 from ..shell_quality import shell_element_quality_from_model
 from ..surface_mesher import surface_mesh_preview_segments
@@ -7298,6 +7299,7 @@ class ModelViewport(QWidget):
         result: dict[str, object],
         component: str,
         *,
+        location: str = "mid",
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
     ) -> None:
@@ -7306,6 +7308,9 @@ class ModelViewport(QWidget):
             return
 
         component = str(component)
+        location = str(location or "mid").strip().lower()
+        if location not in {"mid", "top", "bottom"}:
+            location = "mid"
         component_index = {
             "Exx": 0,
             "Eyy": 1,
@@ -7357,11 +7362,47 @@ class ModelViewport(QWidget):
             average = payload.get("average", [])
             if not isinstance(average, (list, tuple)):
                 continue
-            if principal_index is not None:
-                principal = shell_principal_strains(average)
-                if principal is None:
+            element = self._model.elements.get(tag)
+            if (
+                element is None
+                or element.k is None
+                or element.l is None
+            ):
+                continue
+
+            if component in {"Exx", "Eyy", "Gxy", "E1", "E2"}:
+                z = 0.0
+                if location != "mid":
+                    section = (
+                        self._sections.get(int(element.section_tag))
+                        if element.section_tag is not None
+                        else None
+                    )
+                    thickness = (
+                        float(section.shell_total_thickness())
+                        if section is not None
+                        else 0.0
+                    )
+                    if not math.isfinite(thickness) or thickness <= 0.0:
+                        continue
+                    z = 0.5 * thickness * (
+                        1.0 if location == "top" else -1.0
+                    )
+                surface_strain = shell_surface_strains(average, z)
+                if surface_strain is None:
                     continue
-                value = float(principal[principal_index])
+                if principal_index is not None:
+                    principal = shell_principal_strains(surface_strain)
+                    if principal is None:
+                        continue
+                    value = float(principal[principal_index])
+                else:
+                    membrane_index = {
+                        "Exx": 0,
+                        "Eyy": 1,
+                        "Gxy": 2,
+                    }[component]
+                    value = float(surface_strain[membrane_index])
             else:
                 if (
                     component_index is None
@@ -7374,13 +7415,6 @@ class ModelViewport(QWidget):
                     continue
             if not np.isfinite(value):
                 continue
-            element = self._model.elements.get(tag)
-            if (
-                element is None
-                or element.k is None
-                or element.l is None
-            ):
-                continue
             tags.append(tag)
             values.append(value)
 
@@ -7392,6 +7426,7 @@ class ModelViewport(QWidget):
             cache_key,
             "shell-deformation",
             component,
+            location if component in {"Exx", "Eyy", "Gxy", "E1", "E2"} else "mid",
             self._result_scope_key(set(tags)),
         )
         if self._show_cached_result_view(view_key):
@@ -7421,6 +7456,13 @@ class ModelViewport(QWidget):
             "E1": "ε1 (max principal strain)",
             "E2": "ε2 (min principal strain)",
         }.get(component, component)
+        if component in {"Exx", "Eyy", "Gxy", "E1", "E2"}:
+            location_label = {
+                "mid": "Mid",
+                "top": "Top (+z)",
+                "bottom": "Bottom (-z)",
+            }[location]
+            component_title = f"{component_title} · {location_label}"
         title = (
             f"{component_title} [{unit_text}]"
             if unit_text and unit_text != "-"
