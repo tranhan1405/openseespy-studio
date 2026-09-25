@@ -534,6 +534,35 @@ def test_rc_wall_wizard_custom_mode_and_origin_roundtrip():
         _APP.processEvents()
 
 
+def test_rc_wall_wizard_hybrid_mode_roundtrip():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    dialog = RCWallWizard(project)
+    try:
+        hybrid_index = dialog.reinforcement_mode.findData("hybrid")
+        dialog.reinforcement_mode.setCurrentIndex(hybrid_index)
+        dialog.boundary_bar_count.setValue(4)
+        dialog.boundary_bar_diameter.setValue(16.0)
+        _APP.processEvents()
+
+        spec = dialog.data()
+        assert spec.reinforcement_mode == "hybrid"
+        assert spec.boundary_bar_count == 4
+        assert math.isclose(spec.boundary_bar_diameter, 16.0)
+        assert spec.boundary_truss_type == "corotTruss"
+        assert dialog.boundary_bar_count.isEnabled()
+        assert "Hybrid" in dialog.review.text()
+        assert "smeared remainder" in dialog.review.text()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
 def test_rc_wall_wizard_converts_benchmark_geometry_to_project_units():
     project = ProjectDatabase()
     project.units = {
