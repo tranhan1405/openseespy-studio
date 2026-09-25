@@ -41,6 +41,7 @@ from ..deformed_geometry import (
     section_axis_strength_labels,
 )
 from ..model import (
+    EMBEDDED_ELEMENT_TYPES,
     QUAD_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
@@ -3132,7 +3133,11 @@ class ModelViewport(QWidget):
         line_tags = [
             tag
             for tag in visible_tags
-            if tag not in set(shell_tags)
+            if (
+                tag not in set(shell_tags)
+                and self._model.elements[tag].element_type
+                not in EMBEDDED_ELEMENT_TYPES
+            )
         ]
         reinforcement_tags = [
             tag
