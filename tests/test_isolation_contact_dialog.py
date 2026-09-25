@@ -8,8 +8,17 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from openseespy_studio.model import StructuralModel
-from openseespy_studio.project import NDMaterialData, TransformationData
-from openseespy_studio.ui.isolation_contact_dialog import ContactElementDialog
+from openseespy_studio.project import (
+    FrictionModelData,
+    MaterialData,
+    NDMaterialData,
+    TransformationData,
+)
+from openseespy_studio.ui.isolation_contact_dialog import (
+    ContactElementDialog,
+    LeadRubberXDialog,
+    TripleFrictionPendulumDialog,
+)
 
 
 _APP = QApplication.instance() or QApplication([])
@@ -23,7 +32,7 @@ def _combo_tags(combo):
     }
 
 
-def _close(dialog: ContactElementDialog) -> None:
+def _close(dialog) -> None:
     dialog.close()
     dialog.deleteLater()
     _APP.processEvents()
@@ -154,5 +163,107 @@ def test_zero_length_contact_2d_rejects_zero_normal_in_dialog():
 
         with pytest.raises(ValueError, match="normal cannot be zero"):
             dialog.values()
+    finally:
+        _close(dialog)
+
+
+
+def test_lead_rubber_x_dialog_explains_flags_and_gates_heating_fields():
+    dialog = LeadRubberXDialog(
+        tag=1,
+        node_i=1,
+        node_j=2,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        assert "Cavitation" in dialog.flags[0].text()
+        assert "Buckling" in dialog.flags[1].text()
+        assert "Horizontal-stiffness" in dialog.flags[2].text()
+        assert "Vertical-stiffness" in dialog.flags[3].text()
+        assert "heating degradation" in dialog.flags[4].text()
+
+        assert not dialog.ql.isEnabled()
+        assert not dialog.cl.isEnabled()
+        assert not dialog.ks.isEnabled()
+        assert not dialog.a_s.isEnabled()
+
+        dialog.flags[4].setChecked(True)
+        _APP.processEvents()
+
+        assert dialog.ql.isEnabled()
+        assert dialog.cl.isEnabled()
+        assert dialog.ks.isEnabled()
+        assert dialog.a_s.isEnabled()
+    finally:
+        _close(dialog)
+
+
+def test_lead_rubber_x_dialog_rejects_bad_geometry_and_orientation():
+    dialog = LeadRubberXDialog(
+        tag=1,
+        node_i=1,
+        node_j=2,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        dialog.d1.setValue(0.8)
+        dialog.d2.setValue(0.8)
+        with pytest.raises(ValueError, match="D1 < bearing diameter D2"):
+            dialog.values()
+
+        dialog.d1.setValue(0.1)
+        dialog.custom_orientation.setChecked(True)
+        for widget, value in zip(
+            dialog.orientation,
+            (1.0, 0.0, 0.0, 2.0, 0.0, 0.0),
+        ):
+            widget.setValue(value)
+
+        with pytest.raises(ValueError, match="non-zero and non-parallel"):
+            dialog.values()
+    finally:
+        _close(dialog)
+
+
+def test_triple_friction_pendulum_dialog_uses_opensees_semantic_labels():
+    materials = {
+        tag: MaterialData(
+            tag,
+            f"Elastic {tag}",
+            "Elastic",
+            {"E": 1.0e8},
+        )
+        for tag in range(1, 5)
+    }
+    friction_models = {
+        tag: FrictionModelData(
+            tag,
+            f"Friction {tag}",
+            "Coulomb",
+            {"mu": 0.03 + 0.01 * tag},
+        )
+        for tag in range(1, 4)
+    }
+    dialog = TripleFrictionPendulumDialog(
+        tag=10,
+        node_i=1,
+        node_j=2,
+        materials=materials,
+        friction_models=friction_models,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        assert "matP" in dialog.form.labelForField(dialog.materials[0]).text()
+        assert "matT" in dialog.form.labelForField(dialog.materials[1]).text()
+        assert "matMy" in dialog.form.labelForField(dialog.materials[2]).text()
+        assert "matMz" in dialog.form.labelForField(dialog.materials[3]).text()
+        assert "Ubar1" in dialog.form.labelForField(dialog.lengths["d1"]).text()
+        assert "Ubar2" in dialog.form.labelForField(dialog.lengths["d2"]).text()
+        assert "Ubar3" in dialog.form.labelForField(dialog.lengths["d3"]).text()
+        kvt_label = dialog.form.labelForField(dialog.kvt).text()
+        assert "stiffness" in kvt_label.lower()
+        assert "[N/m]" in kvt_label
+        assert "flexibility" not in kvt_label.lower()
+        assert "Ubar1/Ubar2/Ubar3" in dialog.note.text()
     finally:
         _close(dialog)
