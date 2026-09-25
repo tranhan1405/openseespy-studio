@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..crack_results import (
+    crack_severity,
     mefi_crack_data_health,
     mefi_crack_evolution,
     mefi_crack_panel_states,
@@ -2412,9 +2413,14 @@ class ResultsPanel(QWidget):
                         else "-"
                     ),
                     (
-                        "Cracked"
-                        if state.cracked
-                        else ("Below εcr" if state.valid else "No data")
+                        {
+                            "mild": "Mild",
+                            "moderate": "Moderate",
+                            "severe": "Severe",
+                        }.get(
+                            crack_severity(state.ratio),
+                            "Below εcr" if state.valid else "No data",
+                        )
                     ),
                 )
                 for column, value in enumerate(values):
@@ -2463,10 +2469,19 @@ class ResultsPanel(QWidget):
         )
         health["panels"] = len(current_states)
 
+        severity_counts = {"mild": 0, "moderate": 0, "severe": 0}
+        for state in current_states:
+            severity = crack_severity(state.ratio)
+            if severity in severity_counts:
+                severity_counts[severity] += 1
+
         self.crack_summary.setText(
             f"{int(summary['elements'])} MEFI element(s) · "
             f"{int(summary['panels'])} panel(s) · "
             f"{int(summary['cracked'])} cracked · "
+            f"Mild {severity_counts['mild']} · "
+            f"Moderate {severity_counts['moderate']} · "
+            f"Severe {severity_counts['severe']} · "
             f"max ε1/εcr = {float(summary['max_ratio']):.3f} · "
             f"{'accumulated' if accumulated else 'active'} {frame_label}."
         )
@@ -2500,8 +2515,11 @@ class ResultsPanel(QWidget):
             )
         else:
             self.crack_info.setText(
-                "Crack data are complete. Red lines indicate panels with "
-                "maximum principal tensile strain ε1 ≥ εcr."
+                "<b>Crack severity</b> · "
+                "<span style='color:#f9a825'>Mild 1≤ε1/εcr&lt;2</span> · "
+                "<span style='color:#ef6c00'>Moderate 2≤ε1/εcr&lt;5</span> · "
+                "<span style='color:#c62828'>Severe ε1/εcr≥5</span>. "
+                "Colour and line thickness increase with severity."
             )
 
     def _populate_crack_evolution(self) -> None:
