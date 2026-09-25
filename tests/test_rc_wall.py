@@ -590,6 +590,10 @@ def test_rc_wall_wizard_hybrid_mode_roundtrip():
         assert math.isclose(spec.boundary_bar_diameter, 16.0)
         assert spec.boundary_truss_type == "corotTruss"
         assert dialog.boundary_bar_count.isEnabled()
+        assert dialog.preview.reinforcement_mode == "hybrid"
+        assert dialog.preview.boundary_bars == 4
+        assert "As,discrete" in dialog.reinforcement_info.text()
+        assert "ρy,discrete" in dialog.reinforcement_info.text()
         assert "Hybrid" in dialog.review.text()
         assert "smeared remainder" in dialog.review.text()
     finally:
