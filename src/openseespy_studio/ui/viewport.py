@@ -2913,6 +2913,19 @@ class ModelViewport(QWidget):
                     start[2] -= layer_offset
                     end[2] -= layer_offset
 
+            elif group.startswith("rc-wall-rebar-web-vertical-"):
+                tail = group.split(
+                    "rc-wall-rebar-web-vertical-",
+                    1,
+                )[1]
+                layer = tail.split("-", 1)[0]
+                if layer == "front":
+                    start[2] += layer_offset
+                    end[2] += layer_offset
+                elif layer == "back":
+                    start[2] -= layer_offset
+                    end[2] -= layer_offset
+
             index0 = len(points)
             points.extend((tuple(start), tuple(end)))
             lines.extend((2, index0, index0 + 1))
