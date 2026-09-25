@@ -11043,7 +11043,106 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-            if element.element_type in BEARING_ELEMENT_TYPES:
+            if element.element_type == "LeadRubberX":
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                self.properties_panel.set_properties(
+                    "Lead Rubber Bearing",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        ("Nodes", f"{element.i}, {element.j}"),
+                        ("Group", element.group),
+                        (
+                            f"Yield force Fy [{unit_system.force}]",
+                            f"{unit_system.force_from_n(float(p['Fy'])):g}",
+                        ),
+                        ("Post-yield ratio α", f"{float(p['alpha']):g}"),
+                        (
+                            f"Rubber shear modulus [{unit_system.engineering_stress_label}]",
+                            f"{unit_system.engineering_stress_from_pa(float(p['Gr'])):g}",
+                        ),
+                        (
+                            f"Bulk modulus [{unit_system.engineering_stress_label}]",
+                            f"{unit_system.engineering_stress_from_pa(float(p['Kbulk'])):g}",
+                        ),
+                        (
+                            f"Inner / outer diameter [{unit_system.length}]",
+                            f"{unit_system.length_from_m(float(p['D1'])):g}, "
+                            f"{unit_system.length_from_m(float(p['D2'])):g}",
+                        ),
+                        ("Rubber layers", int(p["n"])),
+                        ("Shear distance", f"{float(p['sDratio']):g}"),
+                        (
+                            "Lead heating degradation",
+                            "On" if int(p["tag5"]) else "Off",
+                        ),
+                        (
+                            "Edit",
+                            "Advanced bearing editor will be added in the "
+                            "remaining Batch 6 UI phase.",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type == "TripleFrictionPendulum":
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                self.properties_panel.set_properties(
+                    "Triple Friction Pendulum",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        ("Nodes", f"{element.i}, {element.j}"),
+                        ("Group", element.group),
+                        (
+                            "Friction models",
+                            f"{int(p['frnTag1'])}, "
+                            f"{int(p['frnTag2'])}, "
+                            f"{int(p['frnTag3'])}",
+                        ),
+                        (
+                            "Vertical / rotational materials",
+                            f"{int(p['vertMatTag'])}, "
+                            f"{int(p['rotZMatTag'])}, "
+                            f"{int(p['rotXMatTag'])}, "
+                            f"{int(p['rotYMatTag'])}",
+                        ),
+                        (
+                            f"Effective radii [{unit_system.length}]",
+                            ", ".join(
+                                f"{unit_system.length_from_m(float(p[key])):g}"
+                                for key in ("L1", "L2", "L3")
+                            ),
+                        ),
+                        (
+                            f"Displacement limits [{unit_system.length}]",
+                            ", ".join(
+                                f"{unit_system.length_from_m(float(p[key])):g}"
+                                for key in ("d1", "d2", "d3")
+                            ),
+                        ),
+                        (
+                            f"Initial axial force W [{unit_system.force}]",
+                            f"{unit_system.force_from_n(float(p['W'])):g}",
+                        ),
+                        (
+                            f"Sliding onset uy [{unit_system.length}]",
+                            f"{unit_system.length_from_m(float(p['uy'])):g}",
+                        ),
+                        (
+                            "Edit",
+                            "Advanced bearing editor will be added in the "
+                            "remaining Batch 6 UI phase.",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type == "elastomericBearingPlasticity":
                 p = element.special_parameters
                 unit_system = UnitSystem.from_mapping(self.project.units)
                 k_init = (
@@ -16477,7 +16576,7 @@ class MainWindow(QMainWindow):
                 parent=self,
             )
             title = "Edit Catenary Cable"
-        elif element.element_type in BEARING_ELEMENT_TYPES:
+        elif element.element_type == "elastomericBearingPlasticity":
             dialog = ElastomericBearingPlasticityDialog(
                 element.tag,
                 element.i,
@@ -29947,7 +30046,13 @@ class MainWindow(QMainWindow):
             is_wall_macro_group = element_type in WALL_MACRO_ELEMENT_TYPES
             is_frame_group = element_type in FRAME_ELEMENT_TYPES
             is_cable_group = element_type in CABLE_ELEMENT_TYPES
-            is_bearing_group = element_type in BEARING_ELEMENT_TYPES
+            is_bearing_group = (
+                element_type == "elastomericBearingPlasticity"
+            )
+            is_advanced_bearing_group = element_type in {
+                "LeadRubberX",
+                "TripleFrictionPendulum",
+            }
 
             if is_truss_group:
                 create = menu.addAction("New Truss...")
@@ -29970,6 +30075,11 @@ class MainWindow(QMainWindow):
             elif is_bearing_group:
                 create = menu.addAction("New Elastomeric Bearing...")
                 create.triggered.connect(self._create_elastomeric_bearing)
+            elif is_advanced_bearing_group:
+                create = menu.addAction(
+                    "Advanced Bearing Editor — Batch 6 Phase 2"
+                )
+                create.setEnabled(False)
             else:
                 create = menu.addAction("New Frame...")
                 create.triggered.connect(self._create_element)
@@ -30497,7 +30607,7 @@ class MainWindow(QMainWindow):
                     | SOLID_ELEMENT_TYPES
                     | WALL_MACRO_ELEMENT_TYPES
                     | CABLE_ELEMENT_TYPES
-                    | BEARING_ELEMENT_TYPES
+                    | {"elastomericBearingPlasticity"}
                 )
             ):
                 definition_menu = menu.addMenu("Definition")
@@ -30543,7 +30653,10 @@ class MainWindow(QMainWindow):
                     )
                 elif (
                     self.model.elements[tag].element_type
-                    in (CABLE_ELEMENT_TYPES | BEARING_ELEMENT_TYPES)
+                    in (
+                        CABLE_ELEMENT_TYPES
+                        | {"elastomericBearingPlasticity"}
+                    )
                 ):
                     edit_special = definition_menu.addAction(
                         "Edit Special Element Definition..."
@@ -32833,7 +32946,8 @@ class MainWindow(QMainWindow):
                 element is not None
                 and (
                     element.element_type in CABLE_ELEMENT_TYPES
-                    or element.element_type in BEARING_ELEMENT_TYPES
+                    or element.element_type
+                    == "elastomericBearingPlasticity"
                 )
             ):
                 self._edit_special_element(int(value))
