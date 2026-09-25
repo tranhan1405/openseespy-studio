@@ -28026,6 +28026,7 @@ class MainWindow(QMainWindow):
                 [
                     ("Materials", len(self.project.materials)),
                     ("nD Materials", len(self.project.nd_materials)),
+                    ("Friction Models", len(self.project.friction_models)),
                     ("Sections", len(self.project.sections)),
                     ("Transformations", len(self.project.transformations)),
                 ],
@@ -29459,6 +29460,8 @@ class MainWindow(QMainWindow):
             library.triggered.connect(self._show_material_library)
             nd_material = menu.addAction("New nD Material...")
             nd_material.triggered.connect(self._create_nd_material)
+            friction_model = menu.addAction("New Friction Model...")
+            friction_model.triggered.connect(self._create_friction_model)
             section = menu.addAction("New Beam / Fiber Section...")
             section.triggered.connect(self._create_section)
             shell_section = menu.addAction("New Shell Section...")
