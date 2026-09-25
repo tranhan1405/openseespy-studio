@@ -1567,6 +1567,106 @@ def test_shell_strain_animation_emits_solver_frame_fringe(qapp):
         qapp.processEvents()
 
 
+def test_shell_curvature_animation_keeps_active_fringe_component(qapp):
+    panel = ResultsPanel()
+    captured = []
+    panel.shell_deformation_frame_requested.connect(
+        lambda frame, component, location, scope: captured.append(
+            (
+                int(frame),
+                str(component),
+                str(location),
+                list(scope),
+            )
+        )
+    )
+    try:
+        panel.set_result(_two_frame_motion_result())
+        panel.show_solution_result(
+            "ShellDeformation",
+            {
+                "component": "Kyy",
+                "_element_scope": [20],
+            },
+        )
+        qapp.processEvents()
+
+        assert (
+            panel.shell_detail_tabs.tabText(
+                panel.shell_detail_tabs.currentIndex()
+            )
+            == "Curvature"
+        )
+        assert (
+            panel.shell_deformation_component_controls[
+                "Curvature"
+            ].currentText()
+            == "Kyy"
+        )
+        assert captured[-1] == (1, "Kyy", "mid", [20])
+
+        panel._set_motion_index(0)
+        qapp.processEvents()
+        assert captured[-1] == (0, "Kyy", "mid", [20])
+
+        panel.shell_deformation_component_controls[
+            "Curvature"
+        ].setCurrentText("Kxy")
+        qapp.processEvents()
+        assert captured[-1] == (0, "Kxy", "mid", [20])
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_shell_shear_strain_animation_keeps_active_fringe_component(qapp):
+    panel = ResultsPanel()
+    captured = []
+    panel.shell_deformation_frame_requested.connect(
+        lambda frame, component, location, scope: captured.append(
+            (
+                int(frame),
+                str(component),
+                str(location),
+                list(scope),
+            )
+        )
+    )
+    try:
+        panel.set_result(_two_frame_motion_result())
+        panel.show_solution_result(
+            "ShellDeformation",
+            {
+                "component": "Gyz",
+                "_element_scope": [20],
+            },
+        )
+        qapp.processEvents()
+
+        assert (
+            panel.shell_detail_tabs.tabText(
+                panel.shell_detail_tabs.currentIndex()
+            )
+            == "Shear Strain"
+        )
+        assert (
+            panel.shell_deformation_component_controls[
+                "Shear Strain"
+            ].currentText()
+            == "Gyz"
+        )
+        assert captured[-1] == (1, "Gyz", "mid", [20])
+
+        panel._set_motion_index(0)
+        qapp.processEvents()
+        assert captured[-1] == (0, "Gyz", "mid", [20])
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
 def test_shell_force_and_deformation_tables_follow_animation_frame(qapp):
     panel = ResultsPanel()
     try:
