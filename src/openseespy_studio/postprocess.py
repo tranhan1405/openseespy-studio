@@ -68,6 +68,32 @@ NODAL_MAGNITUDE_COMPONENTS: dict[str, tuple[int, ...]] = {
 }
 
 
+def shell_principal_strains(
+    values: Sequence[float],
+) -> tuple[float, float] | None:
+    """Return in-plane principal strains from [Exx, Eyy, Gxy, ...].
+
+    Gxy is the engineering shear strain, so the tensor shear term used in
+    the principal-value calculation is Gxy / 2.
+    """
+    if len(values) < 3:
+        return None
+    try:
+        exx = float(values[0])
+        eyy = float(values[1])
+        gxy = float(values[2])
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not all(math.isfinite(value) for value in (exx, eyy, gxy)):
+        return None
+    mean = 0.5 * (exx + eyy)
+    radius = math.sqrt(
+        (0.5 * (exx - eyy)) ** 2
+        + (0.5 * gxy) ** 2
+    )
+    return mean + radius, mean - radius
+
+
 def nodal_result_scalar(
     values: Sequence[float],
     component: str,
