@@ -1245,10 +1245,6 @@ class NDMaterialData:
                     "FSAM dowel coefficient alfadow must satisfy "
                     "0 < alfadow < 0.05."
                 )
-        if not isinstance(self.source, dict):
-            raise ValueError("nDMaterial source metadata must be an object.")
-        self.source = deepcopy(self.source)
-
         elif self.material_type in {
             "ContactMaterial2D",
             "ContactMaterial3D",
@@ -1265,6 +1261,10 @@ class NDMaterialData:
                 raise ValueError(
                     f"{self.material_type} c/t cannot be negative."
                 )
+
+        if not isinstance(self.source, dict):
+            raise ValueError("nDMaterial source metadata must be an object.")
+        self.source = deepcopy(self.source)
 
     def to_dict(self) -> dict[str, Any]:
         return {
