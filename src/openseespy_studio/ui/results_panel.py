@@ -84,6 +84,7 @@ from ..postprocess import (
     force_displacement_curve,
     moment_curvature_curve,
     section_response_curve,
+    shell_principal_strains,
     pushover_capacity_curve,
     time_history_node_tags,
     time_history_series,
@@ -1218,7 +1219,7 @@ class ResultsPanel(QWidget):
             component = str(options.get("component", "Exx"))
             tab = (
                 5
-                if component in {"Exx", "Eyy", "Gxy"}
+                if component in {"Exx", "Eyy", "Gxy", "E1", "E2"}
                 else 6
                 if component.startswith("K")
                 else 7
@@ -2278,8 +2279,8 @@ class ResultsPanel(QWidget):
         self.shell_detail_tabs.addTab(gp_host, "Force Gauss Points")
 
         add_summary_tab(
-            "Membrane Strain",
-            ("Exx", "Eyy", "Gxy"),
+            "Strain",
+            ("Exx", "Eyy", "Gxy", "ε1", "ε2"),
         )
         add_summary_tab(
             "Curvature",
@@ -4371,6 +4372,42 @@ class ResultsPanel(QWidget):
             except (TypeError, ValueError):
                 continue
 
+        if not is_force:
+            strain_table = self.shell_tables["Strain"]
+            strain_table.setUpdatesEnabled(False)
+            try:
+                strain_table.setRowCount(len(rows))
+                for row_index, (tag, values) in enumerate(rows):
+                    principal = shell_principal_strains(values)
+                    e1, e2 = principal if principal is not None else (
+                        math.nan,
+                        math.nan,
+                    )
+                    row_values = (
+                        values[0],
+                        values[1],
+                        values[2],
+                        e1,
+                        e2,
+                    )
+                    cell = strain_table.item(row_index, 0)
+                    if cell is None:
+                        cell = QTableWidgetItem()
+                        strain_table.setItem(row_index, 0, cell)
+                    cell.setText(str(tag))
+                    for column, value in enumerate(row_values, start=1):
+                        cell = strain_table.item(row_index, column)
+                        if cell is None:
+                            cell = QTableWidgetItem()
+                            strain_table.setItem(row_index, column, cell)
+                        cell.setText(
+                            f"{float(value):.6g}"
+                            if math.isfinite(float(value))
+                            else "-"
+                        )
+            finally:
+                strain_table.setUpdatesEnabled(True)
+
         groups = (
             {
                 "Membrane": (0, 1, 2),
@@ -4379,7 +4416,6 @@ class ResultsPanel(QWidget):
             }
             if is_force
             else {
-                "Membrane Strain": (0, 1, 2),
                 "Curvature": (3, 4, 5),
                 "Shear Strain": (6, 7),
             }
@@ -7395,8 +7431,36 @@ class ResultsPanel(QWidget):
                     )
                 row_index += 1
 
+        strain_table = self.shell_tables["Strain"]
+        strain_table.setRowCount(len(deformation_rows))
+        for row_index, (tag, average, _gp) in enumerate(
+            deformation_rows
+        ):
+            principal = shell_principal_strains(average)
+            e1, e2 = principal if principal is not None else (
+                math.nan,
+                math.nan,
+            )
+            strain_table.setItem(
+                row_index,
+                0,
+                QTableWidgetItem(str(tag)),
+            )
+            for column, value in enumerate(
+                (average[0], average[1], average[2], e1, e2),
+                start=1,
+            ):
+                strain_table.setItem(
+                    row_index,
+                    column,
+                    QTableWidgetItem(
+                        f"{float(value):.6g}"
+                        if math.isfinite(float(value))
+                        else "-"
+                    ),
+                )
+
         for title, indices in {
-            "Membrane Strain": (0, 1, 2),
             "Curvature": (3, 4, 5),
             "Shear Strain": (6, 7),
         }.items():
