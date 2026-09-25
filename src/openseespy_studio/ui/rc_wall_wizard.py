@@ -55,6 +55,7 @@ class RCWallPreview(QWidget):
         self.boundary_value = 0.2
         self.rows = 1
         self.fibers = 3
+        self.formulation = "MEFI"
         self.reinforcement_mode = "smeared"
         self.boundary_bars = 0
         self.boundary_layer_mode = "front_back"
@@ -79,6 +80,7 @@ class RCWallPreview(QWidget):
         boundary: float,
         rows: int,
         fibers: int,
+        formulation: str = "MEFI",
         reinforcement_mode: str = "smeared",
         boundary_bars: int = 0,
         boundary_layer_mode: str = "front_back",
@@ -99,6 +101,7 @@ class RCWallPreview(QWidget):
         self.boundary_value = max(float(boundary), 0.0)
         self.rows = max(int(rows), 1)
         self.fibers = max(int(fibers), 3)
+        self.formulation = str(formulation)
         self.reinforcement_mode = str(reinforcement_mode)
         self.boundary_bars = max(int(boundary_bars), 0)
         self.boundary_layer_mode = str(boundary_layer_mode)
@@ -190,6 +193,34 @@ class RCWallPreview(QWidget):
             painter.drawLine(
                 int(left), int(y), int(left + wall_w), int(y)
             )
+
+        if self.formulation in {"MVLEM", "SFI_MVLEM"}:
+            center_x = left + 0.5 * wall_w
+            center_pen = QPen(QColor("#f28c00"), 2.2)
+            center_pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(center_pen)
+            painter.drawLine(
+                int(center_x), int(top), int(center_x), int(top + wall_h)
+            )
+            painter.setBrush(QColor("#ffffff"))
+            node_pen = QPen(QColor("#f28c00"), 1.8)
+            painter.setPen(node_pen)
+            for row in range(self.rows + 1):
+                y = top + wall_h * row / self.rows
+                painter.drawEllipse(
+                    int(center_x - 3), int(y - 3), 6, 6
+                )
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        elif self.formulation == "MVLEM_3D":
+            panel_pen = QPen(QColor("#f28c00"), 1.7)
+            panel_pen.setStyle(Qt.PenStyle.DashDotLine)
+            painter.setPen(panel_pen)
+            for row in range(self.rows):
+                y0 = top + wall_h * row / self.rows
+                y1 = top + wall_h * (row + 1) / self.rows
+                painter.drawLine(
+                    int(left), int(y0), int(left + wall_w), int(y1)
+                )
 
         web_count = max(self.fibers - 2, 1)
         web_width = max(
@@ -413,7 +444,8 @@ class RCWallPreview(QWidget):
             (
                 f"t = {self.thickness_value:g} · "
                 f"B = {self.boundary_value:g} · "
-                f"{self.rows} MEFI rows · {self.fibers} fibers"
+                f"{self.rows} {self.formulation} row(s) · "
+                f"{self.fibers} fibers"
             ),
         )
 
@@ -552,8 +584,8 @@ class RCWallWizard(QWizard):
         page.setSubTitle(
             "Choose the OpenSees wall formulation first. MEFI/RCLMS uses "
             "two edge-node chains; MVLEM and SFI_MVLEM use a centerline "
-            "macro-element stack. MVLEM_3D is exposed now for workflow "
-            "continuity and will be enabled in the next implementation stage."
+            "macro-element stack. MVLEM_3D uses four-node wall panels in "
+            "an ndm=3 / ndf=6 project."
         )
         body = self._scrollable_page_body(page, "geometry")
         layout = QVBoxLayout(body)
@@ -585,7 +617,7 @@ class RCWallWizard(QWizard):
             "SFI_MVLEM",
         )
         self.formulation.addItem(
-            "MVLEM_3D · 3D wall panel (coming in next stage)",
+            "MVLEM_3D · 3D four-node wall-panel stack",
             "MVLEM_3D",
         )
         self.formulation.currentIndexChanged.connect(
@@ -900,6 +932,10 @@ class RCWallWizard(QWizard):
 
         self.macro_center_ratio = _double(0.4, 0.0, 1.0, 6)
         self.macro_density = _double(0.0, 0.0, 1.0e20, 6)
+        self.macro_thick_mod = _double(0.63, 1.0e-9, 1.0e6, 6)
+        self.macro_poisson = _double(
+            0.25, -0.999999, 0.499999, 6
+        )
         self.macro_shear_material = QComboBox()
         self.macro_shear_material.addItem(
             "Select existing uniaxial shear material…",
@@ -930,7 +966,9 @@ class RCWallWizard(QWizard):
 
         form.addRow("Macro CoR ratio c:", self.macro_center_ratio)
         form.addRow("Macro density:", self.macro_density)
-        form.addRow("MVLEM shear material:", self.macro_shear_material)
+        form.addRow("MVLEM_3D ThickMod:", self.macro_thick_mod)
+        form.addRow("MVLEM_3D Poisson ν:", self.macro_poisson)
+        form.addRow("MVLEM / MVLEM_3D shear material:", self.macro_shear_material)
         form.addRow("SFI_MVLEM web FSAM:", self.macro_web_fsam)
         form.addRow("SFI_MVLEM boundary FSAM:", self.macro_boundary_fsam)
 
@@ -997,6 +1035,12 @@ class RCWallWizard(QWizard):
             lambda _value: self._mark_custom()
         )
         self.macro_density.valueChanged.connect(
+            lambda _value: self._mark_custom()
+        )
+        self.macro_thick_mod.valueChanged.connect(
+            lambda _value: self._mark_custom()
+        )
+        self.macro_poisson.valueChanged.connect(
             lambda _value: self._mark_custom()
         )
         self.macro_shear_material.currentIndexChanged.connect(
@@ -1519,23 +1563,19 @@ class RCWallWizard(QWizard):
             getattr(self, "macro_density", None),
         ):
             if widget is not None:
-                widget.setEnabled(is_mvlem or is_sfi)
+                widget.setEnabled(is_mvlem or is_sfi or is_3d)
+        if hasattr(self, "macro_thick_mod"):
+            self.macro_thick_mod.setEnabled(is_3d)
+        if hasattr(self, "macro_poisson"):
+            self.macro_poisson.setEnabled(is_3d)
         if hasattr(self, "macro_shear_material"):
-            self.macro_shear_material.setEnabled(is_mvlem)
+            self.macro_shear_material.setEnabled(is_mvlem or is_3d)
         if hasattr(self, "macro_web_fsam"):
             self.macro_web_fsam.setEnabled(is_sfi)
         if hasattr(self, "macro_boundary_fsam"):
             self.macro_boundary_fsam.setEnabled(is_sfi)
         if hasattr(self, "macro_dependency_note"):
             self.macro_dependency_note.setVisible(not is_mefi)
-
-        # MVLEM_3D is intentionally visible in the unified workflow but not
-        # accepted during this first implementation stage.
-        if is_3d:
-            self.statusTip = (
-                "MVLEM_3D workflow is exposed but generation is enabled in "
-                "the second implementation stage."
-            )
 
     def _preset_changed(self, *_args) -> None:
         if self.preset.currentData() == "rw-a20":
@@ -1575,6 +1615,7 @@ class RCWallWizard(QWizard):
             boundary=float(self.boundary_width.value()),
             rows=int(self.vertical_elements.value()),
             fibers=int(self.macro_fibers.value()),
+            formulation=str(self.formulation.currentData()),
             reinforcement_mode=mode,
             boundary_bars=(
                 int(self.boundary_bar_count.value())
@@ -1763,6 +1804,8 @@ class RCWallWizard(QWizard):
             formulation=str(self.formulation.currentData()),
             macro_center_ratio=float(self.macro_center_ratio.value()),
             macro_density=float(self.macro_density.value()),
+            macro_thick_mod=float(self.macro_thick_mod.value()),
+            macro_poisson=float(self.macro_poisson.value()),
             macro_shear_material_tag=(
                 None
                 if self.macro_shear_material.currentData() is None
@@ -1871,21 +1914,20 @@ class RCWallWizard(QWizard):
                         "half the wall width."
                     )
                 formulation = str(self.formulation.currentData())
-                if formulation == "MVLEM_3D":
-                    raise ValueError(
-                        "MVLEM_3D is exposed in the unified Wall Wizard but "
-                        "will be enabled in the second implementation stage."
-                    )
+                required_domain = (
+                    (3, 6) if formulation == "MVLEM_3D" else (2, 3)
+                )
                 if (
                     not self.replace_geometry.isChecked()
                     and (
                         int(self.project.model.ndm),
                         int(self.project.model.ndf),
-                    ) != (2, 3)
+                    ) != required_domain
                 ):
                     raise ValueError(
-                        "Append mode requires the current project domain to "
-                        "be ndm=2 / ndf=3."
+                        "Append mode for "
+                        f"{formulation} requires ndm={required_domain[0]} / "
+                        f"ndf={required_domain[1]}."
                     )
             elif page == 1:
                 if self.unconfined_layer.value() >= self.thickness.value():
@@ -1929,11 +1971,22 @@ class RCWallWizard(QWizard):
                             f"{label} must be between 0 and 100%."
                         )
                 formulation = str(self.formulation.currentData())
-                if formulation == "MVLEM":
+                if formulation in {"MVLEM", "MVLEM_3D"}:
                     if self.macro_shear_material.currentData() is None:
                         raise ValueError(
-                            "MVLEM requires an existing uniaxial shear material."
+                            f"{formulation} requires an existing uniaxial "
+                            "shear material."
                         )
+                    if formulation == "MVLEM_3D":
+                        if self.macro_thick_mod.value() <= 0.0:
+                            raise ValueError(
+                                "MVLEM_3D ThickMod must be positive."
+                            )
+                        if not -1.0 < self.macro_poisson.value() < 0.5:
+                            raise ValueError(
+                                "MVLEM_3D Poisson ratio must satisfy "
+                                "-1 < nu < 0.5."
+                            )
                     return True
                 if formulation == "SFI_MVLEM":
                     if (
