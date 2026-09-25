@@ -307,3 +307,42 @@ def test_bearing_model_check_reports_missing_material():
         and "99" in issue.message
         for issue in issues
     )
+
+
+def test_special_element_copy_preserves_parameters():
+    model = StructuralModel(ndm=3, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 10.0, 0.0, 0.0)
+    source = model.add_element(
+        1,
+        1,
+        2,
+        element_type="CatenaryCable",
+        group="cable",
+        special_parameters={
+            "weight": 500.0,
+            "E": 2.0e11,
+            "A": 0.001,
+            "L0": 10.2,
+            "alpha": 1.2e-5,
+            "temperature_change": 10.0,
+            "rho": 7.85,
+            "errorTol": 1.0e-8,
+            "Nsubsteps": 10,
+            "massType": 0,
+        },
+    )
+
+    _nodes, elements = model.copy_entities(
+        element_tags={1},
+        dx=0.0,
+        dy=2.0,
+        dz=0.0,
+    )
+
+    copied_tag = next(iter(elements))
+    copied = model.elements[copied_tag]
+    assert copied.element_type == "CatenaryCable"
+    assert copied.group == source.group
+    assert copied.special_parameters == source.special_parameters
+    assert copied.special_parameters is not source.special_parameters
