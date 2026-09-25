@@ -2306,13 +2306,15 @@ class ResultsPanel(QWidget):
         self.shell_strain_component.addItem("ε2 (min principal)", "E2")
         strain_controls.addWidget(self.shell_strain_component)
 
-        show_strain = QPushButton("Apply Fringe")
-        show_strain.setToolTip(
+        self.shell_strain_show_button = QPushButton("Apply Fringe")
+        self.shell_strain_show_button.setToolTip(
             "Contour the selected membrane/principal strain on the active "
             "Shell result scope."
         )
-        show_strain.clicked.connect(self._display_shell_strain)
-        strain_controls.addWidget(show_strain)
+        self.shell_strain_show_button.clicked.connect(
+            self._display_shell_strain
+        )
+        strain_controls.addWidget(self.shell_strain_show_button)
         strain_controls.addStretch(1)
         strain_layout.addLayout(strain_controls)
 
