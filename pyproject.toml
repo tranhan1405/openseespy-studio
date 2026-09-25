@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openseespy-studio"
 version = "0.2.0a1"
-description = "SARE - Structural Analysis & Research Environment for OpenSees"
+description = "FEWIZ - Finite Element Wizard for structural modeling and analysis with OpenSeesPy"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 authors = [{name = "Tran-Van Han"}]

@@ -8,7 +8,6 @@ from PySide6.QtGui import (
     QColor,
     QIcon,
     QPainter,
-    QPainterPath,
     QPen,
     QPixmap,
 )
@@ -17,18 +16,35 @@ _ICON_DIR = Path(__file__).resolve().parent.parent / "resources" / "icons"
 
 
 def studio_icon(name: str) -> QIcon:
-    """Return a bundled SARE command SVG icon by stem name."""
+    """Return a bundled FEWIZ command SVG icon by stem name."""
     path = _ICON_DIR / f"{name}.svg"
     return QIcon(str(path))
 
 
-def _visual_icon_pixmap(size: int = 256) -> QPixmap:
-    """Draw the SARE application mark using only Qt vector primitives.
+def _draw_node(
+    painter: QPainter,
+    x: float,
+    y: float,
+    radius: float,
+    *,
+    fill: QColor,
+    outline: QColor,
+) -> None:
+    painter.setPen(QPen(outline, 4.0))
+    painter.setBrush(QBrush(fill))
+    painter.drawEllipse(QPointF(x, y), radius, radius)
 
-    The mark is intentionally simple:
-    - navy structural-response S = SARE / structural analysis
-    - red response curve = earthquake / nonlinear dynamic response
-    - light field = readable at 16 px as well as large splash sizes
+
+def _visual_icon_pixmap(size: int = 256) -> QPixmap:
+    """Draw the FEWIZ application mark with Qt vector primitives.
+
+    The mark is intentionally CAD-like rather than illustrative:
+    - a five-node structural W identifies the Wizard workflow
+    - members and nodes read directly as finite-element geometry
+    - one red terminal member indicates generated/active model content
+
+    No gradients, magic-wand motifs or decorative sparkles are used so the
+    mark stays technical and legible at toolbar and taskbar sizes.
     """
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -41,61 +57,71 @@ def _visual_icon_pixmap(size: int = 256) -> QPixmap:
     p.scale(scale, scale)
 
     navy = QColor("#0B315C")
-    navy_dark = QColor("#082643")
+    blue = QColor("#2871B9")
     red = QColor("#E5252A")
     field = QColor("#F7FAFC")
     border = QColor("#DCE5EE")
 
-    # Quiet engineering-style field. No gradients are used so the icon
-    # remains crisp and reproducible across platforms and DPI settings.
     p.setPen(QPen(border, 2.0))
     p.setBrush(QBrush(field))
     p.drawRoundedRect(QRectF(12, 12, 232, 232), 42, 42)
 
-    # Geometric S mark. A single heavy centreline is deliberately used
-    # instead of a font glyph so branding is independent of installed fonts.
-    s_path = QPainterPath()
-    s_path.moveTo(190, 66)
-    s_path.cubicTo(164, 48, 92, 48, 68, 70)
-    s_path.cubicTo(45, 91, 55, 118, 82, 124)
-    s_path.cubicTo(106, 129, 155, 123, 180, 138)
-    s_path.cubicTo(207, 154, 202, 185, 178, 199)
-    s_path.cubicTo(151, 216, 86, 212, 61, 193)
+    nodes = (
+        QPointF(52, 66),
+        QPointF(88, 188),
+        QPointF(128, 116),
+        QPointF(168, 188),
+        QPointF(204, 66),
+    )
 
-    s_pen = QPen(navy, 32.0)
-    s_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    s_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    p.setPen(s_pen)
+    member_pen = QPen(navy, 13.0)
+    member_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    member_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(member_pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
-    p.drawPath(s_path)
+    for start, end in zip(nodes[:3], nodes[1:4]):
+        p.drawLine(start, end)
 
-    # Small darker terminal accents give a structural/member feel.
-    accent_pen = QPen(navy_dark, 7.0)
-    accent_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    p.setPen(accent_pen)
-    p.drawLine(QPointF(167, 58), QPointF(192, 68))
-    p.drawLine(QPointF(60, 192), QPointF(84, 203))
+    active_pen = QPen(red, 13.0)
+    active_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    active_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(active_pen)
+    p.drawLine(nodes[3], nodes[4])
 
-    # Response/deformation curve crossing the S. At large size it reads as
-    # seismic response; at small size it remains a clean red deformation arc.
-    response = QPainterPath()
-    response.moveTo(38, 154)
-    response.cubicTo(69, 154, 84, 151, 104, 136)
-    response.cubicTo(119, 124, 129, 111, 143, 116)
-    response.cubicTo(156, 120, 163, 143, 178, 150)
-    response.cubicTo(190, 156, 204, 155, 218, 153)
+    for point in nodes[:4]:
+        _draw_node(
+            p,
+            point.x(),
+            point.y(),
+            9.0,
+            fill=field,
+            outline=navy,
+        )
+    _draw_node(
+        p,
+        nodes[4].x(),
+        nodes[4].y(),
+        9.0,
+        fill=field,
+        outline=red,
+    )
 
-    response_pen = QPen(red, 9.0)
-    response_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    response_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    p.setPen(response_pen)
-    p.drawPath(response)
+    # The central node is filled to provide a stable visual anchor at 16 px.
+    _draw_node(
+        p,
+        nodes[2].x(),
+        nodes[2].y(),
+        7.0,
+        fill=blue,
+        outline=blue,
+    )
 
     p.end()
     return pixmap
 
+
 def create_visual_icon(size: int = 256) -> QIcon:
-    """Return the SARE icon at the requested size."""
+    """Return the FEWIZ icon at the requested size."""
     return QIcon(_visual_icon_pixmap(size))
 
 

@@ -1,43 +1,56 @@
-# SARE Brand Identity
+# FEWIZ Brand Identity
 
-**SARE** stands for **Structural Analysis & Research Environment for OpenSees**.
+**FEWIZ** stands for **Finite Element Wizard**.
 
-SARE is positioned as a structural simulation and research environment rather
-than a GUI wrapper. OpenSeesPy is the current Python backend; OpenSees remains
-the solver/platform named in the product identity.
+FEWIZ is a structural finite-element modeling, analysis and results environment
+built around an automated **Wizard** workflow. In FEWIZ, a Wizard is not merely
+a Next/Back dialog: it is a parametric model builder that converts engineering
+inputs into model entities, previews the result, and creates the finite-element
+objects automatically.
+
+The Python package and project format intentionally retain the historical
+`openseespy-studio` identifiers where changing them would break compatibility.
 
 ## Primary mark
 
-The application mark combines two elements:
+The application mark is a geometric **W** built from finite-element members and
+nodes. It deliberately looks like engineering/CAD geometry rather than an AI
+mascot or decorative illustration.
 
-1. A geometric navy **S**, representing SARE, structures, and structural
-   response.
-2. A single red response/deformation curve, representing earthquake,
-   nonlinear, and dynamic response.
+- Navy members and outlined nodes represent the FE model.
+- The blue central node provides the visual anchor.
+- One red terminal member indicates generated/active model content.
+- No gradients, magic wand, stars or sparkles are used.
 
-The mark must remain simple enough to be drawn directly with Qt/QPainter and to
-remain recognizable at 16 x 16 px.
+The mark must remain recognizable at 16 x 16 px.
 
 ## Wordmark
 
-Use **SARE** as the primary wordmark. When space permits, pair it with:
+Use **FEWIZ** as the primary wordmark. When space permits, pair it with:
 
-> Structural Analysis & Research Environment for OpenSees
+> Finite Element Wizard
 
-Do not use “GUI”, “Visual Platform”, or “OpenSeesPy Studio” as the primary
-product identity.
+A useful product line is:
+
+> Build FE models, not commands.
+
+OpenSeesPy is the current backend, but it is not part of the primary product
+name so the FEWIZ identity remains independent of a single solver backend.
 
 ## Core colors
 
-- SARE Navy: `#0B315C`
+- FEWIZ Navy: `#0B315C`
 - Deep Navy: `#082643`
-- Response Red: `#E5252A`
+- FE Node Blue: `#2871B9`
+- Generated/Active Red: `#E5252A`
 - Light Field: `#F7FAFC`
 
 ## Usage
 
-- App icon: S mark + red response curve only.
-- Ribbon/header: SARE wordmark + red response curve + compact descriptor.
-- About dialog: full product name and current OpenSeesPy backend.
-- Technical/package identifiers may retain `openseespy-studio` where changing
-  them would break compatibility.
+- App icon: structural W made from FE nodes and members.
+- Ribbon/header: FEWIZ wordmark with the compact descriptor “Finite Element Wizard”.
+- About dialog: product name, description and current OpenSeesPy backend.
+- Wizard commands remain the signature automated model-generation workflow.
+- Technical/package identifiers may retain `openseespy-studio` for compatibility.
+- The legacy `sare_mark.svg` and `sare_wordmark.svg` paths are retained as
+  visual aliases during the transition so older references do not break.
