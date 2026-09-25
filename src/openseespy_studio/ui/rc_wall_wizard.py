@@ -1077,7 +1077,58 @@ class RCWallWizard(QWizard):
     def _update_reinforcement_info(self) -> None:
         if not hasattr(self, "reinforcement_info"):
             return
-        if self.reinforcement_mode.currentData() != "hybrid":
+        mode = str(self.reinforcement_mode.currentData())
+        if mode == "fully_discrete":
+            spec = self.data()
+            summary = rc_wall_reinforcement_summary(spec)
+            boundary_layers = (
+                2
+                if self.boundary_layer_mode.currentData() == "front_back"
+                else 1
+            )
+            vertical_layers = (
+                2
+                if self.web_vertical_layer_mode.currentData() == "front_back"
+                else 1
+            )
+            self.reinforcement_info.setText(
+                "<b>Fully Discrete reinforcement</b><br>"
+                "All target reinforcement ratios are carried by truss bars; "
+                "RCLMS smeared steel ratios = 0.<br>"
+                f"Boundary Y: {self.boundary_bar_count.value()} bars/zone · "
+                f"{boundary_layers} layer(s) · "
+                f"equiv. Ø{float(summary['boundary_equivalent_diameter']):g} "
+                f"{self.units.length} · "
+                f"s≈{float(summary['boundary_bar_spacing']):g} "
+                f"{self.units.length}<br>"
+                f"Web Y: {len(summary['web_vertical_positions'])} "
+                f"bars/layer × {vertical_layers} layer(s) · "
+                f"equiv. Ø"
+                f"{float(summary['web_vertical_equivalent_diameter']):g} "
+                f"{self.units.length} · "
+                f"s≈{float(summary['web_vertical_actual_spacing']):g} "
+                f"{self.units.length}<br>"
+                f"Horizontal X: {int(summary['horizontal_line_count'])} "
+                f"internal row(s) × "
+                f"{int(summary['horizontal_layer_count'])} layer(s)<br>"
+                f"Web segment equiv. Ø"
+                f"{float(summary['web_horizontal_equivalent_diameter']):g} "
+                f"{self.units.length} · "
+                f"Boundary segment equiv. Ø"
+                f"{float(summary['boundary_horizontal_equivalent_diameter']):g} "
+                f"{self.units.length}<br>"
+                f"ρ targets represented discretely: "
+                f"web X={100.0 * float(spec.rho_x_web):.4g}% · "
+                f"web Y={100.0 * float(spec.rho_y_web):.4g}% · "
+                f"boundary X={100.0 * float(spec.rho_x_boundary):.4g}% · "
+                f"boundary Y={100.0 * float(spec.rho_y_boundary):.4g}%<br>"
+                f"Embedded penalty K≈"
+                f"{self._stress_display(float(summary['embedded_penalty'])):g} "
+                f"{self.units.engineering_stress_label}"
+            )
+            return
+
+        if mode != "hybrid":
             self.reinforcement_info.setText(
                 "All reinforcement is represented by RCLMS smeared ratios."
             )
@@ -1347,6 +1398,27 @@ class RCWallWizard(QWizard):
     def _update_preview(self) -> None:
         if not hasattr(self, "preview"):
             return
+
+        mode = (
+            str(self.reinforcement_mode.currentData())
+            if hasattr(self, "reinforcement_mode")
+            else "smeared"
+        )
+        fully_discrete = mode == "fully_discrete"
+        vertical_diameter = (
+            float(self.web_vertical_bar_diameter.value())
+            if hasattr(self, "web_vertical_bar_diameter")
+            else 0.0
+        )
+        if fully_discrete:
+            try:
+                summary = rc_wall_reinforcement_summary(self.data())
+                vertical_diameter = float(
+                    summary["web_vertical_equivalent_diameter"]
+                )
+            except (AttributeError, ValueError, ZeroDivisionError):
+                pass
+
         preview_kwargs = dict(
             width=float(self.width.value()),
             height=float(self.height.value()),
@@ -1354,11 +1426,7 @@ class RCWallWizard(QWizard):
             boundary=float(self.boundary_width.value()),
             rows=int(self.vertical_elements.value()),
             fibers=int(self.macro_fibers.value()),
-            reinforcement_mode=(
-                str(self.reinforcement_mode.currentData())
-                if hasattr(self, "reinforcement_mode")
-                else "smeared"
-            ),
+            reinforcement_mode=mode,
             boundary_bars=(
                 int(self.boundary_bar_count.value())
                 if hasattr(self, "boundary_bar_count")
@@ -1375,9 +1443,13 @@ class RCWallWizard(QWizard):
                 else 0.0
             ),
             web_horizontal_mode=(
-                str(self.web_horizontal_mode.currentData())
-                if hasattr(self, "web_horizontal_mode")
-                else "smeared"
+                "mesh_aligned"
+                if fully_discrete
+                else (
+                    str(self.web_horizontal_mode.currentData())
+                    if hasattr(self, "web_horizontal_mode")
+                    else "smeared"
+                )
             ),
             web_horizontal_layer_mode=(
                 str(self.web_horizontal_layer_mode.currentData())
@@ -1385,15 +1457,15 @@ class RCWallWizard(QWizard):
                 else "front_back"
             ),
             web_vertical_mode=(
-                str(self.web_vertical_mode.currentData())
-                if hasattr(self, "web_vertical_mode")
-                else "smeared"
+                "embedded"
+                if fully_discrete
+                else (
+                    str(self.web_vertical_mode.currentData())
+                    if hasattr(self, "web_vertical_mode")
+                    else "smeared"
+                )
             ),
-            web_vertical_bar_diameter=(
-                float(self.web_vertical_bar_diameter.value())
-                if hasattr(self, "web_vertical_bar_diameter")
-                else 0.0
-            ),
+            web_vertical_bar_diameter=vertical_diameter,
             web_vertical_spacing=(
                 float(self.web_vertical_spacing.value())
                 if hasattr(self, "web_vertical_spacing")
