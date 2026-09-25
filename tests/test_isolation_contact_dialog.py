@@ -16,6 +16,7 @@ from openseespy_studio.project import (
 )
 from openseespy_studio.ui.isolation_contact_dialog import (
     ContactElementDialog,
+    FrictionBearingDialog,
     LeadRubberXDialog,
     TripleFrictionPendulumDialog,
 )
@@ -300,5 +301,110 @@ def test_tfp_auto_selects_single_available_dependencies():
         assert [combo.currentData() for combo in dialog.materials] == [1, 1, 1, 1]
         assert "force/length" in dialog.kvt.toolTip()
         assert "backward-compatible" in dialog.lengths["d1"].toolTip()
+    finally:
+        _close(dialog)
+
+
+
+def test_friction_bearing_dialog_switches_formulation_and_2d_dependencies():
+    materials = {
+        1: MaterialData(1, "Axial", "Elastic", {"E": 1.0e8}),
+        2: MaterialData(2, "Rotation", "Elastic", {"E": 1.0e8}),
+    }
+    friction_models = {
+        3: FrictionModelData(3, "PTFE", "Coulomb", {"mu": 0.05}),
+    }
+    dialog = FrictionBearingDialog(
+        tag=20,
+        node_i=1,
+        node_j=2,
+        ndm=2,
+        materials=materials,
+        friction_models=friction_models,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        assert dialog.kind.currentData() == "flatSliderBearing"
+        assert not dialog.reff.isEnabled()
+        assert not dialog.mat_t.isEnabled()
+        assert not dialog.mat_my.isEnabled()
+        assert dialog.friction.currentData() == 3
+
+        dialog.mat_p.setCurrentIndex(dialog.mat_p.findData(1))
+        dialog.mat_mz.setCurrentIndex(dialog.mat_mz.findData(2))
+        values = dialog.values()
+        assert values[3] == "flatSliderBearing"
+        assert "Reff" not in values[5]
+        assert values[5]["t_mat_tag"] is None
+        assert values[5]["my_mat_tag"] is None
+
+        single = dialog.kind.findData("singleFPBearing")
+        dialog.kind.setCurrentIndex(single)
+        _APP.processEvents()
+        assert dialog.reff.isEnabled()
+        values = dialog.values()
+        assert values[3] == "singleFPBearing"
+        assert values[5]["Reff"] == pytest.approx(2.5)
+        assert "spherical sliding surface" in dialog.note.text()
+    finally:
+        _close(dialog)
+
+
+def test_friction_bearing_dialog_3d_requires_torsion_and_my_materials():
+    materials = {
+        1: MaterialData(1, "Elastic", "Elastic", {"E": 1.0e8}),
+    }
+    friction_models = {
+        2: FrictionModelData(2, "PTFE", "Coulomb", {"mu": 0.05}),
+    }
+    dialog = FrictionBearingDialog(
+        tag=21,
+        node_i=1,
+        node_j=2,
+        ndm=3,
+        materials=materials,
+        friction_models=friction_models,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        assert dialog.friction.currentData() == 2
+        assert dialog.mat_p.currentData() == 1
+        assert dialog.mat_t.currentData() == 1
+        assert dialog.mat_my.currentData() == 1
+        assert dialog.mat_mz.currentData() == 1
+        assert dialog.mat_t.isEnabled()
+        assert dialog.mat_my.isEnabled()
+
+        values = dialog.values()
+        assert values[5]["p_mat_tag"] == 1
+        assert values[5]["t_mat_tag"] == 1
+        assert values[5]["my_mat_tag"] == 1
+        assert values[5]["mz_mat_tag"] == 1
+        assert "3D/6DOF" in dialog.note.text()
+    finally:
+        _close(dialog)
+
+
+def test_friction_bearing_dialog_rejects_parallel_orientation():
+    material = MaterialData(1, "Elastic", "Elastic", {"E": 1.0e8})
+    friction = FrictionModelData(1, "PTFE", "Coulomb", {"mu": 0.05})
+    dialog = FrictionBearingDialog(
+        tag=22,
+        node_i=1,
+        node_j=2,
+        ndm=3,
+        materials={1: material},
+        friction_models={1: friction},
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        dialog.custom_orientation.setChecked(True)
+        for widget, value in zip(
+            dialog.orientation,
+            (1.0, 0.0, 0.0, 2.0, 0.0, 0.0),
+        ):
+            widget.setValue(value)
+        with pytest.raises(ValueError, match="non-zero and non-parallel"):
+            dialog.values()
     finally:
         _close(dialog)
