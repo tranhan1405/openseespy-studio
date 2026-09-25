@@ -62,7 +62,7 @@ class TransformationDialog(QDialog):
             )
 
         self.orientation_mode = QComboBox()
-        self.orientation_mode.addItem("Auto (SARE managed)", "auto")
+        self.orientation_mode.addItem("Auto (FEWIZ managed)", "auto")
         self.orientation_mode.addItem("Manual vector", "manual")
         initial_mode = (
             transformation.orientation_mode
@@ -126,6 +126,13 @@ class TransformationDialog(QDialog):
             self.orientation_mode.setToolTip(
                 "LinearInt is the dedicated 2D transformation for "
                 "dispBeamColumnInt; vecxz is not used."
+            )
+        else:
+            self.orientation_mode.setToolTip(
+                "Auto uses a stable Global Z up direction, with deterministic "
+                "Global X/Y fallback only near parallel member directions. "
+                "Choose Manual only when explicit section orientation control "
+                "is required."
             )
 
     def transformation_data(self) -> TransformationData:
