@@ -33,6 +33,8 @@ class ContinuumQuadDialog(QDialog):
     FORMULATIONS = (
         ("FourNodeQuad (full integration)", "quad"),
         ("SSPquad (stabilized single point)", "SSPquad"),
+        ("bbarQuad (B-bar · plane strain)", "bbarQuad"),
+        ("enhancedQuad (enhanced strain)", "enhancedQuad"),
     )
 
     def __init__(
@@ -168,9 +170,10 @@ class ContinuumQuadDialog(QDialog):
 
         note = QLabel(
             "Nodes must be four distinct corners ordered counter-clockwise "
-            "in the global XY plane. FourNodeQuad supports optional pressure, "
-            "density and body force. SSPquad uses thickness and body force; "
-            "pressure/density are disabled."
+            "in the global XY plane. FourNodeQuad supports pressure, density "
+            "and body force; SSPquad supports body force. bbarQuad is "
+            "PlaneStrain-only. bbarQuad/enhancedQuad do not use pressure, "
+            "density or body-force inputs."
         )
         note.setWordWrap(True)
         root.addWidget(note)
@@ -186,12 +189,26 @@ class ContinuumQuadDialog(QDialog):
         root.addWidget(buttons)
 
     def _sync_formulation(self, *_args) -> None:
-        is_quad = self.formulation.currentData() == "quad"
+        formulation = str(self.formulation.currentData())
+        is_quad = formulation == "quad"
+        supports_body_force = formulation in {"quad", "SSPquad"}
+        is_bbar = formulation == "bbarQuad"
+
+        self.behavior.setEnabled(not is_bbar)
+        if is_bbar:
+            self.behavior.setCurrentText("PlaneStrain")
+
         self.pressure.setEnabled(is_quad)
         self.density.setEnabled(is_quad)
+        self.body_x.setEnabled(supports_body_force)
+        self.body_y.setEnabled(supports_body_force)
+
         if not is_quad:
             self.pressure.setValue(0.0)
             self.density.setValue(0.0)
+        if not supports_body_force:
+            self.body_x.setValue(0.0)
+            self.body_y.setValue(0.0)
 
     def values(self) -> dict[str, object]:
         nodes = tuple(

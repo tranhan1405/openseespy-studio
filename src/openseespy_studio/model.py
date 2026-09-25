@@ -19,7 +19,12 @@ SHELL_ELEMENT_TYPES = {
     "ShellNLDKGQ",
 }
 MEMBRANE_ELEMENT_TYPES = {"MEFI"}
-CONTINUUM_QUAD_ELEMENT_TYPES = {"quad", "SSPquad"}
+CONTINUUM_QUAD_ELEMENT_TYPES = {
+    "quad",
+    "SSPquad",
+    "bbarQuad",
+    "enhancedQuad",
+}
 TRUSS_ELEMENT_TYPES = {"truss", "corotTruss"}
 EMBEDDED_ELEMENT_TYPES = {"ASDEmbeddedNodeElement"}
 QUAD_ELEMENT_TYPES = (
@@ -488,9 +493,18 @@ class Element:
                 raise ValueError(
                     "2D continuum pressure/density values are invalid."
                 )
-            if self.element_type == "SSPquad":
+            if (
+                self.element_type == "bbarQuad"
+                and self.continuum_type != "PlaneStrain"
+            ):
+                raise ValueError(
+                    "bbarQuad supports PlaneStrain material behavior only."
+                )
+            if self.element_type in {"SSPquad", "bbarQuad", "enhancedQuad"}:
                 self.continuum_pressure = 0.0
                 self.continuum_density = 0.0
+            if self.element_type in {"bbarQuad", "enhancedQuad"}:
+                self.continuum_body_force = (0.0, 0.0)
         else:
             self.continuum_thickness = 1.0
             self.continuum_material_tag = None

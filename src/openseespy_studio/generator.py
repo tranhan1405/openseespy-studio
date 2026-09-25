@@ -5409,13 +5409,28 @@ def to_openseespy(
                     )
                 args += ")"
                 lines.append(args)
-            else:
+            elif e.element_type == "SSPquad":
                 lines.append(
                     "ops.element('SSPquad', "
                     f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, "
                     f"{e.continuum_material_tag}, "
                     f"'{e.continuum_type}', "
                     f"{e.continuum_thickness:g}, {b1:g}, {b2:g})"
+                )
+            elif e.element_type == "bbarQuad":
+                lines.append(
+                    "ops.element('bbarQuad', "
+                    f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, "
+                    f"{e.continuum_thickness:g}, "
+                    f"{e.continuum_material_tag})"
+                )
+            else:
+                lines.append(
+                    "ops.element('enhancedQuad', "
+                    f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, "
+                    f"{e.continuum_thickness:g}, "
+                    f"'{e.continuum_type}', "
+                    f"{e.continuum_material_tag})"
                 )
             continue
 

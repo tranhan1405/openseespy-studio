@@ -2451,7 +2451,7 @@ class MainWindow(QMainWindow):
             "2D Quad...",
             "continuum-quad",
             self._create_continuum_quad,
-            "Create a FourNodeQuad or SSPquad continuum element",
+            "Create a FourNodeQuad, SSPquad, bbarQuad, or enhancedQuad continuum element",
         )
         self._make_action(
             "sketch_plane_offset",
@@ -10613,14 +10613,18 @@ class MainWindow(QMainWindow):
                         ("nD Material", material_text),
                         (
                             "Body force",
-                            f"({float(b1):g}, {float(b2):g})",
+                            (
+                                f"({float(b1):g}, {float(b2):g})"
+                                if element.element_type in {"quad", "SSPquad"}
+                                else f"Not used by {element.element_type}"
+                            ),
                         ),
                         (
                             "Pressure",
                             (
                                 f"{element.continuum_pressure:g}"
                                 if element.element_type == "quad"
-                                else "Not used by SSPquad"
+                                else f"Not used by {element.element_type}"
                             ),
                         ),
                         (
@@ -10628,7 +10632,7 @@ class MainWindow(QMainWindow):
                             (
                                 f"{element.continuum_density:g}"
                                 if element.element_type == "quad"
-                                else "Not used by SSPquad"
+                                else f"Not used by {element.element_type}"
                             ),
                         ),
                         ("Section", "Not used by 2D continuum"),
@@ -10636,8 +10640,7 @@ class MainWindow(QMainWindow):
                         ("Group", element.group),
                         (
                             "Edit",
-                            "Direct-edit support will be added with the "
-                            "remaining continuum formulations.",
+                            "Right-click element → Edit 2D Continuum Definition...",
                         ),
                     ],
                     context={"kind": "element", "tag": int(tag)},
@@ -16113,7 +16116,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "2D Continuum Quad",
-                "FourNodeQuad and SSPquad require an OpenSees 2D/2DOF "
+                "2D continuum quads require an OpenSees 2D/2DOF "
                 "model (ndm=2, ndf=2).",
             )
             return
@@ -16190,6 +16193,66 @@ class MainWindow(QMainWindow):
         self.selection.select("element", values["tag"], "replace")
         self._record_project_change(
             f"Create {values['formulation']} {values['tag']}",
+            before,
+        )
+
+    def _edit_continuum_quad(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if (
+            element is None
+            or element.element_type not in CONTINUUM_QUAD_ELEMENT_TYPES
+        ):
+            return
+        dialog = ContinuumQuadDialog(
+            tag=element.tag,
+            nodes=self.model.nodes,
+            nd_materials=self.project.nd_materials,
+            element=element,
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit 2D Continuum Quad", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = type(element)(
+                tag=element.tag,
+                i=values["nodes"][0],
+                j=values["nodes"][1],
+                element_type=values["formulation"],
+                section_tag=None,
+                transf_tag=None,
+                group=element.group or "continuum-2d",
+                k=values["nodes"][2],
+                l=values["nodes"][3],
+                continuum_thickness=values["thickness"],
+                continuum_material_tag=values["material_tag"],
+                continuum_type=values["behavior"],
+                continuum_pressure=values["pressure"],
+                continuum_density=values["density"],
+                continuum_body_force=values["body_force"],
+            )
+            self.model.elements[element.tag] = updated
+            self.project.validate_element_state(element.tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Edit 2D Continuum Quad", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Updated {values['formulation']} continuum element {tag}"
+        )
+        self._show_entity_properties("element", tag)
+        self._record_project_change(
+            f"Edit {values['formulation']} {tag}",
             before,
         )
 
@@ -28935,6 +28998,9 @@ class MainWindow(QMainWindow):
             }
             is_truss_group = element_type in TRUSS_ELEMENT_TYPES
             is_shell_group = element_type in SHELL_ELEMENT_TYPES
+            is_continuum_group = (
+                element_type in CONTINUUM_QUAD_ELEMENT_TYPES
+            )
 
             if is_truss_group:
                 create = menu.addAction("New Truss...")
@@ -28942,6 +29008,9 @@ class MainWindow(QMainWindow):
             elif is_shell_group:
                 create = menu.addAction("New Shell Element...")
                 create.triggered.connect(self._create_shell)
+            elif is_continuum_group:
+                create = menu.addAction("New 2D Continuum Quad...")
+                create.triggered.connect(self._create_continuum_quad)
             else:
                 create = menu.addAction("New Frame...")
                 create.triggered.connect(self._create_element)
@@ -28975,6 +29044,19 @@ class MainWindow(QMainWindow):
                             else None
                         )
                     )
+                elif is_continuum_group:
+                    edit_continuum = definition_menu.addAction(
+                        "Edit 2D Continuum Definition..."
+                    )
+                    edit_continuum.setEnabled(len(tags) == 1)
+                    edit_continuum.triggered.connect(
+                        lambda checked=False,
+                        values=tuple(sorted(tags)): (
+                            self._edit_continuum_quad(values[0])
+                            if len(values) == 1
+                            else None
+                        )
+                    )
                 else:
                     formulation = definition_menu.addAction(
                         "Element Formulation..."
@@ -28987,6 +29069,7 @@ class MainWindow(QMainWindow):
                     )
 
             assign = menu.addMenu("Assign")
+            assign.setEnabled(not is_continuum_group)
             if is_truss_group:
                 material = assign.addAction("Material (Truss)...")
                 material.triggered.connect(
@@ -29404,7 +29487,7 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             if has_frame or (
                 self.model.elements[tag].element_type
-                in SHELL_ELEMENT_TYPES
+                in (SHELL_ELEMENT_TYPES | CONTINUUM_QUAD_ELEMENT_TYPES)
             ):
                 definition_menu = menu.addMenu("Definition")
                 if (
@@ -29416,6 +29499,16 @@ class MainWindow(QMainWindow):
                     )
                     edit_shell.triggered.connect(
                         lambda: self._edit_shell(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in CONTINUUM_QUAD_ELEMENT_TYPES
+                ):
+                    edit_continuum = definition_menu.addAction(
+                        "Edit 2D Continuum Definition..."
+                    )
+                    edit_continuum.triggered.connect(
+                        lambda: self._edit_continuum_quad(tag)
                     )
                 if has_frame:
                     formulation = definition_menu.addAction(

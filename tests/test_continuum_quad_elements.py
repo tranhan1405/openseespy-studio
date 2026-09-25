@@ -111,3 +111,77 @@ def test_continuum_quad_requires_2d_2dof_and_ccw_order():
         assert "counter-clockwise" in str(exc)
     else:
         raise AssertionError("quad accepted clockwise node order")
+
+
+
+def test_bbar_quad_generation_and_plane_strain_only():
+    project = _project()
+    project.model.add_element(
+        3,
+        1,
+        2,
+        element_type="bbarQuad",
+        k=3,
+        l=4,
+        continuum_thickness=0.4,
+        continuum_material_tag=1,
+        continuum_type="PlaneStrain",
+    )
+    project.validate_element_state(3)
+
+    script = to_openseespy(
+        project.model,
+        nd_materials=project.nd_materials,
+        units=project.units,
+    )
+    assert (
+        "ops.element('bbarQuad', 3, 1, 2, 3, 4, 0.4, 1)"
+    ) in script
+
+    try:
+        project.model.add_element(
+            4,
+            1,
+            2,
+            element_type="bbarQuad",
+            k=3,
+            l=4,
+            continuum_thickness=0.4,
+            continuum_material_tag=1,
+            continuum_type="PlaneStress",
+        )
+    except ValueError as exc:
+        assert "PlaneStrain" in str(exc)
+    else:
+        raise AssertionError("bbarQuad accepted PlaneStress")
+
+
+def test_enhanced_quad_generation_and_round_trip():
+    project = _project()
+    project.model.add_element(
+        5,
+        1,
+        2,
+        element_type="enhancedQuad",
+        k=3,
+        l=4,
+        continuum_thickness=0.35,
+        continuum_material_tag=1,
+        continuum_type="PlaneStress",
+    )
+    project.validate_element_state(5)
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    element = restored.model.elements[5]
+    assert element.element_type == "enhancedQuad"
+    assert element.continuum_type == "PlaneStress"
+
+    script = to_openseespy(
+        restored.model,
+        nd_materials=restored.nd_materials,
+        units=restored.units,
+    )
+    assert (
+        "ops.element('enhancedQuad', 5, 1, 2, 3, 4, 0.35, "
+        "'PlaneStress', 1)"
+    ) in script
