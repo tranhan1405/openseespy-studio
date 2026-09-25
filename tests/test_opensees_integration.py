@@ -2783,3 +2783,136 @@ def test_advanced_isolation_elements_construct_in_real_opensees(
         timeout=30,
     )
     assert tfp_run.returncode == 0, tfp_run.stderr
+
+
+def test_contact_elements_construct_in_real_opensees(tmp_path: Path):
+    cases: list[tuple[str, ProjectDatabase]] = []
+
+    z2 = ProjectDatabase()
+    z2.units = {"length": "m", "force": "N", "time": "s"}
+    z2.model = StructuralModel(ndm=2, ndf=2)
+    z2.model.add_node(1, 0.0, 0.0)
+    z2.model.add_node(2, 0.0, 0.0)
+    z2.model.add_element(
+        1, 1, 2,
+        element_type="zeroLengthContact2D",
+        special_parameters={
+            "Kn": 1.0e9,
+            "Kt": 1.0e8,
+            "mu": 0.3,
+            "normal": (1.0, 0.0),
+        },
+    )
+    cases.append(("zero-contact-2d", z2))
+
+    z3 = ProjectDatabase()
+    z3.units = {"length": "m", "force": "N", "time": "s"}
+    z3.model = StructuralModel(ndm=3, ndf=3)
+    z3.model.add_node(1, 0.0, 0.0, 0.0)
+    z3.model.add_node(2, 0.0, 0.0, 0.0)
+    z3.model.add_element(
+        1, 1, 2,
+        element_type="zeroLengthContact3D",
+        special_parameters={
+            "Kn": 1.0e9,
+            "Kt": 1.0e8,
+            "mu": 0.3,
+            "cohesion": 0.0,
+            "dir": 3,
+        },
+    )
+    cases.append(("zero-contact-3d", z3))
+
+    b2 = ProjectDatabase()
+    b2.units = {"length": "m", "force": "N", "time": "s"}
+    b2.model = StructuralModel(ndm=2, ndf=3)
+    b2.model.add_node(1, 0.0, 0.0)
+    b2.model.add_node(2, 1.0, 0.0)
+    b2.model.add_node(3, 0.5, 0.1, ndf=2)
+    b2.model.add_node(4, 0.5, 0.1, ndf=2)
+    b2.add_nd_material(
+        NDMaterialData(
+            1,
+            "Contact 2D",
+            "ContactMaterial2D",
+            {"mu": 0.3, "G": 1.0e8, "c": 0.0, "t": 0.0},
+        )
+    )
+    b2.model.add_element(
+        1, 1, 2, k=3, l=4,
+        element_type="BeamContact2D",
+        special_parameters={
+            "nd_material_tag": 1,
+            "width": 0.30,
+            "gTol": 1.0e-8,
+            "fTol": 1.0e-4,
+            "cFlag": 0,
+        },
+    )
+    cases.append(("beam-contact-2d", b2))
+
+    b3 = ProjectDatabase()
+    b3.units = {"length": "m", "force": "N", "time": "s"}
+    b3.model = StructuralModel(ndm=3, ndf=6)
+    b3.model.add_node(1, 0.0, 0.0, 0.0)
+    b3.model.add_node(2, 1.0, 0.0, 0.0)
+    b3.model.add_node(3, 0.5, 0.1, 0.0, ndf=3)
+    b3.model.add_node(4, 0.5, 0.1, 0.0, ndf=3)
+    b3.add_nd_material(
+        NDMaterialData(
+            1,
+            "Contact 3D",
+            "ContactMaterial3D",
+            {"mu": 0.3, "G": 1.0e8, "c": 0.0, "t": 0.0},
+        )
+    )
+    b3.add_transformation(
+        TransformationData(
+            1,
+            "Contact beam",
+            "Linear",
+            (0.0, 0.0, 1.0),
+        )
+    )
+    b3.model.add_element(
+        1, 1, 2, k=3, l=4,
+        element_type="BeamContact3D",
+        special_parameters={
+            "nd_material_tag": 1,
+            "radius": 0.15,
+            "transf_tag": 1,
+            "gTol": 1.0e-8,
+            "fTol": 1.0e-4,
+            "cFlag": 0,
+        },
+    )
+    cases.append(("beam-contact-3d", b3))
+
+    for name, project in cases:
+        project.validate_element_state(1)
+        script = to_openseespy(
+            project.model,
+            materials=project.materials,
+            sections=project.sections,
+            transformations=project.transformations,
+            constraints=project.constraints,
+            connections=project.connections,
+            nd_materials=project.nd_materials,
+            friction_models=project.friction_models,
+            units=project.units,
+        )
+        assert "# ERROR:" not in script
+        path = tmp_path / f"{name}.py"
+        path.write_text(script, encoding="utf-8")
+        completed = subprocess.run(
+            [sys.executable, str(path)],
+            cwd=tmp_path,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, (
+            name + "\nSTDOUT:\n" + completed.stdout
+            + "\nSTDERR:\n" + completed.stderr
+        )
