@@ -22,7 +22,11 @@ from PySide6.QtWidgets import (
 )
 
 from ..project import ProjectDatabase
-from ..rc_wall import RCWallSpec
+from ..rc_wall import (
+    RCWallSpec,
+    rc_wall_reinforcement_summary,
+    validate_rc_wall_spec,
+)
 from ..units import UnitSystem
 
 
@@ -206,7 +210,10 @@ class RCWallPreview(QWidget):
                 int(x), int(top), int(x), int(top + wall_h)
             )
 
-        if self.reinforcement_mode == "hybrid" and self.boundary_bars:
+        if (
+            self.reinforcement_mode in {"hybrid", "fully_discrete"}
+            and self.boundary_bars
+        ):
             # Elevation preview: individual boundary bars are shown explicitly.
             # Front/back bars are separated schematically by line style because
             # the physical model is a 2D MEFI wall.
@@ -283,7 +290,7 @@ class RCWallPreview(QWidget):
                     )
 
         if (
-            self.reinforcement_mode == "hybrid"
+            self.reinforcement_mode in {"hybrid", "fully_discrete"}
             and self.web_vertical_mode == "embedded"
         ):
             diameter = self.web_vertical_bar_diameter
@@ -730,8 +737,12 @@ class RCWallWizard(QWizard):
             "smeared",
         )
         self.reinforcement_mode.addItem(
-            "Hybrid · discrete boundary longitudinal steel",
+            "Hybrid · selected discrete reinforcement",
             "hybrid",
+        )
+        self.reinforcement_mode.addItem(
+            "Fully Discrete · all reinforcement as bars",
+            "fully_discrete",
         )
         self.boundary_bar_count = QSpinBox()
         self.boundary_bar_count.setRange(1, 200)
@@ -864,16 +875,18 @@ class RCWallWizard(QWizard):
         )
 
         note = QLabel(
-            "Hybrid creates one FE chain per boundary longitudinal bar, so "
-            "bars have individual element tags and results. In the current "
+            "Hybrid moves only the selected reinforcement into discrete "
+            "bars. Fully Discrete moves all target ρx/ρy into truss bars and "
+            "sets the RCLMS smeared steel ratios to zero. In the current "
             "2D MEFI formulation the physical bars still share each boundary "
             "edge node chain (perfect bond); front/back and cover are shown "
             "schematically in the viewport. Horizontal web bars can also be "
             "discretized on existing internal MEFI node rows, with their rho-x "
             "automatically removed from smeared RCLMS steel. Vertical web bars "
             "may use independent steel nodes coupled to the MEFI host through "
-            "ASDEmbeddedNodeElement interpolation; their rho-y is then removed "
-            "from the smeared web steel automatically."
+            "ASDEmbeddedNodeElement interpolation. Fully Discrete auto-sizes "
+            "equivalent FE bar areas from the target reinforcement ratios and "
+            "uses segmented horizontal bars so web and boundary rho-x may differ."
         )
         note.setWordWrap(True)
         note.setStyleSheet(
