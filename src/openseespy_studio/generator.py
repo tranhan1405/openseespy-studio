@@ -20,7 +20,7 @@ from .model import (
     WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
 )
-from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
+from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, FrictionModelData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 from .response_spectrum import build_period_grid
 
@@ -4311,6 +4311,33 @@ def build_joint_response_specs(
     }
 
 
+def friction_model_to_openseespy(
+    model: FrictionModelData,
+    units: dict[str, str] | None = None,
+) -> str:
+    p = model.parameters
+    if model.friction_type == "Coulomb":
+        return (
+            "ops.frictionModel('Coulomb', "
+            f"{model.tag}, {float(p['mu']):g})"
+        )
+    if model.friction_type == "VelDependent":
+        unit_system = UnitSystem.from_mapping(units)
+        trans_rate = (
+            float(p["transRate"])
+            * unit_system.length_to_m
+            / unit_system.time_to_s
+        )
+        return (
+            "ops.frictionModel('VelDependent', "
+            f"{model.tag}, {float(p['muSlow']):g}, "
+            f"{float(p['muFast']):g}, {trans_rate:g})"
+        )
+    raise ValueError(
+        f"Unsupported friction model type: {model.friction_type}"
+    )
+
+
 def to_openseespy(
     model: StructuralModel,
     materials: dict[int, MaterialData] | None = None,
@@ -4329,6 +4356,7 @@ def to_openseespy(
     units: dict[str, str] | None = None,
     solution_results: dict[int, object] | None = None,
     nd_materials: dict[int, NDMaterialData] | None = None,
+    friction_models: dict[int, FrictionModelData] | None = None,
 ) -> str:
     active_analysis = (
         analyses.get(active_analysis_tag)
@@ -4517,7 +4545,7 @@ def to_openseespy(
                 f"truss element {element.tag} -> missing material "
                 f"{element.truss_material_tag}"
             )
-        if element.element_type in BEARING_ELEMENT_TYPES:
+        if element.element_type == "elastomericBearingPlasticity":
             referenced = {
                 int(value)
                 for key in (
@@ -4534,6 +4562,36 @@ def to_openseespy(
                 material_reference_errors.append(
                     f"bearing element {element.tag} -> missing material "
                     + ", ".join(map(str, missing))
+                )
+        if element.element_type == "TripleFrictionPendulum":
+            referenced = {
+                int(element.special_parameters[key])
+                for key in (
+                    "vertMatTag", "rotZMatTag",
+                    "rotXMatTag", "rotYMatTag",
+                )
+            }
+            missing = sorted(
+                tag for tag in referenced
+                if material_catalog is None or tag not in material_catalog
+            )
+            if missing:
+                material_reference_errors.append(
+                    f"TripleFrictionPendulum element {element.tag} "
+                    "-> missing material "
+                    + ", ".join(map(str, missing))
+                )
+            friction_catalog = set(friction_models or {})
+            missing_friction = sorted(
+                int(element.special_parameters[key])
+                for key in ("frnTag1", "frnTag2", "frnTag3")
+                if int(element.special_parameters[key]) not in friction_catalog
+            )
+            if missing_friction:
+                material_reference_errors.append(
+                    f"TripleFrictionPendulum element {element.tag} "
+                    "-> missing friction model "
+                    + ", ".join(map(str, missing_friction))
                 )
 
     for connection in (connections or {}).values():
@@ -5322,6 +5380,16 @@ def to_openseespy(
             lines.extend(material_source_comments(material))
             lines.append(material_to_openseespy(material, units))
 
+    if friction_models:
+        lines.extend(["", "# Friction models"])
+        for tag in sorted(friction_models):
+            lines.append(
+                friction_model_to_openseespy(
+                    friction_models[tag],
+                    units,
+                )
+            )
+
     if nd_materials:
         lines.extend(["", "# nD Materials"])
         for tag in sorted(nd_materials):
@@ -5393,7 +5461,91 @@ def to_openseespy(
             )
             continue
 
-        if e.element_type in BEARING_ELEMENT_TYPES:
+        if e.element_type == "LeadRubberX":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            fy = u.force_from_n(float(p["Fy"]))
+            gr = u.stress_from_pa(float(p["Gr"]))
+            kbulk = u.stress_from_pa(float(p["Kbulk"]))
+            lengths = [
+                u.length_from_m(float(p[key]))
+                for key in ("D1", "D2", "ts", "tr")
+            ]
+            args = (
+                "ops.element('LeadRubberX', "
+                f"{tag}, {e.i}, {e.j}, {fy:g}, "
+                f"{float(p['alpha']):g}, {gr:g}, {kbulk:g}, "
+                + ", ".join(f"{value:g}" for value in lengths)
+                + f", {int(p['n'])}"
+            )
+            orientation = p.get("orientation")
+            if orientation is not None:
+                args += ", " + ", ".join(
+                    f"{float(value):g}" for value in orientation
+                )
+            mass = float(p["mass"]) / u.mass_unit_kg
+            tc = u.length_from_m(float(p["tc"]))
+            ql = (
+                float(p["qL"])
+                * u.length_to_m**3
+                / u.mass_unit_kg
+            )
+            cl = (
+                float(p["cL"])
+                * u.mass_unit_kg
+                / (u.force_to_n * u.length_to_m)
+            )
+            ks = (
+                float(p["kS"])
+                * u.time_to_s
+                / u.force_to_n
+            )
+            a_s = (
+                float(p["aS"])
+                * u.time_to_s
+                / (u.length_to_m**2)
+            )
+            args += (
+                f", {float(p['kc']):g}, {float(p['PhiM']):g}, "
+                f"{float(p['ac']):g}, {float(p['sDratio']):g}, "
+                f"{mass:g}, {float(p['cd']):g}, {tc:g}, "
+                f"{ql:g}, {cl:g}, {ks:g}, {a_s:g}, "
+                f"{int(p['tag1'])}, {int(p['tag2'])}, "
+                f"{int(p['tag3'])}, {int(p['tag4'])}, "
+                f"{int(p['tag5'])})"
+            )
+            lines.append(args)
+            continue
+
+        if e.element_type == "TripleFrictionPendulum":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            lengths = [
+                u.length_from_m(float(p[key]))
+                for key in ("L1", "L2", "L3", "d1", "d2", "d3")
+            ]
+            w = u.force_from_n(float(p["W"]))
+            uy = u.length_from_m(float(p["uy"]))
+            kvt = (
+                float(p["kvt"])
+                * u.length_to_m
+                / u.force_to_n
+            )
+            min_fv = u.force_from_n(float(p["minFv"]))
+            lines.append(
+                "ops.element('TripleFrictionPendulum', "
+                f"{tag}, {e.i}, {e.j}, "
+                f"{int(p['frnTag1'])}, {int(p['frnTag2'])}, "
+                f"{int(p['frnTag3'])}, {int(p['vertMatTag'])}, "
+                f"{int(p['rotZMatTag'])}, {int(p['rotXMatTag'])}, "
+                f"{int(p['rotYMatTag'])}, "
+                + ", ".join(f"{value:g}" for value in lengths)
+                + f", {w:g}, {uy:g}, {kvt:g}, {min_fv:g}, "
+                f"{float(p['tol']):g})"
+            )
+            continue
+
+        if e.element_type == "elastomericBearingPlasticity":
             p = e.special_parameters
             unit_system = UnitSystem.from_mapping(units)
             k_init = (
