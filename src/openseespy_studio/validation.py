@@ -6,8 +6,10 @@ from typing import Iterable
 
 from .beam_loads import resolve_self_weight_local
 from .model import (
+    BEAM_CONTACT_ELEMENT_TYPES,
     BEARING_ELEMENT_TYPES,
     CABLE_ELEMENT_TYPES,
+    CONTACT_TWO_NODE_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
@@ -742,7 +744,9 @@ def _element_geometry_checks(
         length = _norm(axis)
         if (
             length <= 1.0e-12
-            and element.element_type not in BEARING_ELEMENT_TYPES
+            and element.element_type not in (
+                BEARING_ELEMENT_TYPES | CONTACT_TWO_NODE_ELEMENT_TYPES
+            )
         ):
             issues.append(
                 ValidationIssue(
@@ -788,6 +792,124 @@ def _element_geometry_checks(
                         "element",
                         tag,
                         "Assign an existing uniaxial material.",
+                    )
+                )
+            continue
+
+        if element.element_type in CONTACT_TWO_NODE_ELEMENT_TYPES:
+            expected_ndm = (
+                2 if element.element_type == "zeroLengthContact2D" else 3
+            )
+            expected_ndf = expected_ndm
+            node_ndfs = {
+                int(model.nodes[node_tag].ndf)
+                for node_tag in element.node_tags()
+            }
+            if int(model.ndm) != expected_ndm or node_ndfs != {expected_ndf}:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Contact formulation",
+                        f"{element.element_type} element {tag} requires "
+                        f"ndm={expected_ndm} and ndf={expected_ndf} at both nodes.",
+                        "element",
+                        tag,
+                        "Use contact nodes with translational DOFs only.",
+                    )
+                )
+            issues.append(
+                ValidationIssue(
+                    "INFO",
+                    "Contact solver",
+                    f"{element.element_type} element {tag} has a non-symmetric "
+                    "contact tangent.",
+                    "element",
+                    tag,
+                    "Use a non-symmetric equation-system solver for analysis.",
+                )
+            )
+            continue
+
+        if element.element_type in BEAM_CONTACT_ELEMENT_TYPES:
+            p = element.special_parameters
+            nd_tag = int(p["nd_material_tag"])
+            nd_material = project.nd_materials.get(nd_tag)
+            expected_material = (
+                "ContactMaterial2D"
+                if element.element_type == "BeamContact2D"
+                else "ContactMaterial3D"
+            )
+            if nd_material is None:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Contact material",
+                        f"{element.element_type} element {tag} references "
+                        f"missing nDMaterial {nd_tag}.",
+                        "element",
+                        tag,
+                        f"Assign an existing {expected_material}.",
+                    )
+                )
+            elif nd_material.material_type != expected_material:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Contact material",
+                        f"{element.element_type} element {tag} requires "
+                        f"{expected_material}; nDMaterial {nd_tag} is "
+                        f"{nd_material.material_type}.",
+                        "element",
+                        tag,
+                        f"Assign a {expected_material}.",
+                    )
+                )
+            if element.element_type == "BeamContact2D":
+                required_ndfs = (3, 3, 2, 2)
+                expected_ndm = 2
+            else:
+                required_ndfs = (6, 6, 3, 3)
+                expected_ndm = 3
+                transf_tag = int(p["transf_tag"])
+                if transf_tag not in project.transformations:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Transformation",
+                            f"BeamContact3D element {tag} references missing "
+                            f"transformation {transf_tag}.",
+                            "element",
+                            tag,
+                            "Assign an existing 3D geometric transformation.",
+                        )
+                    )
+            actual_ndfs = tuple(
+                int(model.nodes[node_tag].ndf)
+                for node_tag in element.node_tags()
+            )
+            if int(model.ndm) != expected_ndm or actual_ndfs != required_ndfs:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Contact formulation",
+                        f"{element.element_type} element {tag} node NDFs are "
+                        f"{actual_ndfs}; expected {required_ndfs}.",
+                        "element",
+                        tag,
+                        "Use mixed-DOF master/contact/Lagrange nodes required "
+                        "by the OpenSees BeamContact formulation.",
+                    )
+                )
+            if element.l is not None and any(model.nodes[int(element.l)].fixity):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Contact formulation",
+                        f"{element.element_type} Lagrange node {element.l} "
+                        "must remain free.",
+                        "element",
+                        tag,
+                        "Remove fixities from the Lagrange multiplier node.",
                     )
                 )
             continue
