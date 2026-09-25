@@ -591,23 +591,19 @@ class TrussDialog(_BaseDialog):
                     "the section-based truss."
                 )
 
-        return {
-            "tag": int(self.tag.value()),
-            "node_i": int(self.node_i.value()),
-            "node_j": int(self.node_j.value()),
-            "element_type": element_type,
-            "area": area,
-            "material_tag": (
-                None if material_tag is None else int(material_tag)
-            ),
-            "section_tag": (
-                None if section_tag is None else int(section_tag)
-            ),
-            "group": self.group.currentText().strip() or "truss",
-            "rho": float(self.rho.value()),
-            "consistent_mass": self.consistent_mass.isChecked(),
-            "do_rayleigh": self.do_rayleigh.isChecked(),
-        }
+        return (
+            int(self.tag.value()),
+            int(self.node_i.value()),
+            int(self.node_j.value()),
+            area,
+            None if material_tag is None else int(material_tag),
+            self.group.currentText().strip() or "truss",
+            float(self.rho.value()),
+            self.consistent_mass.isChecked(),
+            self.do_rayleigh.isChecked(),
+            element_type,
+            None if section_tag is None else int(section_tag),
+        )
 
 
 class ElementFormulationDialog(_BaseDialog):
