@@ -7589,6 +7589,45 @@ class ModelViewport(QWidget):
         self._result_overlay_active = True
         self.plotter.render()
 
+    def show_shell_displacement_contour(
+        self,
+        result: dict[str, object],
+        component: str,
+        *,
+        display_mode: str = "deformed_only",
+        deformation_scale: float = 10.0,
+        element_tags: set[int] | None = None,
+        cache_key: object | None = None,
+    ) -> None:
+        """Fringe nodal displacement only on true Shell element surfaces."""
+        if self._model is None:
+            return
+        shell_tags = {
+            int(tag)
+            for tag in self._visible_element_tags()
+            if (
+                tag in self._model.elements
+                and self._model.elements[tag].element_type
+                in SHELL_ELEMENT_TYPES
+            )
+        }
+        if element_tags:
+            shell_tags.intersection_update(
+                int(tag) for tag in element_tags
+            )
+        if not shell_tags:
+            self.clear_result_overlay()
+            return
+        self.show_node_contour(
+            result,
+            "Displacement",
+            str(component),
+            display_mode=str(display_mode),
+            deformation_scale=float(deformation_scale),
+            element_tags=shell_tags,
+            cache_key=cache_key,
+        )
+
     def show_node_contour(
         self,
         result: dict[str, object],
