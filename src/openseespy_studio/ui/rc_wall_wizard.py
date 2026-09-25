@@ -998,6 +998,59 @@ class RCWallWizard(QWizard):
         self._update_preview()
         self._update_review()
 
+    def _vertical_web_metrics(self) -> dict[str, object]:
+        width = float(self.width.value())
+        boundary = float(self.boundary_width.value())
+        thickness = float(self.thickness.value())
+        diameter = float(self.web_vertical_bar_diameter.value())
+        target = float(self.web_vertical_spacing.value())
+        edge = float(self.web_vertical_edge_offset.value())
+        layers = (
+            2
+            if self.web_vertical_layer_mode.currentData() == "front_back"
+            else 1
+        )
+
+        local_left = boundary + edge + 0.5 * diameter
+        local_right = width - boundary - edge - 0.5 * diameter
+        positions: tuple[float, ...] = ()
+        actual_spacing = 0.0
+        if (
+            target > 0.0
+            and diameter > 0.0
+            and local_right >= local_left
+        ):
+            span = local_right - local_left
+            if span <= 1.0e-12:
+                positions = (local_left,)
+            else:
+                intervals = max(1, int(math.ceil(span / target)))
+                positions = tuple(
+                    local_left + span * index / intervals
+                    for index in range(intervals + 1)
+                )
+                actual_spacing = span / intervals
+
+        bar_area = math.pi * diameter * diameter / 4.0
+        web_width = width - 2.0 * boundary
+        gross = web_width * thickness
+        discrete_rho = (
+            len(positions) * layers * bar_area / gross
+            if gross > 0.0
+            else float("inf")
+        )
+        total_rho = float(self.rho_y_web.value()) / 100.0
+        return {
+            "positions": positions,
+            "bar_count_per_layer": len(positions),
+            "layers": layers,
+            "bar_area": bar_area,
+            "actual_spacing": actual_spacing,
+            "discrete_rho": discrete_rho,
+            "remaining_rho": total_rho - discrete_rho,
+            "fits": bool(positions),
+        }
+
     def _update_reinforcement_info(self) -> None:
         if not hasattr(self, "reinforcement_info"):
             return
@@ -1095,6 +1148,31 @@ class RCWallWizard(QWizard):
                 f"ρx,discrete = {100.0 * h_rho:.4g}%"
             )
 
+        vertical_text = "Vertical web steel: smeared"
+        if self.web_vertical_mode.currentData() == "embedded":
+            vertical = self._vertical_web_metrics()
+            if not bool(vertical["fits"]):
+                warning_parts.append(
+                    "No embedded vertical web bar fits between boundary zones."
+                )
+            if float(vertical["remaining_rho"]) < -1.0e-12:
+                warning_parts.append(
+                    "Embedded vertical bars exceed available web rho-y."
+                )
+            vertical_text = (
+                f"Vertical embedded: "
+                f"{int(vertical['bar_count_per_layer'])} bars/layer × "
+                f"{int(vertical['layers'])} layer(s) × "
+                f"Ø{self.web_vertical_bar_diameter.value():g}; "
+                f"target ≤ {self.web_vertical_spacing.value():g} "
+                f"{self.units.length}; actual ≈ "
+                f"{float(vertical['actual_spacing']):g} "
+                f"{self.units.length}; ρy,discrete = "
+                f"{100.0 * float(vertical['discrete_rho']):.4g}% · "
+                f"ρy,smeared remaining = "
+                f"{100.0 * max(float(vertical['remaining_rho']), 0.0):.4g}%"
+            )
+
         warning = "".join(
             f"<br><b style='color:#b42318'>{message}</b>"
             for message in warning_parts
@@ -1116,7 +1194,7 @@ class RCWallWizard(QWizard):
             f"ρy,smeared remaining = "
             f"{100.0 * max(remaining, 0.0):.4g}%<br>"
             f"{horizontal_text}<br>"
-            "<i>Vertical web bars remain smeared until embedded coupling.</i>"
+            f"{vertical_text}"
             + warning
         )
 
@@ -1635,6 +1713,20 @@ class RCWallWizard(QWizard):
                                 "Discrete horizontal bars exceed available "
                                 "rho-x in the web or boundary zone."
                             )
+                    if self.web_vertical_mode.currentData() == "embedded":
+                        vertical = self._vertical_web_metrics()
+                        if not bool(vertical["fits"]):
+                            raise ValueError(
+                                "No embedded vertical web bar fits between "
+                                "the boundary zones. Reduce edge offset/bar "
+                                "diameter or increase the web width."
+                            )
+                        if float(vertical["remaining_rho"]) < -1.0e-12:
+                            raise ValueError(
+                                "Embedded vertical web bars exceed available "
+                                "web rho-y. Increase spacing/reduce diameter "
+                                "or increase web rho-y."
+                            )
             else:
                 self.data()
         except ValueError as exc:
@@ -1653,6 +1745,9 @@ class RCWallWizard(QWizard):
         )
         boundary_rebar = 0
         horizontal_rebar = 0
+        vertical_rebar = 0
+        embedded_nodes = 0
+        embedded_coupling = 0
         if hybrid:
             boundary_rebar = (
                 rows
@@ -1668,18 +1763,38 @@ class RCWallWizard(QWizard):
                 )
                 horizontal_rebar = max(rows - 1, 0) * layers
 
-        discrete = boundary_rebar + horizontal_rebar
+            if self.web_vertical_mode.currentData() == "embedded":
+                vertical = self._vertical_web_metrics()
+                bar_lines = (
+                    int(vertical["bar_count_per_layer"])
+                    * int(vertical["layers"])
+                )
+                vertical_rebar = bar_lines * rows
+                embedded_nodes = bar_lines * (rows + 1)
+                embedded_coupling = embedded_nodes
+
+        discrete = boundary_rebar + horizontal_rebar + vertical_rebar
+        selection_sets = 3
+        if discrete:
+            selection_sets += 1
+        if embedded_coupling:
+            selection_sets += 1
         return {
-            "nodes": 2 * (rows + 1),
+            "nodes": 2 * (rows + 1) + embedded_nodes,
+            "host_nodes": 2 * (rows + 1),
+            "embedded_nodes": embedded_nodes,
             "mefi": rows,
             "boundary_rebar": boundary_rebar,
             "horizontal_rebar": horizontal_rebar,
+            "vertical_rebar": vertical_rebar,
+            "embedded_coupling": embedded_coupling,
             "discrete_rebar": discrete,
-            "elements": rows + discrete,
+            "elements": rows + discrete + embedded_coupling,
+            "structural_elements": rows + discrete,
             "uniaxial_materials": 5,
             "nd_materials": 4,
             "sections": 2,
-            "selection_sets": 3 + (1 if discrete else 0),
+            "selection_sets": selection_sets,
             "fixed_nodes": 2,
         }
 
@@ -1786,6 +1901,19 @@ class RCWallWizard(QWizard):
                         "Discrete horizontal bars exceed available rho-x.",
                     ))
 
+            if self.web_vertical_mode.currentData() == "embedded":
+                vertical = self._vertical_web_metrics()
+                if not bool(vertical["fits"]):
+                    items.append((
+                        "web_vertical",
+                        "No embedded vertical web bar fits in the web region.",
+                    ))
+                if float(vertical["remaining_rho"]) < -1.0e-12:
+                    items.append((
+                        "web_vertical",
+                        "Embedded vertical bars exceed available web rho-y.",
+                    ))
+
         return items
 
     def _preview_validation_messages(self) -> list[str]:
@@ -1842,13 +1970,24 @@ class RCWallWizard(QWizard):
                     if self.web_horizontal_mode.currentData() == "mesh_aligned"
                     else "Smeared"
                 )
+                vertical_label = "Smeared"
+                if self.web_vertical_mode.currentData() == "embedded":
+                    vertical = self._vertical_web_metrics()
+                    vertical_label = (
+                        f"Embedded · "
+                        f"{int(vertical['bar_count_per_layer'])} bars/layer × "
+                        f"{int(vertical['layers'])} layer(s) · "
+                        f"s≈{float(vertical['actual_spacing']):g} "
+                        f"{self.units.length}"
+                    )
                 reinforcement_text = (
                     f"{bars} × Ø{diameter:g} / boundary · {layer_label}<br>"
                     f"Cover = {self.boundary_cover.value():g} "
                     f"{self.units.length}<br>"
                     f"ρy discrete = {discrete_rho:.3g}% · "
                     f"smeared remaining = {remaining:.3g}%<br>"
-                    f"Horizontal web = {horizontal_label}"
+                    f"Horizontal web = {horizontal_label}<br>"
+                    f"Vertical web = {vertical_label}"
                 )
 
             counts = self._preview_object_counts()
@@ -1866,12 +2005,19 @@ class RCWallWizard(QWizard):
             )
             self.preview_object_summary.setText(
                 "<b>Objects to be created</b><br>"
-                f"Nodes: {counts['nodes']}<br>"
+                f"Nodes: {counts['nodes']} "
+                f"({counts['host_nodes']} host + "
+                f"{counts['embedded_nodes']} embedded steel)<br>"
                 f"MEFI elements: {counts['mefi']}<br>"
                 f"Boundary bar elements: {counts['boundary_rebar']}<br>"
                 f"Horizontal web bar elements: "
                 f"{counts['horizontal_rebar']}<br>"
-                f"<b>Total elements: {counts['elements']}</b><br>"
+                f"Vertical web bar elements: "
+                f"{counts['vertical_rebar']}<br>"
+                f"Embedded coupling helpers: "
+                f"{counts['embedded_coupling']}<br>"
+                f"<b>Total elements: {counts['elements']}</b> "
+                f"({counts['structural_elements']} structural)<br>"
                 f"Uniaxial materials: {counts['uniaxial_materials']}<br>"
                 f"nD materials: {counts['nd_materials']}<br>"
                 f"RCLMS sections: {counts['sections']}<br>"
@@ -1891,11 +2037,19 @@ class RCWallWizard(QWizard):
                 "SmearedSteelDoubleLayer ×2<br>"
                 "Sections: RCLMS Web (1 layer) · "
                 "RCLMS Boundary (2 layers)<br>"
-                f"Discrete reinforcement formulation: {truss_text}"
+                f"Discrete reinforcement formulation: {truss_text}<br>"
+                + (
+                    "Coupling: ASDEmbeddedNodeElement · "
+                    f"penalty factor {self.embedded_penalty_factor.value():g}"
+                    if counts["embedded_coupling"]
+                    else "Coupling: —"
+                )
             )
             selection_text = "Base · Top · MEFI"
             if counts["discrete_rebar"]:
                 selection_text += " · Reinforcement"
+            if counts["embedded_coupling"]:
+                selection_text += " · Embedded Coupling"
             self.preview_selection_summary.setText(
                 "<b>Selections & Boundary Conditions</b><br>"
                 f"Named selections: {selection_text}<br>"
@@ -1917,6 +2071,7 @@ class RCWallWizard(QWizard):
                     "geometry": "Geometry",
                     "boundary": "Boundary / reinforcement",
                     "web_rebar": "Web reinforcement",
+                    "web_vertical": "Embedded vertical reinforcement",
                     "domain": "Project domain",
                 }
                 self.preview_validation_status.setText(
@@ -1958,6 +2113,11 @@ class RCWallWizard(QWizard):
                 "Base: both bottom nodes fixed in UX, UY and RZ.<br>"
                 "Named selections: Base · Top · MEFI"
                 + (" · Reinforcement" if counts["discrete_rebar"] else "")
+                + (
+                    " · Embedded Coupling"
+                    if counts["embedded_coupling"]
+                    else ""
+                )
             )
         except (AttributeError, ZeroDivisionError, ValueError):
             self.preview_geometry_summary.setText(
