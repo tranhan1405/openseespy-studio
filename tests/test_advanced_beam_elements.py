@@ -13,6 +13,29 @@ from openseespy_studio.project import (
 )
 
 
+
+def _script(project: ProjectDatabase) -> str:
+    return to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        nodal_loads=project.nodal_loads,
+        analyses=project.analyses,
+        active_analysis_tag=project.active_analysis_tag,
+        element_loads=project.element_loads,
+        prescribed_displacements=project.prescribed_displacements,
+        recorders=project.recorders,
+        units=project.units,
+        solution_results=project.solution_results,
+        nd_materials=project.nd_materials,
+    )
+
+
 def _elastic_section(tag=1):
     return SectionData(
         tag,
@@ -51,7 +74,7 @@ def test_elastic_timoshenko_beam_2d_generator():
         consistent_mass=True,
     )
     project.validate_element_state(1)
-    script = project.to_openseespy()
+    script = _script(project)
     assert (
         "ops.element('ElasticTimoshenkoBeam', 1, 1, 2, "
         "3e+07, 1.2e+07, 0.3, 0.02, 0.24, 1, "
@@ -83,7 +106,7 @@ def test_elastic_timoshenko_beam_3d_generator():
         transf_tag=1,
     )
     project.validate_element_state(1)
-    script = project.to_openseespy()
+    script = _script(project)
     assert (
         "ops.element('ElasticTimoshenkoBeam', 1, 1, 2, "
         "3e+07, 1.2e+07, 0.3, 0.01, 0.015, 0.02, "
@@ -173,7 +196,7 @@ def test_fiber_int_and_disp_beam_column_int_generation():
         mass_per_length=1.25,
     )
     project.validate_element_state(7)
-    script = project.to_openseespy()
+    script = _script(project)
     assert (
         "ops.section('FiberInt', 2, '-NStrip', "
         "1, 0.2, 1, 0.15, 1, 0.2)"
