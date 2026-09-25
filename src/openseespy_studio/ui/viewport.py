@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QRubberBand,
     QToolButton,
@@ -125,6 +126,7 @@ class ModelViewport(QWidget):
             "masses": False,
             "section_axes": False,
             "load_values": True,
+            "reinforcement": True,
         }
         self._model_representation = "tube"
         self._model_color_mode = "uniform"
@@ -316,7 +318,7 @@ class ModelViewport(QWidget):
         for icon, tip, callback in (
             ("iso", "Orientation cube", lambda: self.view_requested.emit("iso")),
             ("box", "Fit selection", self.fit_view),
-            ("display", "Display options", self._noop),
+            ("display", "Display options", self._show_display_options_menu),
             ("fullscreen", "Toggle fullscreen", self._toggle_fullscreen),
         ):
             button = QToolButton()
@@ -1918,6 +1920,40 @@ class ModelViewport(QWidget):
     def _noop(self):
         return None
 
+    def _show_display_options_menu(self) -> None:
+        """Show compact model-display toggles next to the viewport button."""
+        menu = QMenu(self)
+        definitions = (
+            ("reinforcement", "Discrete reinforcement"),
+            ("node_numbers", "Node numbers"),
+            ("element_numbers", "Element numbers"),
+            ("masses", "Mass symbols"),
+            ("section_axes", "Section / shell axes"),
+            ("nodal_loads", "Nodal loads"),
+            ("element_loads", "Element loads"),
+            (
+                "prescribed_displacements",
+                "Prescribed displacements",
+            ),
+            ("load_values", "Load values"),
+        )
+        for key, label in definitions:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(self.display_option(key))
+            action.toggled.connect(
+                lambda checked, name=key:
+                self.set_display_option(name, checked)
+            )
+
+        sender = self.sender()
+        if isinstance(sender, QToolButton):
+            menu.exec(
+                sender.mapToGlobal(sender.rect().bottomLeft())
+            )
+        else:
+            menu.exec(self.mapToGlobal(self.rect().center()))
+
     def _toggle_fullscreen(self):
         window = self.window()
         if window.isFullScreen():
@@ -2238,7 +2274,14 @@ class ModelViewport(QWidget):
             mapping = {}
             for tag in visible_tags:
                 element = self._model.elements[tag]
-                color = "#687d90" if element.group == "column" else "#74889b"
+                if str(element.group).startswith("rc-wall-rebar"):
+                    color = "#d64545"
+                elif element.group == "column":
+                    color = "#687d90"
+                elif element.element_type in QUAD_ELEMENT_TYPES:
+                    color = "#8fa3b5"
+                else:
+                    color = "#74889b"
                 mapping[int(tag)] = self._hex_rgb(color)
             return mapping, []
 
@@ -2406,6 +2449,9 @@ class ModelViewport(QWidget):
         if self._display_options[name] == enabled:
             return
         self._display_options[name] = enabled
+        if name == "reinforcement":
+            self._rebuild_visible_scene()
+            return
         self._update_display_option(name)
 
     def display_option(self, name: str) -> bool:
@@ -2441,6 +2487,14 @@ class ModelViewport(QWidget):
         if self._model is None:
             return set()
         tags = set(self._model.elements) - self._hidden_elements
+        if not self._display_options.get("reinforcement", True):
+            tags = {
+                tag
+                for tag in tags
+                if not str(self._model.elements[tag].group).startswith(
+                    "rc-wall-rebar"
+                )
+            }
         if self._isolate_active:
             tags &= self._isolate_elements
         return tags
@@ -2961,14 +3015,26 @@ class ModelViewport(QWidget):
             for tag in visible_tags
             if tag not in set(shell_tags)
         ]
-        beam_tags = [
+        reinforcement_tags = [
             tag
             for tag in line_tags
+            if str(self._model.elements[tag].group).startswith(
+                "rc-wall-rebar"
+            )
+        ]
+        structural_line_tags = [
+            tag
+            for tag in line_tags
+            if tag not in set(reinforcement_tags)
+        ]
+        beam_tags = [
+            tag
+            for tag in structural_line_tags
             if self._model.elements[tag].group != "column"
         ]
         column_tags = [
             tag
-            for tag in line_tags
+            for tag in structural_line_tags
             if self._model.elements[tag].group == "column"
         ]
 
@@ -2979,7 +3045,11 @@ class ModelViewport(QWidget):
 
         if representation == "centerline":
             combined = {}
-            for name, tags in (("column", column_tags), ("beam", beam_tags)):
+            for name, tags in (
+                ("column", column_tags),
+                ("beam", beam_tags),
+                ("reinforcement", reinforcement_tags),
+            ):
                 mesh = self._batched_centerline_mesh(self._model, tags)
                 if mesh is not None:
                     combined[name] = mesh
@@ -2990,6 +3060,7 @@ class ModelViewport(QWidget):
         if representation == "tube":
             beam_size = max(span * 0.010, 0.08)
             column_size = max(span * 0.0115, 0.09)
+            reinforcement_size = max(span * 0.0025, 0.012)
             combined = {}
             column_mesh = self._batched_tube_mesh(
                 self._model,
@@ -3001,22 +3072,37 @@ class ModelViewport(QWidget):
                 beam_tags,
                 beam_size,
             )
+            reinforcement_mesh = self._batched_tube_mesh(
+                self._model,
+                reinforcement_tags,
+                reinforcement_size,
+            )
             if column_mesh is not None:
                 combined["column"] = column_mesh
             if beam_mesh is not None:
                 combined["beam"] = beam_mesh
+            if reinforcement_mesh is not None:
+                combined["reinforcement"] = reinforcement_mesh
             if shell_mesh is not None:
                 combined["shell"] = shell_mesh
             return combined
 
-        # Actual-section view remains geometry-driven for line members.
-        # Shells remain true surface cells for all representation modes.
-        groups: dict[str, list[object]] = {"column": [], "beam": []}
+        # Actual-section view remains geometry-driven for frame members.
+        # RC-wall discrete reinforcement keeps a compact tube representation
+        # because it has an area/material rather than a beam Section object.
+        groups: dict[str, list[object]] = {
+            "column": [],
+            "beam": [],
+        }
         beam_size = max(span * 0.010, 0.08)
         column_size = max(span * 0.0115, 0.09)
-        fallback: dict[str, list[int]] = {"column": [], "beam": []}
+        reinforcement_size = max(span * 0.0025, 0.012)
+        fallback: dict[str, list[int]] = {
+            "column": [],
+            "beam": [],
+        }
 
-        for tag in line_tags:
+        for tag in structural_line_tags:
             element = self._model.elements[tag]
             group = "column" if element.group == "column" else "beam"
             mesh = self._actual_section_member_mesh(element)
@@ -3046,10 +3132,16 @@ class ModelViewport(QWidget):
                     if len(parts) == 1
                     else pv.merge(parts, merge_points=False)
                 )
+        reinforcement_mesh = self._batched_tube_mesh(
+            self._model,
+            reinforcement_tags,
+            reinforcement_size,
+        )
+        if reinforcement_mesh is not None:
+            combined["reinforcement"] = reinforcement_mesh
         if shell_mesh is not None:
             combined["shell"] = shell_mesh
         return combined
-
 
     def _fiber_material_points(
         self,
@@ -4713,11 +4805,18 @@ class ModelViewport(QWidget):
                 ),
                 edge_color="#243b52",
                 show_edges=(
-                    group_name == "shell"
+                    group_name in {"shell", "reinforcement"}
                     or self._model_representation == "tube"
                 ),
                 line_width=(
-                    3 if self._model_representation == "centerline" else 1
+                    5
+                    if (
+                        group_name == "reinforcement"
+                        and self._model_representation == "centerline"
+                    )
+                    else 3
+                    if self._model_representation == "centerline"
+                    else 1
                 ),
                 render_lines_as_tubes=(
                     self._model_representation == "centerline"
