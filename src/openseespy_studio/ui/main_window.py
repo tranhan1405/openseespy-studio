@@ -5632,12 +5632,12 @@ class MainWindow(QMainWindow):
                         "continuum-quad"
                         if "quad" in element_type_lower
                         else (
-                        "frame"
-                        if any(
-                            token in element_type_lower
-                            for token in ("beam", "column")
-                        )
-                        else "element"
+                            "frame"
+                            if any(
+                                token in element_type_lower
+                                for token in ("beam", "column")
+                            )
+                            else "element"
                         )
                     )
                 )
@@ -5887,12 +5887,12 @@ class MainWindow(QMainWindow):
                         "continuum-quad"
                         if "quad" in element_type_lower
                         else (
-                        "frame"
-                        if any(
-                            token in element_type_lower
-                            for token in ("beam", "column")
-                        )
-                        else "element"
+                            "frame"
+                            if any(
+                                token in element_type_lower
+                                for token in ("beam", "column")
+                            )
+                            else "element"
                         )
                     )
                 )
@@ -10097,67 +10097,7 @@ class MainWindow(QMainWindow):
                 if element is None:
                     return
 
-                if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
-                material = (
-                    self.project.nd_materials.get(
-                        int(element.continuum_material_tag)
-                    )
-                    if element.continuum_material_tag is not None
-                    else None
-                )
-                material_text = (
-                    f"{element.continuum_material_tag} - {material.name} "
-                    f"({material.material_type})"
-                    if material is not None
-                    else (
-                        f"{element.continuum_material_tag} (missing)"
-                        if element.continuum_material_tag is not None
-                        else "Unassigned"
-                    )
-                )
-                b1, b2 = element.continuum_body_force
-                self.properties_panel.set_properties(
-                    "2D Continuum Quad",
-                    [
-                        ("Tag", tag),
-                        ("Type", element.element_type),
-                        (
-                            "Nodes",
-                            ", ".join(map(str, element.node_tags())),
-                        ),
-                        ("Topology", "4-node XY continuum · CCW"),
-                        ("Behavior", element.continuum_type),
-                        ("Thickness", f"{element.continuum_thickness:g}"),
-                        ("nD Material", material_text),
-                        (
-                            "Body force",
-                            f"({float(b1):g}, {float(b2):g})",
-                        ),
-                        (
-                            "Pressure",
-                            (
-                                f"{element.continuum_pressure:g}"
-                                if element.element_type == "quad"
-                                else "Not used by SSPquad"
-                            ),
-                        ),
-                        (
-                            "Density",
-                            (
-                                f"{element.continuum_density:g}"
-                                if element.element_type == "quad"
-                                else "Not used by SSPquad"
-                            ),
-                        ),
-                        ("Section", "Not used by 2D continuum"),
-                        ("Transformation", "Not used by 2D continuum"),
-                        ("Group", element.group),
-                    ],
-                    context={"kind": "element", "tag": int(tag)},
-                )
-                return
-
-            if element.element_type in SHELL_ELEMENT_TYPES:
+                if element.element_type in SHELL_ELEMENT_TYPES:
                     shell_direct_fields = {
                         "group",
                         "section_tag",
@@ -10633,6 +10573,71 @@ class MainWindow(QMainWindow):
                             "Edit",
                             "Macro-fiber layout is managed by the RC Wall "
                             "Wizard / project data.",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
+                material = (
+                    self.project.nd_materials.get(
+                        int(element.continuum_material_tag)
+                    )
+                    if element.continuum_material_tag is not None
+                    else None
+                )
+                material_text = (
+                    f"{element.continuum_material_tag} - {material.name} "
+                    f"({material.material_type})"
+                    if material is not None
+                    else (
+                        f"{element.continuum_material_tag} (missing)"
+                        if element.continuum_material_tag is not None
+                        else "Unassigned"
+                    )
+                )
+                b1, b2 = element.continuum_body_force
+                self.properties_panel.set_properties(
+                    "2D Continuum Quad",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        (
+                            "Nodes",
+                            ", ".join(map(str, element.node_tags())),
+                        ),
+                        ("Topology", "4-node XY continuum · CCW"),
+                        ("Behavior", element.continuum_type),
+                        ("Thickness", f"{element.continuum_thickness:g}"),
+                        ("nD Material", material_text),
+                        (
+                            "Body force",
+                            f"({float(b1):g}, {float(b2):g})",
+                        ),
+                        (
+                            "Pressure",
+                            (
+                                f"{element.continuum_pressure:g}"
+                                if element.element_type == "quad"
+                                else "Not used by SSPquad"
+                            ),
+                        ),
+                        (
+                            "Density",
+                            (
+                                f"{element.continuum_density:g}"
+                                if element.element_type == "quad"
+                                else "Not used by SSPquad"
+                            ),
+                        ),
+                        ("Section", "Not used by 2D continuum"),
+                        ("Transformation", "Not used by 2D continuum"),
+                        ("Group", element.group),
+                        (
+                            "Edit",
+                            "Direct-edit support will be added with the "
+                            "remaining continuum formulations.",
                         ),
                     ],
                     context={"kind": "element", "tag": int(tag)},
