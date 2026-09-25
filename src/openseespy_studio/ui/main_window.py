@@ -31473,16 +31473,6 @@ class MainWindow(QMainWindow):
                 and element.truss_material_tag is not None
                 for element in selected_elements
             )
-            has_section_assignment = any(
-                element.element_type
-                in (
-                    FRAME_ELEMENT_TYPES
-                    | SHELL_ELEMENT_TYPES
-                    | TRUSS_SECTION_ELEMENT_TYPES
-                )
-                and element.section_tag is not None
-                for element in selected_elements
-            )
             has_clearable_section_assignment = any(
                 element.element_type
                 in (FRAME_ELEMENT_TYPES | SHELL_ELEMENT_TYPES)
@@ -31631,7 +31621,7 @@ class MainWindow(QMainWindow):
 
             if (
                 has_truss_material
-                or has_section_assignment
+                or has_clearable_section_assignment
                 or has_transformation_assignment
             ):
                 assign.addSeparator()
