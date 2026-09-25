@@ -2078,6 +2078,7 @@ class StructuralModel:
                 element is None
                 or element.element_type in TRUSS_ELEMENT_TYPES
                 or element.element_type in SPECIAL_TWO_NODE_ELEMENT_TYPES
+                or element.element_type in BEAM_CONTACT_ELEMENT_TYPES
             ):
                 continue
             element.section_tag = value
