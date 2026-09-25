@@ -1154,9 +1154,18 @@ def test_rc_wall_gui_exposes_reinforcement_tree_and_display_controls():
     assert "Boundary Bars · Left · Front" in tree_source
     assert "Boundary Bars · Right · Back" in tree_source
     assert "Web Bars · Horizontal" in tree_source
+    assert "Boundary Bars · Horizontal · Left" in tree_source
+    assert "Boundary Bars · Horizontal · Right" in tree_source
+    assert "Web Bars · Vertical · Embedded" in tree_source
     assert "rc-wall-rebar" in selection_source
+    assert "boundary-horizontal-left" in selection_source
+    assert "boundary-horizontal-right" in selection_source
+    assert "web-vertical" in selection_source
     assert "Discrete Reinforcement" in root_source
-    assert "Perfect Bond" in group_source
+    assert "Horizontal Boundary" in root_source
+    assert "Vertical Web" in root_source
+    assert "Bond / Coupling" in group_source
+    assert "ASDEmbeddedNodeElement" in group_source
     assert '"reinforcement"' in viewport_source
     assert "_batched_reinforcement_mesh" in viewport_source
     assert "rc-wall-rebar-web-vertical-" in reinforcement_mesh_source
