@@ -7300,17 +7300,32 @@ class ModelViewport(QWidget):
         component: str,
         *,
         location: str = "mid",
+        frame_index: int | None = None,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
-    ) -> None:
-        """Show averaged shell generalized strains/curvatures as contours."""
+    ) -> dict[str, object]:
+        """Show shell generalized strain/curvature contours.
+
+        frame_index=None uses the final-state Gauss-point average payload.
+        A non-negative frame index uses captured shell deformation history so
+        the fringe follows result animation.
+        """
+        stats: dict[str, object] = {
+            "rendered_elements": 0,
+            "missing_thickness": 0,
+            "frame_index": frame_index,
+            "location": str(location),
+            "component": str(component),
+        }
         if self._model is None:
-            return
+            return stats
 
         component = str(component)
         location = str(location or "mid").strip().lower()
         if location not in {"mid", "top", "bottom"}:
             location = "mid"
+        stats["location"] = location
+
         component_index = {
             "Exx": 0,
             "Eyy": 1,
@@ -7327,17 +7342,30 @@ class ModelViewport(QWidget):
         }.get(component)
         if component_index is None and principal_index is None:
             self.clear_result_overlay()
-            return
+            return stats
 
         final = result.get("final", {}) if isinstance(result, dict) else {}
-        shell_data = (
-            final.get("shell_section_deformations", {})
-            if isinstance(final, dict)
+        history = (
+            result.get("history", {})
+            if isinstance(result, dict)
             else {}
         )
+        use_history = frame_index is not None and int(frame_index) >= 0
+        if use_history:
+            shell_data = (
+                history.get("shell_section_deformations", {})
+                if isinstance(history, dict)
+                else {}
+            )
+        else:
+            shell_data = (
+                final.get("shell_section_deformations", {})
+                if isinstance(final, dict)
+                else {}
+            )
         if not isinstance(shell_data, dict) or not shell_data:
             self.clear_result_overlay()
-            return
+            return stats
 
         visible = {
             int(tag)
@@ -7357,11 +7385,20 @@ class ModelViewport(QWidget):
         values: list[float] = []
         for tag in sorted(visible):
             payload = shell_data.get(str(tag), shell_data.get(tag))
-            if not isinstance(payload, dict):
-                continue
-            average = payload.get("average", [])
+            if use_history:
+                if not isinstance(payload, list):
+                    continue
+                source_index = int(frame_index or 0)
+                if source_index < 0 or source_index >= len(payload):
+                    continue
+                average = payload[source_index]
+            else:
+                if not isinstance(payload, dict):
+                    continue
+                average = payload.get("average", [])
             if not isinstance(average, (list, tuple)):
                 continue
+
             element = self._model.elements.get(tag)
             if (
                 element is None
@@ -7384,10 +7421,14 @@ class ModelViewport(QWidget):
                         else 0.0
                     )
                     if not math.isfinite(thickness) or thickness <= 0.0:
+                        stats["missing_thickness"] = (
+                            int(stats["missing_thickness"]) + 1
+                        )
                         continue
                     z = 0.5 * thickness * (
                         1.0 if location == "top" else -1.0
                     )
+
                 surface_strain = shell_surface_strains(average, z)
                 if surface_strain is None:
                     continue
@@ -7413,6 +7454,7 @@ class ModelViewport(QWidget):
                     value = float(average[component_index])
                 except (TypeError, ValueError):
                     continue
+
             if not np.isfinite(value):
                 continue
             tags.append(tag)
@@ -7420,22 +7462,26 @@ class ModelViewport(QWidget):
 
         if not tags:
             self.clear_result_overlay()
-            return
+            return stats
 
         view_key = self._result_view_key(
             cache_key,
             "shell-deformation",
             component,
-            location if component in {"Exx", "Eyy", "Gxy", "E1", "E2"} else "mid",
+            location
+            if component in {"Exx", "Eyy", "Gxy", "E1", "E2"}
+            else "mid",
+            -1 if frame_index is None else int(frame_index),
             self._result_scope_key(set(tags)),
         )
         if self._show_cached_result_view(view_key):
-            return
+            stats["rendered_elements"] = len(tags)
+            return stats
 
         mesh = self._batched_shell_mesh(self._model, tags)
         if mesh is None or mesh.n_cells != len(values):
             self.clear_result_overlay()
-            return
+            return stats
 
         scalar_name = "shell_deformation"
         mesh.cell_data[scalar_name] = np.asarray(values, dtype=float)
@@ -7463,6 +7509,10 @@ class ModelViewport(QWidget):
                 "bottom": "Bottom (-z)",
             }[location]
             component_title = f"{component_title} · {location_label}"
+        if frame_index is not None and int(frame_index) >= 0:
+            component_title = (
+                f"{component_title} · Frame {int(frame_index) + 1}"
+            )
         title = (
             f"{component_title} [{unit_text}]"
             if unit_text and unit_text != "-"
@@ -7495,7 +7545,9 @@ class ModelViewport(QWidget):
             [(mesh, kwargs)],
         )
         self._result_overlay_active = True
+        stats["rendered_elements"] = len(tags)
         self.plotter.render()
+        return stats
 
     def show_shell_force_contour(
         self,
