@@ -408,3 +408,67 @@ def test_friction_bearing_dialog_rejects_parallel_orientation():
             dialog.values()
     finally:
         _close(dialog)
+
+def test_friction_bearing_dialog_exposes_dependency_roles_and_counts():
+    materials = {
+        1: MaterialData(1, "Axial", "Elastic", {"E": 1.0e8}),
+        2: MaterialData(2, "Rotation", "Elastic", {"E": 1.0e8}),
+    }
+    friction_models = {
+        3: FrictionModelData(3, "PTFE", "Coulomb", {"mu": 0.05}),
+    }
+    dialog = FrictionBearingDialog(
+        tag=23,
+        node_i=1,
+        node_j=2,
+        ndm=3,
+        materials=materials,
+        friction_models=friction_models,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        assert "frnMdlTag" in dialog.friction.toolTip()
+        assert "OpenSees -P" in dialog.mat_p.toolTip()
+        assert "OpenSees -T" in dialog.mat_t.toolTip()
+        assert "OpenSees -My" in dialog.mat_my.toolTip()
+        assert "OpenSees -Mz" in dialog.mat_mz.toolTip()
+        assert "1 friction model(s)" in dialog.note.text()
+        assert "2 uniaxial material(s)" in dialog.note.text()
+    finally:
+        _close(dialog)
+
+
+def test_friction_bearing_dialog_keeps_missing_references_visible_for_repair():
+    class _Element:
+        tag = 24
+        i = 1
+        j = 2
+        group = "isolation"
+        element_type = "flatSliderBearing"
+        special_parameters = {
+            "frn_model_tag": 91,
+            "kInit": 2.0e7,
+            "p_mat_tag": 92,
+            "mz_mat_tag": 93,
+        }
+
+    dialog = FrictionBearingDialog(
+        tag=24,
+        node_i=1,
+        node_j=2,
+        ndm=2,
+        materials={},
+        friction_models={},
+        units={"length": "m", "force": "N", "time": "s"},
+        element=_Element(),
+    )
+    try:
+        assert dialog.friction.currentData() == 91
+        assert "missing reference" in dialog.friction.currentText()
+        assert dialog.mat_p.currentData() == 92
+        assert "missing reference" in dialog.mat_p.currentText()
+        assert dialog.mat_mz.currentData() == 93
+        assert "missing reference" in dialog.mat_mz.currentText()
+    finally:
+        _close(dialog)
+
