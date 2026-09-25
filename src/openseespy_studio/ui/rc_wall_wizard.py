@@ -1454,6 +1454,10 @@ class RCWallWizard(QWizard):
 
             self.review.setText(
                 "<b>Model definition</b><br>"
+                f"Mode: {mode}<br>"
+                f"Vertical MEFI elements: {rows}<br>"
+                f"Macro-fibers: {count} · web fiber width "
+                f"{web_width:g} {self.units.length}<br>"
                 f"Mapping: <code>{mapping}</code><br>"
                 f"Reinforcement: {reinforcement_text}<br>"
                 "Base: both bottom nodes fixed in UX, UY and RZ.<br>"
