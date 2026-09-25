@@ -58,10 +58,11 @@ class RCWallSpec:
     rho_x_boundary: float = 0.0082
     rho_y_boundary: float = 0.0323
 
-    # Hybrid V1 keeps web steel smeared and may move part of the boundary
-    # longitudinal steel into discrete perfect-bond truss lines. Because the
-    # current MEFI wall has nodes only on its two vertical edges, each edge
-    # line represents the total discrete bar area of one boundary zone.
+    # Reinforcement representation:
+    # - smeared: all steel stays in SmearedSteelDoubleLayer;
+    # - hybrid: user-selected discrete bars subtract from the smeared ratios;
+    # - fully_discrete: all target rho values are represented by truss bars
+    #   and the RCLMS smeared steel ratios are zero.
     reinforcement_mode: str = "smeared"
     boundary_bar_count: int = 4
     boundary_bar_diameter: float = 0.016
@@ -112,7 +113,16 @@ class RCWallBuildResult:
     boundary_discrete_rho_y: float = 0.0
     boundary_smeared_rho_y: float = 0.0
     web_horizontal_element_tags: list[int] = field(default_factory=list)
+    boundary_horizontal_element_tags: list[int] = field(default_factory=list)
+    horizontal_embedded_node_tags: list[int] = field(default_factory=list)
+    horizontal_embedded_coupling_element_tags: list[int] = field(
+        default_factory=list
+    )
+    horizontal_selection_name: str = ""
     web_horizontal_discrete_rho_x: float = 0.0
+    boundary_horizontal_discrete_rho_x: float = 0.0
+    web_horizontal_bar_area: float = 0.0
+    boundary_horizontal_bar_area: float = 0.0
     web_vertical_node_tags: list[int] = field(default_factory=list)
     web_vertical_element_tags: list[int] = field(default_factory=list)
     embedded_coupling_element_tags: list[int] = field(default_factory=list)
@@ -125,6 +135,7 @@ class RCWallBuildResult:
     embedded_penalty: float = 0.0
     web_smeared_rho_x: float = 0.0
     boundary_smeared_rho_x: float = 0.0
+    fully_discrete: bool = False
 
 
 def _next_tags(store: dict[int, object], count: int) -> list[int]:
@@ -142,8 +153,49 @@ def _single_bar_area(diameter: float) -> float:
     return math.pi * value * value / 4.0
 
 
+def _equivalent_diameter(area: float) -> float:
+    value = max(float(area), 0.0)
+    return math.sqrt(4.0 * value / math.pi) if value > 0.0 else 0.0
+
+
+def _reinforcement_mode(spec: RCWallSpec) -> str:
+    return str(spec.reinforcement_mode).strip().lower()
+
+
+def _discrete_system_enabled(spec: RCWallSpec) -> bool:
+    return _reinforcement_mode(spec) in {"hybrid", "fully_discrete"}
+
+
+def _fully_discrete(spec: RCWallSpec) -> bool:
+    return _reinforcement_mode(spec) == "fully_discrete"
+
+
+def _boundary_discrete_area(spec: RCWallSpec) -> float:
+    if not _discrete_system_enabled(spec):
+        return 0.0
+    if _fully_discrete(spec):
+        return (
+            float(spec.rho_y_boundary)
+            * float(spec.boundary_width)
+            * float(spec.thickness)
+        )
+    return (
+        int(spec.boundary_bar_count)
+        * _single_bar_area(spec.boundary_bar_diameter)
+    )
+
+
 def _boundary_bar_area(spec: RCWallSpec) -> float:
+    if not _discrete_system_enabled(spec):
+        return 0.0
+    count = max(int(spec.boundary_bar_count), 1)
+    if _fully_discrete(spec):
+        return _boundary_discrete_area(spec) / count
     return _single_bar_area(spec.boundary_bar_diameter)
+
+
+def _boundary_effective_diameter(spec: RCWallSpec) -> float:
+    return _equivalent_diameter(_boundary_bar_area(spec))
 
 
 def _boundary_layer_layout(
@@ -166,18 +218,17 @@ def _boundary_bar_spacing(spec: RCWallSpec) -> float:
     count = _boundary_bars_per_layer(spec)
     if count <= 1:
         return 0.0
+    diameter = (
+        _boundary_effective_diameter(spec)
+        if _fully_discrete(spec)
+        else float(spec.boundary_bar_diameter)
+    )
     clear_span = (
         float(spec.boundary_width)
         - 2.0 * float(spec.boundary_cover)
-        - float(spec.boundary_bar_diameter)
+        - diameter
     )
     return max(clear_span, 0.0) / float(count - 1)
-
-
-def _boundary_discrete_area(spec: RCWallSpec) -> float:
-    if str(spec.reinforcement_mode).strip().lower() != "hybrid":
-        return 0.0
-    return int(spec.boundary_bar_count) * _boundary_bar_area(spec)
 
 
 def _web_horizontal_layer_layout(
@@ -187,21 +238,68 @@ def _web_horizontal_layer_layout(
     return ("front", "back") if mode == "front_back" else ("center",)
 
 
-def _web_horizontal_discrete_ratio(spec: RCWallSpec) -> float:
-    if (
-        str(spec.reinforcement_mode).strip().lower() != "hybrid"
-        or str(spec.web_horizontal_mode).strip().lower() != "mesh_aligned"
-    ):
+def _horizontal_line_count(spec: RCWallSpec) -> int:
+    return max(int(spec.vertical_elements) - 1, 0)
+
+
+def _web_horizontal_bar_area(spec: RCWallSpec) -> float:
+    if not _discrete_system_enabled(spec):
         return 0.0
-    line_count = max(int(spec.vertical_elements) - 1, 0)
-    layer_count = len(_web_horizontal_layer_layout(spec))
+    if _fully_discrete(spec):
+        lines = _horizontal_line_count(spec)
+        layers = len(_web_horizontal_layer_layout(spec))
+        divisor = lines * layers
+        if divisor <= 0:
+            return 0.0
+        return (
+            float(spec.rho_x_web)
+            * float(spec.height)
+            * float(spec.thickness)
+            / divisor
+        )
+    return _single_bar_area(spec.web_horizontal_bar_diameter)
+
+
+def _boundary_horizontal_bar_area(spec: RCWallSpec) -> float:
+    if not _discrete_system_enabled(spec):
+        return 0.0
+    if _fully_discrete(spec):
+        lines = _horizontal_line_count(spec)
+        layers = len(_web_horizontal_layer_layout(spec))
+        divisor = lines * layers
+        if divisor <= 0:
+            return 0.0
+        return (
+            float(spec.rho_x_boundary)
+            * float(spec.height)
+            * float(spec.thickness)
+            / divisor
+        )
+    return _single_bar_area(spec.web_horizontal_bar_diameter)
+
+
+def _web_horizontal_discrete_ratio(spec: RCWallSpec) -> float:
+    if not _discrete_system_enabled(spec):
+        return 0.0
+    if _fully_discrete(spec):
+        return float(spec.rho_x_web)
+    if str(spec.web_horizontal_mode).strip().lower() != "mesh_aligned":
+        return 0.0
     steel_area = (
-        line_count
-        * layer_count
-        * _single_bar_area(spec.web_horizontal_bar_diameter)
+        _horizontal_line_count(spec)
+        * len(_web_horizontal_layer_layout(spec))
+        * _web_horizontal_bar_area(spec)
     )
     gross = float(spec.height) * float(spec.thickness)
     return steel_area / gross if gross > 0.0 else 0.0
+
+
+def _boundary_horizontal_discrete_ratio(spec: RCWallSpec) -> float:
+    if not _discrete_system_enabled(spec):
+        return 0.0
+    if _fully_discrete(spec):
+        return float(spec.rho_x_boundary)
+    return _web_horizontal_discrete_ratio(spec)
 
 
 def _web_vertical_layer_names(
@@ -211,34 +309,128 @@ def _web_vertical_layer_names(
     return ("front", "back") if mode == "front_back" else ("center",)
 
 
-def _web_vertical_positions(spec: RCWallSpec) -> tuple[float, ...]:
-    if str(spec.web_vertical_mode).strip().lower() != "embedded":
-        return ()
+def _web_vertical_layout(
+    spec: RCWallSpec,
+) -> tuple[tuple[float, ...], float, float]:
+    enabled = (
+        _fully_discrete(spec)
+        or (
+            _discrete_system_enabled(spec)
+            and str(spec.web_vertical_mode).strip().lower() == "embedded"
+        )
+    )
+    if not enabled:
+        return (), 0.0, 0.0
+
+    layers = max(len(_web_vertical_layer_names(spec)), 1)
+    web_width = float(spec.width) - 2.0 * float(spec.boundary_width)
+    thickness = float(spec.thickness)
+    target_spacing = float(spec.web_vertical_spacing)
+    edge = float(spec.web_vertical_edge_offset)
+    if (
+        web_width <= 0.0
+        or thickness <= 0.0
+        or target_spacing <= 0.0
+        or edge < 0.0
+    ):
+        return (), 0.0, 0.0
+
+    if _fully_discrete(spec):
+        available = web_width - 2.0 * edge
+        if available < 0.0:
+            return (), 0.0, 0.0
+        intervals = max(
+            1,
+            int(math.ceil(available / target_spacing)),
+        )
+        area = 0.0
+        diameter = 0.0
+        positions: tuple[float, ...] = ()
+        for _iteration in range(8):
+            count = intervals + 1
+            area = (
+                float(spec.rho_y_web)
+                * web_width
+                * thickness
+                / max(count * layers, 1)
+            )
+            diameter = _equivalent_diameter(area)
+            left = (
+                float(spec.boundary_width)
+                + edge
+                + 0.5 * diameter
+            )
+            right = (
+                float(spec.width)
+                - float(spec.boundary_width)
+                - edge
+                - 0.5 * diameter
+            )
+            if right < left:
+                return (), area, diameter
+            span = right - left
+            next_intervals = (
+                max(1, int(math.ceil(span / target_spacing)))
+                if span > 1.0e-12
+                else 1
+            )
+            positions = (
+                (left,)
+                if span <= 1.0e-12
+                else tuple(
+                    left + span * index / next_intervals
+                    for index in range(next_intervals + 1)
+                )
+            )
+            if next_intervals == intervals:
+                break
+            intervals = next_intervals
+        if positions:
+            area = (
+                float(spec.rho_y_web)
+                * web_width
+                * thickness
+                / max(len(positions) * layers, 1)
+            )
+            diameter = _equivalent_diameter(area)
+        return positions, area, diameter
+
     diameter = float(spec.web_vertical_bar_diameter)
     left = (
         float(spec.boundary_width)
-        + float(spec.web_vertical_edge_offset)
+        + edge
         + 0.5 * diameter
     )
     right = (
         float(spec.width)
         - float(spec.boundary_width)
-        - float(spec.web_vertical_edge_offset)
+        - edge
         - 0.5 * diameter
     )
     if right < left:
-        return ()
+        return (), _single_bar_area(diameter), diameter
     span = right - left
     if span <= 1.0e-12:
-        return (left,)
-    intervals = max(
-        1,
-        int(math.ceil(span / float(spec.web_vertical_spacing))),
-    )
-    return tuple(
-        left + span * index / intervals
-        for index in range(intervals + 1)
-    )
+        positions = (left,)
+    else:
+        intervals = max(1, int(math.ceil(span / target_spacing)))
+        positions = tuple(
+            left + span * index / intervals
+            for index in range(intervals + 1)
+        )
+    return positions, _single_bar_area(diameter), diameter
+
+
+def _web_vertical_positions(spec: RCWallSpec) -> tuple[float, ...]:
+    return _web_vertical_layout(spec)[0]
+
+
+def _web_vertical_bar_area(spec: RCWallSpec) -> float:
+    return float(_web_vertical_layout(spec)[1])
+
+
+def _web_vertical_effective_diameter(spec: RCWallSpec) -> float:
+    return float(_web_vertical_layout(spec)[2])
 
 
 def _web_vertical_actual_spacing(spec: RCWallSpec) -> float:
@@ -249,7 +441,7 @@ def _web_vertical_actual_spacing(spec: RCWallSpec) -> float:
 
 
 def _web_vertical_discrete_ratio(spec: RCWallSpec) -> float:
-    positions = _web_vertical_positions(spec)
+    positions, area, _diameter = _web_vertical_layout(spec)
     if not positions:
         return 0.0
     web_width = float(spec.width) - 2.0 * float(spec.boundary_width)
@@ -259,15 +451,12 @@ def _web_vertical_discrete_ratio(spec: RCWallSpec) -> float:
     steel_area = (
         len(positions)
         * len(_web_vertical_layer_names(spec))
-        * _single_bar_area(spec.web_vertical_bar_diameter)
+        * area
     )
     return steel_area / gross
 
 
 def _embedded_penalty(spec: RCWallSpec) -> float:
-    # Concrete02 initial tangent is approximately 2*fpc/epsc0. Store the
-    # penalty in SI Pa, matching SARE material storage. The generator converts
-    # it to the active project stress unit before writing OpenSees commands.
     concrete_tangent = (
         2.0
         * abs(float(spec.concrete_fc_web))
@@ -388,9 +577,14 @@ def _validate(spec: RCWallSpec) -> None:
             raise ValueError(f"{name} must be a reinforcement ratio in [0, 1].")
 
     reinforcement_mode = str(spec.reinforcement_mode).strip().lower()
-    if reinforcement_mode not in {"smeared", "hybrid"}:
+    if reinforcement_mode not in {
+        "smeared",
+        "hybrid",
+        "fully_discrete",
+    }:
         raise ValueError(
-            "reinforcement_mode must be 'smeared' or 'hybrid'."
+            "reinforcement_mode must be 'smeared', 'hybrid', "
+            "or 'fully_discrete'."
         )
     if str(spec.boundary_truss_type) not in {"truss", "corotTruss"}:
         raise ValueError(
@@ -435,15 +629,15 @@ def _validate(spec: RCWallSpec) -> None:
         raise ValueError("embedded_penalty_factor must be positive.")
 
     if (
-        reinforcement_mode != "hybrid"
+        reinforcement_mode == "smeared"
         and str(spec.web_vertical_mode).strip().lower() == "embedded"
     ):
         raise ValueError(
             "Embedded vertical web reinforcement currently requires "
-            "reinforcement_mode='hybrid'."
+            "a discrete reinforcement mode."
         )
 
-    if reinforcement_mode == "hybrid":
+    if reinforcement_mode in {"hybrid", "fully_discrete"}:
         if int(spec.boundary_bar_count) < 1:
             raise ValueError(
                 "Hybrid reinforcement requires at least one longitudinal "
@@ -493,17 +687,69 @@ def _validate(spec: RCWallSpec) -> None:
                 "the wall thickness for front/back layers."
             )
 
+        if reinforcement_mode == "fully_discrete":
+            for name, value in (
+                ("rho_x_web", spec.rho_x_web),
+                ("rho_y_web", spec.rho_y_web),
+                ("rho_x_boundary", spec.rho_x_boundary),
+                ("rho_y_boundary", spec.rho_y_boundary),
+            ):
+                if float(value) <= 0.0:
+                    raise ValueError(
+                        "Fully discrete reinforcement requires positive "
+                        f"{name}."
+                    )
+            if int(spec.vertical_elements) < 2:
+                raise ValueError(
+                    "Fully discrete horizontal reinforcement needs at least "
+                    "two vertical MEFI elements."
+                )
+            effective_boundary_diameter = _boundary_effective_diameter(spec)
+            if (
+                2.0 * float(spec.boundary_cover)
+                + effective_boundary_diameter
+                > float(spec.boundary_width) + 1.0e-12
+            ):
+                raise ValueError(
+                    "Auto-sized fully discrete boundary bars do not fit "
+                    "inside the boundary-zone width with the selected cover."
+                )
+            if (
+                str(spec.boundary_layer_mode).strip().lower() == "front_back"
+                and (
+                    2.0 * float(spec.boundary_cover)
+                    + effective_boundary_diameter
+                    > float(spec.thickness) + 1.0e-12
+                )
+            ):
+                raise ValueError(
+                    "Auto-sized fully discrete boundary bars do not fit "
+                    "through the wall thickness."
+                )
+            positions = _web_vertical_positions(spec)
+            if not positions:
+                raise ValueError(
+                    "No fully discrete vertical web bar fits between the "
+                    "boundary zones."
+                )
+
         discrete_ratio = _boundary_discrete_ratio(spec)
         remaining_ratio = _boundary_smeared_ratio(spec)
         tolerance = max(1.0e-12, 1.0e-9 * float(spec.rho_y_boundary))
-        if remaining_ratio < -tolerance:
+        if reinforcement_mode == "hybrid" and remaining_ratio < -tolerance:
             raise ValueError(
                 "Discrete boundary longitudinal steel exceeds the specified "
                 "boundary rho-y. Reduce bar count/diameter or increase rho-y."
             )
 
-        if str(spec.web_vertical_mode).strip().lower() == "embedded":
-            if float(spec.web_vertical_bar_diameter) <= 0.0:
+        if (
+            reinforcement_mode == "fully_discrete"
+            or str(spec.web_vertical_mode).strip().lower() == "embedded"
+        ):
+            if (
+                reinforcement_mode == "hybrid"
+                and float(spec.web_vertical_bar_diameter) <= 0.0
+            ):
                 raise ValueError(
                     "Embedded vertical web bar diameter must be positive."
                 )
@@ -526,19 +772,28 @@ def _validate(spec: RCWallSpec) -> None:
                 1.0e-12,
                 1.0e-9 * float(spec.rho_y_web),
             )
-            if float(spec.rho_y_web) - vertical_ratio < -tolerance_y:
+            if (
+                reinforcement_mode == "hybrid"
+                and float(spec.rho_y_web) - vertical_ratio < -tolerance_y
+            ):
                 raise ValueError(
                     "Embedded vertical web steel exceeds the available "
                     "smeared rho-y in the web."
                 )
 
-        if str(spec.web_horizontal_mode).strip().lower() == "mesh_aligned":
+        if (
+            reinforcement_mode == "fully_discrete"
+            or str(spec.web_horizontal_mode).strip().lower() == "mesh_aligned"
+        ):
             if int(spec.vertical_elements) < 2:
                 raise ValueError(
                     "Mesh-aligned horizontal bars need at least two vertical "
                     "MEFI elements so an internal shared-node row exists."
                 )
-            if float(spec.web_horizontal_bar_diameter) <= 0.0:
+            if (
+                reinforcement_mode == "hybrid"
+                and float(spec.web_horizontal_bar_diameter) <= 0.0
+            ):
                 raise ValueError(
                     "Horizontal web bar diameter must be positive."
                 )
@@ -551,9 +806,12 @@ def _validate(spec: RCWallSpec) -> None:
                 ),
             )
             if (
-                float(spec.rho_x_web) - rho_x_discrete < -tolerance_x
-                or float(spec.rho_x_boundary) - rho_x_discrete
-                < -tolerance_x
+                reinforcement_mode == "hybrid"
+                and (
+                    float(spec.rho_x_web) - rho_x_discrete < -tolerance_x
+                    or float(spec.rho_x_boundary) - rho_x_discrete
+                    < -tolerance_x
+                )
             ):
                 raise ValueError(
                     "Mesh-aligned horizontal discrete steel exceeds the "
