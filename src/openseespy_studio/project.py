@@ -7304,7 +7304,11 @@ class ProjectDatabase:
                 and element.section_tag == original_tag
             )
         )
-        if truss_section_users and section.section_type in SHELL_SECTION_TYPES:
+        if (
+            truss_section_users
+            and section.section_type
+            in (SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES)
+        ):
             raise ValueError(
                 f"Section {original_tag} is used by section-based truss "
                 "element(s) "
@@ -9185,7 +9189,9 @@ class ProjectDatabase:
                     f"{element.element_type} element {element_tag} requires "
                     "an existing section."
                 )
-            if section.section_type in SHELL_SECTION_TYPES:
+            if section.section_type in (
+                SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES
+            ):
                 raise ValueError(
                     f"{element.element_type} element {element_tag} cannot "
                     f"use shell section {section.tag}."
