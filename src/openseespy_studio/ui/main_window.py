@@ -84,6 +84,7 @@ from ..model import (
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
+    WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
     classify_fixity,
     dof_is_rotation,
@@ -183,6 +184,7 @@ from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
 from .continuum_dialog import ContinuumQuadDialog
 from .solid_dialog import SolidBrickDialog
+from .wall_macro_dialog import RCWallMacroElementDialog
 from .geometry_dialogs import (
     ElementDialog,
     ElementFormulationDialog,
@@ -2463,6 +2465,13 @@ class MainWindow(QMainWindow):
             "Create an stdBrick, SSPbrick, or bbarBrick 8-node solid element",
         )
         self._make_action(
+            "wall_macro_element",
+            "RC Wall Macro...",
+            "wall-macro",
+            self._create_wall_macro_element,
+            "Create an MVLEM, SFI_MVLEM, or MVLEM_3D wall macro-element",
+        )
+        self._make_action(
             "sketch_plane_offset",
             "Offset Plane...",
             "sketch-plane",
@@ -3047,6 +3056,7 @@ class MainWindow(QMainWindow):
         truss_menu.addAction(self.actions["truss_input"])
         geometry_menu.addAction(self.actions["continuum_quad"])
         geometry_menu.addAction(self.actions["solid_brick"])
+        geometry_menu.addAction(self.actions["wall_macro_element"])
         geometry_menu.addAction(self.actions["surface_geometry"])
         geometry_menu.addSeparator()
         geometry_menu.addActions([
@@ -3628,6 +3638,7 @@ class MainWindow(QMainWindow):
                 "shell_input",
                 "continuum_quad",
                 "solid_brick",
+                "wall_macro_element",
                 "rc_wall_wizard",
             ),
             widgets=(frame_button, truss_button),
@@ -5644,18 +5655,22 @@ class MainWindow(QMainWindow):
                     "shell-element"
                     if "shell" in element_type_lower
                     else (
-                        "solid-brick"
-                        if "brick" in element_type_lower
+                        "wall-macro"
+                        if "mvlem" in element_type_lower
                         else (
-                            "continuum-quad"
-                            if "quad" in element_type_lower
+                            "solid-brick"
+                            if "brick" in element_type_lower
                             else (
-                                "frame"
-                                if any(
-                                    token in element_type_lower
-                                    for token in ("beam", "column")
+                                "continuum-quad"
+                                if "quad" in element_type_lower
+                                else (
+                                    "frame"
+                                    if any(
+                                        token in element_type_lower
+                                        for token in ("beam", "column")
+                                    )
+                                    else "element"
                                 )
-                                else "element"
                             )
                         )
                     )
@@ -5903,18 +5918,22 @@ class MainWindow(QMainWindow):
                     "shell-element"
                     if "shell" in element_type_lower
                     else (
-                        "solid-brick"
-                        if "brick" in element_type_lower
+                        "wall-macro"
+                        if "mvlem" in element_type_lower
                         else (
-                            "continuum-quad"
-                            if "quad" in element_type_lower
+                            "solid-brick"
+                            if "brick" in element_type_lower
                             else (
-                                "frame"
-                                if any(
-                                    token in element_type_lower
-                                    for token in ("beam", "column")
+                                "continuum-quad"
+                                if "quad" in element_type_lower
+                                else (
+                                    "frame"
+                                    if any(
+                                        token in element_type_lower
+                                        for token in ("beam", "column")
+                                    )
+                                    else "element"
                                 )
-                                else "element"
                             )
                         )
                     )
@@ -10666,6 +10685,58 @@ class MainWindow(QMainWindow):
                             "Right-click element → Edit 2D Continuum Definition...",
                         ),
                     ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in WALL_MACRO_ELEMENT_TYPES:
+                fiber_count = len(element.wall_widths)
+                rows = [
+                    ("Tag", tag),
+                    ("Type", element.element_type),
+                    ("Nodes", ", ".join(map(str, element.node_tags()))),
+                    ("Macro-fibers", fiber_count),
+                    ("Total width", f"{sum(element.wall_widths):g}"),
+                    ("Center of rotation c", f"{element.wall_center_ratio:g}"),
+                ]
+                if element.element_type == "SFI_MVLEM":
+                    rows.extend([
+                        (
+                            "FSAM nDMaterials",
+                            ", ".join(map(str, element.wall_nd_material_tags)),
+                        ),
+                        ("Density", "Not used by SFI_MVLEM"),
+                    ])
+                else:
+                    rows.extend([
+                        (
+                            "Concrete materials",
+                            ", ".join(map(str, element.wall_concrete_tags)),
+                        ),
+                        (
+                            "Steel materials",
+                            ", ".join(map(str, element.wall_steel_tags)),
+                        ),
+                        ("Shear material", element.wall_shear_tag),
+                        ("Density", f"{element.wall_density:g}"),
+                    ])
+                if element.element_type == "MVLEM_3D":
+                    rows.extend([
+                        ("Thickness modifier", f"{element.wall_thick_mod:g}"),
+                        ("Poisson ratio", f"{element.wall_poisson:g}"),
+                    ])
+                rows.extend([
+                    ("Section", "Not used by wall macro-element"),
+                    ("Transformation", "Not used by wall macro-element"),
+                    ("Group", element.group),
+                    (
+                        "Edit",
+                        "Right-click element → Edit RC Wall Macro Definition...",
+                    ),
+                ])
+                self.properties_panel.set_properties(
+                    "RC Wall Macro Element",
+                    rows,
                     context={"kind": "element", "tag": int(tag)},
                 )
                 return
@@ -16463,6 +16534,169 @@ class MainWindow(QMainWindow):
 
         self._refresh_all(
             f"Updated {values['formulation']} solid element {tag}"
+        )
+        self._show_entity_properties("element", tag)
+        self._record_project_change(
+            f"Edit {values['formulation']} {tag}",
+            before,
+        )
+
+    def _create_wall_macro_element(self) -> None:
+        dims = (int(self.model.ndm), int(self.model.ndf))
+        if dims not in {(2, 3), (3, 6)}:
+            QMessageBox.warning(
+                self,
+                "RC Wall Macro Element",
+                "MVLEM/SFI_MVLEM require ndm=2, ndf=3; MVLEM_3D "
+                "requires ndm=3, ndf=6.",
+            )
+            return
+        required_nodes = 2 if dims == (2, 3) else 4
+        if not self._ensure_node_count(
+            required_nodes,
+            title="RC Wall Macro Element",
+        ):
+            return
+
+        selected_nodes = [
+            int(tag)
+            for tag in sorted(self.selection.nodes)
+            if int(tag) in self.model.nodes
+        ]
+        dialog = RCWallMacroElementDialog(
+            tag=self.project.next_element_tag(),
+            nodes=self.model.nodes,
+            materials=self.project.materials,
+            nd_materials=self.project.nd_materials,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
+            initial_nodes=selected_nodes[:required_nodes],
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "RC Wall Macro Element", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            if values["tag"] in self.project.connections:
+                raise ValueError(
+                    f"Element tag {values['tag']} is already used by "
+                    "a connection."
+                )
+            node_values = values["nodes"]
+            self.model.add_element(
+                values["tag"],
+                node_values[0],
+                node_values[1],
+                element_type=values["formulation"],
+                group="rc-wall-macro",
+                k=(node_values[2] if len(node_values) == 4 else None),
+                l=(node_values[3] if len(node_values) == 4 else None),
+                wall_center_ratio=values["center_ratio"],
+                wall_density=values["density"],
+                wall_thicknesses=values["thicknesses"],
+                wall_widths=values["widths"],
+                wall_rhos=values["rhos"],
+                wall_concrete_tags=values["concrete_tags"],
+                wall_steel_tags=values["steel_tags"],
+                wall_shear_tag=values["shear_tag"],
+                wall_nd_material_tags=values["nd_material_tags"],
+                wall_thick_mod=values["thick_mod"],
+                wall_poisson=values["poisson"],
+            )
+            self.project.validate_element_state(values["tag"])
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "RC Wall Macro Element", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Created {values['formulation']} {values['tag']} · "
+            f"{len(values['widths'])} macro-fibers"
+        )
+        self.selection.select("element", values["tag"], "replace")
+        self._record_project_change(
+            f"Create {values['formulation']} {values['tag']}",
+            before,
+        )
+
+    def _edit_wall_macro_element(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if (
+            element is None
+            or element.element_type not in WALL_MACRO_ELEMENT_TYPES
+        ):
+            return
+        dialog = RCWallMacroElementDialog(
+            tag=element.tag,
+            nodes=self.model.nodes,
+            materials=self.project.materials,
+            nd_materials=self.project.nd_materials,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
+            element=element,
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Edit RC Wall Macro Element",
+                str(exc),
+            )
+            return
+
+        before = self.project.to_dict()
+        try:
+            node_values = values["nodes"]
+            updated = type(element)(
+                tag=element.tag,
+                i=node_values[0],
+                j=node_values[1],
+                element_type=values["formulation"],
+                section_tag=None,
+                transf_tag=None,
+                group=element.group or "rc-wall-macro",
+                k=(node_values[2] if len(node_values) == 4 else None),
+                l=(node_values[3] if len(node_values) == 4 else None),
+                wall_center_ratio=values["center_ratio"],
+                wall_density=values["density"],
+                wall_thicknesses=values["thicknesses"],
+                wall_widths=values["widths"],
+                wall_rhos=values["rhos"],
+                wall_concrete_tags=values["concrete_tags"],
+                wall_steel_tags=values["steel_tags"],
+                wall_shear_tag=values["shear_tag"],
+                wall_nd_material_tags=values["nd_material_tags"],
+                wall_thick_mod=values["thick_mod"],
+                wall_poisson=values["poisson"],
+            )
+            self.model.elements[element.tag] = updated
+            self.project.validate_element_state(element.tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Edit RC Wall Macro Element",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Updated {values['formulation']} wall macro-element {tag}"
         )
         self._show_entity_properties("element", tag)
         self._record_project_change(
@@ -29186,6 +29420,12 @@ class MainWindow(QMainWindow):
             create_shell.triggered.connect(self._create_shell)
             create_solid = menu.addAction("New 3D Solid Brick...")
             create_solid.triggered.connect(self._create_solid_brick)
+            create_wall_macro = menu.addAction(
+                "New RC Wall Macro Element..."
+            )
+            create_wall_macro.triggered.connect(
+                self._create_wall_macro_element
+            )
             create_connection = menu.addAction(
                 "New Connection / Joint..."
             )
@@ -29218,6 +29458,7 @@ class MainWindow(QMainWindow):
                 element_type in CONTINUUM_QUAD_ELEMENT_TYPES
             )
             is_solid_group = element_type in SOLID_ELEMENT_TYPES
+            is_wall_macro_group = element_type in WALL_MACRO_ELEMENT_TYPES
             is_frame_group = element_type in FRAME_ELEMENT_TYPES
 
             if is_truss_group:
@@ -29232,6 +29473,9 @@ class MainWindow(QMainWindow):
             elif is_solid_group:
                 create = menu.addAction("New 3D Solid Brick...")
                 create.triggered.connect(self._create_solid_brick)
+            elif is_wall_macro_group:
+                create = menu.addAction("New RC Wall Macro Element...")
+                create.triggered.connect(self._create_wall_macro_element)
             else:
                 create = menu.addAction("New Frame...")
                 create.triggered.connect(self._create_element)
@@ -29287,6 +29531,19 @@ class MainWindow(QMainWindow):
                         lambda checked=False,
                         values=tuple(sorted(tags)): (
                             self._edit_solid_brick(values[0])
+                            if len(values) == 1
+                            else None
+                        )
+                    )
+                elif is_wall_macro_group:
+                    edit_wall = definition_menu.addAction(
+                        "Edit RC Wall Macro Definition..."
+                    )
+                    edit_wall.setEnabled(len(tags) == 1)
+                    edit_wall.triggered.connect(
+                        lambda checked=False,
+                        values=tuple(sorted(tags)): (
+                            self._edit_wall_macro_element(values[0])
                             if len(values) == 1
                             else None
                         )
@@ -29731,6 +29988,7 @@ class MainWindow(QMainWindow):
                     SHELL_ELEMENT_TYPES
                     | CONTINUUM_QUAD_ELEMENT_TYPES
                     | SOLID_ELEMENT_TYPES
+                    | WALL_MACRO_ELEMENT_TYPES
                 )
             ):
                 definition_menu = menu.addMenu("Definition")
@@ -29763,6 +30021,16 @@ class MainWindow(QMainWindow):
                     )
                     edit_solid.triggered.connect(
                         lambda: self._edit_solid_brick(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in WALL_MACRO_ELEMENT_TYPES
+                ):
+                    edit_wall = definition_menu.addAction(
+                        "Edit RC Wall Macro Definition..."
+                    )
+                    edit_wall.triggered.connect(
+                        lambda: self._edit_wall_macro_element(tag)
                     )
                 if has_frame:
                     formulation = definition_menu.addAction(
