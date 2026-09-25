@@ -1755,7 +1755,12 @@ class RCWallWizard(QWizard):
                         raise ValueError(
                             f"{label} must be between 0 and 100%."
                         )
-                if self.reinforcement_mode.currentData() == "hybrid":
+                reinforcement_mode = str(
+                    self.reinforcement_mode.currentData()
+                )
+                if reinforcement_mode == "fully_discrete":
+                    validate_rc_wall_spec(self.data())
+                elif reinforcement_mode == "hybrid":
                     diameter = float(self.boundary_bar_diameter.value())
                     count = int(self.boundary_bar_count.value())
                     cover = float(self.boundary_cover.value())
@@ -1859,55 +1864,98 @@ class RCWallWizard(QWizard):
 
     def _preview_object_counts(self) -> dict[str, int]:
         rows = max(int(self.vertical_elements.value()), 1)
-        hybrid = (
-            str(self.reinforcement_mode.currentData()) == "hybrid"
-        )
+        mode = str(self.reinforcement_mode.currentData())
+        discrete_enabled = mode in {"hybrid", "fully_discrete"}
+        fully_discrete = mode == "fully_discrete"
+
         boundary_rebar = 0
         horizontal_rebar = 0
+        web_horizontal_rebar = 0
+        boundary_horizontal_rebar = 0
         vertical_rebar = 0
-        embedded_nodes = 0
-        embedded_coupling = 0
-        if hybrid:
+        horizontal_embedded_nodes = 0
+        vertical_embedded_nodes = 0
+        horizontal_coupling = 0
+        vertical_coupling = 0
+
+        if discrete_enabled:
             boundary_rebar = (
                 rows
                 * 2
                 * int(self.boundary_bar_count.value())
             )
-            if self.web_horizontal_mode.currentData() == "mesh_aligned":
-                layers = (
-                    2
-                    if self.web_horizontal_layer_mode.currentData()
-                    == "front_back"
-                    else 1
-                )
-                horizontal_rebar = max(rows - 1, 0) * layers
+            horizontal_layers = (
+                2
+                if self.web_horizontal_layer_mode.currentData()
+                == "front_back"
+                else 1
+            )
+            internal_rows = max(rows - 1, 0)
 
-            if self.web_vertical_mode.currentData() == "embedded":
+            if fully_discrete:
+                web_horizontal_rebar = (
+                    internal_rows * horizontal_layers
+                )
+                boundary_horizontal_rebar = (
+                    2 * internal_rows * horizontal_layers
+                )
+                horizontal_rebar = (
+                    web_horizontal_rebar
+                    + boundary_horizontal_rebar
+                )
+                horizontal_embedded_nodes = 2 * internal_rows
+                horizontal_coupling = horizontal_embedded_nodes
+            elif self.web_horizontal_mode.currentData() == "mesh_aligned":
+                web_horizontal_rebar = (
+                    internal_rows * horizontal_layers
+                )
+                horizontal_rebar = web_horizontal_rebar
+
+            vertical_enabled = (
+                fully_discrete
+                or self.web_vertical_mode.currentData() == "embedded"
+            )
+            if vertical_enabled:
                 vertical = self._vertical_web_metrics()
                 bar_lines = (
                     int(vertical["bar_count_per_layer"])
                     * int(vertical["layers"])
                 )
                 vertical_rebar = bar_lines * rows
-                embedded_nodes = bar_lines * (rows + 1)
-                embedded_coupling = embedded_nodes
+                vertical_embedded_nodes = bar_lines * (rows + 1)
+                vertical_coupling = vertical_embedded_nodes
 
+        embedded_nodes = (
+            horizontal_embedded_nodes + vertical_embedded_nodes
+        )
+        embedded_coupling = horizontal_coupling + vertical_coupling
         discrete = boundary_rebar + horizontal_rebar + vertical_rebar
+
         selection_sets = 3
         if discrete:
-            selection_sets += 1
+            selection_sets += 1  # Discrete Reinforcement
+        if horizontal_rebar:
+            selection_sets += 1  # Horizontal Bars
+        if vertical_rebar:
+            selection_sets += 1  # Vertical Web Bars
         if embedded_coupling:
-            # Dedicated Vertical Web Bars + Embedded Coupling named sets.
-            selection_sets += 2
+            selection_sets += 1  # Embedded Coupling
+
         return {
             "nodes": 2 * (rows + 1) + embedded_nodes,
             "host_nodes": 2 * (rows + 1),
             "embedded_nodes": embedded_nodes,
+            "horizontal_embedded_nodes": horizontal_embedded_nodes,
+            "vertical_embedded_nodes": vertical_embedded_nodes,
             "mefi": rows,
             "boundary_rebar": boundary_rebar,
             "horizontal_rebar": horizontal_rebar,
+            "web_horizontal_rebar": web_horizontal_rebar,
+            "boundary_horizontal_rebar": boundary_horizontal_rebar,
             "vertical_rebar": vertical_rebar,
             "embedded_coupling": embedded_coupling,
+            "horizontal_coupling": horizontal_coupling,
+            "vertical_coupling": vertical_coupling,
             "discrete_rebar": discrete,
             "elements": rows + discrete + embedded_coupling,
             "structural_elements": rows + discrete,
@@ -1952,7 +2000,28 @@ class RCWallWizard(QWizard):
                 "Append mode requires an ndm=2 / ndf=3 model.",
             ))
 
-        if self.reinforcement_mode.currentData() == "hybrid":
+        reinforcement_mode = str(
+            self.reinforcement_mode.currentData()
+        )
+        if reinforcement_mode == "fully_discrete":
+            try:
+                validate_rc_wall_spec(self.data())
+            except ValueError as exc:
+                message = str(exc)
+                lowered = message.lower()
+                key = (
+                    "boundary"
+                    if "boundary" in lowered
+                    else "web_vertical"
+                    if "vertical" in lowered
+                    else "web_rebar"
+                    if "horizontal" in lowered
+                    else "fully_discrete"
+                )
+                items.append((key, message))
+            return items
+
+        if reinforcement_mode == "hybrid":
             count = int(self.boundary_bar_count.value())
             diameter = float(self.boundary_bar_diameter.value())
             cover = float(self.boundary_cover.value())
