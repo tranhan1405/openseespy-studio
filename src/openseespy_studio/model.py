@@ -44,7 +44,22 @@ BEARING_ELEMENT_TYPES = {
     "LeadRubberX",
     "TripleFrictionPendulum",
 }
-SPECIAL_TWO_NODE_ELEMENT_TYPES = CABLE_ELEMENT_TYPES | BEARING_ELEMENT_TYPES
+CONTACT_TWO_NODE_ELEMENT_TYPES = {
+    "zeroLengthContact2D",
+    "zeroLengthContact3D",
+}
+BEAM_CONTACT_ELEMENT_TYPES = {
+    "BeamContact2D",
+    "BeamContact3D",
+}
+CONTACT_ELEMENT_TYPES = (
+    CONTACT_TWO_NODE_ELEMENT_TYPES | BEAM_CONTACT_ELEMENT_TYPES
+)
+SPECIAL_TWO_NODE_ELEMENT_TYPES = (
+    CABLE_ELEMENT_TYPES
+    | BEARING_ELEMENT_TYPES
+    | CONTACT_TWO_NODE_ELEMENT_TYPES
+)
 EMBEDDED_ELEMENT_TYPES = {"ASDEmbeddedNodeElement"}
 QUAD_ELEMENT_TYPES = (
     SHELL_ELEMENT_TYPES
@@ -59,6 +74,7 @@ SUPPORTED_ELEMENT_TYPES = (
     | WALL_MACRO_2D_ELEMENT_TYPES
     | TRUSS_ELEMENT_TYPES
     | SPECIAL_TWO_NODE_ELEMENT_TYPES
+    | BEAM_CONTACT_ELEMENT_TYPES
     | EMBEDDED_ELEMENT_TYPES
 )
 
@@ -326,6 +342,152 @@ def _normalize_special_element_parameters(
                 )
         return result
 
+    if element_type == "zeroLengthContact2D":
+        required = ("Kn", "Kt", "mu", "normal")
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "zeroLengthContact2D requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                "Unsupported zeroLengthContact2D parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {
+            "Kn": float(raw["Kn"]),
+            "Kt": float(raw["Kt"]),
+            "mu": float(raw["mu"]),
+        }
+        try:
+            normal = tuple(float(value) for value in raw["normal"])
+        except TypeError as exc:
+            raise ValueError(
+                "zeroLengthContact2D normal must contain two values."
+            ) from exc
+        if len(normal) != 2 or any(not math.isfinite(v) for v in normal):
+            raise ValueError(
+                "zeroLengthContact2D normal must contain two finite values."
+            )
+        norm2 = sum(v * v for v in normal)
+        if norm2 <= 1.0e-24:
+            raise ValueError("zeroLengthContact2D normal cannot be zero.")
+        result["normal"] = normal
+        if (
+            not math.isfinite(result["Kn"])
+            or not math.isfinite(result["Kt"])
+            or not math.isfinite(result["mu"])
+        ):
+            raise ValueError("zeroLengthContact2D parameters must be finite.")
+        if result["Kn"] <= 0.0 or result["Kt"] <= 0.0:
+            raise ValueError(
+                "zeroLengthContact2D Kn and Kt must be positive."
+            )
+        if result["mu"] < 0.0:
+            raise ValueError("zeroLengthContact2D mu cannot be negative.")
+        return result
+
+    if element_type == "zeroLengthContact3D":
+        required = ("Kn", "Kt", "mu", "cohesion", "dir")
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "zeroLengthContact3D requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                "Unsupported zeroLengthContact3D parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {
+            "Kn": float(raw["Kn"]),
+            "Kt": float(raw["Kt"]),
+            "mu": float(raw["mu"]),
+            "cohesion": float(raw["cohesion"]),
+            "dir": _strict_int(raw["dir"], "zeroLengthContact3D dir"),
+        }
+        if any(
+            not math.isfinite(float(result[key]))
+            for key in ("Kn", "Kt", "mu", "cohesion")
+        ):
+            raise ValueError("zeroLengthContact3D parameters must be finite.")
+        if result["Kn"] <= 0.0 or result["Kt"] <= 0.0:
+            raise ValueError(
+                "zeroLengthContact3D Kn and Kt must be positive."
+            )
+        if result["mu"] < 0.0 or result["cohesion"] < 0.0:
+            raise ValueError(
+                "zeroLengthContact3D mu/cohesion cannot be negative."
+            )
+        if int(result["dir"]) not in {1, 2, 3}:
+            raise ValueError("zeroLengthContact3D dir must be 1, 2, or 3.")
+        return result
+
+    if element_type in BEAM_CONTACT_ELEMENT_TYPES:
+        common = ("nd_material_tag", "gTol", "fTol", "cFlag")
+        required = (
+            common + ("width",)
+            if element_type == "BeamContact2D"
+            else common + ("radius", "transf_tag")
+        )
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                f"{element_type} requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                f"Unsupported {element_type} parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {
+            "nd_material_tag": _strict_int(
+                raw["nd_material_tag"],
+                f"{element_type} nD material tag",
+            ),
+            "gTol": float(raw["gTol"]),
+            "fTol": float(raw["fTol"]),
+            "cFlag": _strict_int(raw["cFlag"], f"{element_type} cFlag"),
+        }
+        size_key = "width" if element_type == "BeamContact2D" else "radius"
+        result[size_key] = float(raw[size_key])
+        if element_type == "BeamContact3D":
+            result["transf_tag"] = _strict_int(
+                raw["transf_tag"],
+                "BeamContact3D transformation tag",
+            )
+        if any(
+            not math.isfinite(float(result[key]))
+            for key in ("gTol", "fTol", size_key)
+        ):
+            raise ValueError(f"{element_type} parameters must be finite.")
+        if int(result["nd_material_tag"]) <= 0:
+            raise ValueError(f"{element_type} nD material tag must be positive.")
+        if float(result[size_key]) <= 0.0:
+            raise ValueError(f"{element_type} {size_key} must be positive.")
+        if float(result["gTol"]) <= 0.0 or float(result["fTol"]) <= 0.0:
+            raise ValueError(f"{element_type} tolerances must be positive.")
+        if int(result["cFlag"]) not in {0, 1}:
+            raise ValueError(f"{element_type} cFlag must be 0 or 1.")
+        if (
+            element_type == "BeamContact3D"
+            and int(result["transf_tag"]) <= 0
+        ):
+            raise ValueError("BeamContact3D transformation tag must be positive.")
+        return result
+
     required = (
         "kInit", "qd", "alpha1", "alpha2", "mu",
         "p_mat_tag", "mz_mat_tag",
@@ -542,6 +704,7 @@ class Node:
     xyz: Vec3
     fixity: Tuple[int, ...] = (0, 0, 0, 0, 0, 0)
     mass: Tuple[float, ...] = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    ndf: int | None = None
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Node tag")
@@ -554,14 +717,30 @@ class Node:
         if any(not math.isfinite(value) for value in self.xyz):
             raise ValueError("Node coordinates must be finite.")
 
+        self.ndf = (
+            len(self.fixity)
+            if self.ndf is None
+            else _strict_int(self.ndf, "Node ndf")
+        )
+        if self.ndf < 1 or self.ndf > 6:
+            raise ValueError("Node ndf must be between 1 and 6.")
+
         self.fixity = tuple(
             _strict_int(value, "Fixity value")
             for value in self.fixity
         )
+        if len(self.fixity) != self.ndf:
+            raise ValueError(
+                f"Node {self.tag} fixity count must match ndf={self.ndf}."
+            )
         if any(value not in {0, 1} for value in self.fixity):
             raise ValueError("Fixity values must be 0 or 1.")
 
         self.mass = tuple(float(value) for value in self.mass)
+        if len(self.mass) != self.ndf:
+            raise ValueError(
+                f"Node {self.tag} mass count must match ndf={self.ndf}."
+            )
         if any(not math.isfinite(value) for value in self.mass):
             raise ValueError("Nodal mass values must be finite.")
         if any(value < 0.0 for value in self.mass):
@@ -662,7 +841,7 @@ class Element:
                 self.j,
                 *(int(value) for value in tail if value is not None),
             )
-        if self.is_quad or self.is_embedded:
+        if self.is_quad or self.is_embedded or self.element_type in BEAM_CONTACT_ELEMENT_TYPES:
             if self.k is None or self.l is None:
                 return (self.i, self.j)
             return (self.i, self.j, self.k, self.l)
@@ -1281,7 +1460,15 @@ class StructuralModel:
         self.nodes.clear()
         self.elements.clear()
 
-    def add_node(self, tag: int, x: float, y: float, z: float = 0.0) -> Node:
+    def add_node(
+        self,
+        tag: int,
+        x: float,
+        y: float,
+        z: float = 0.0,
+        *,
+        ndf: int | None = None,
+    ) -> Node:
         tag = _strict_int(tag, "Node tag")
         if tag < 0:
             raise ValueError("Node tag must be a non-negative integer.")
@@ -1290,11 +1477,15 @@ class StructuralModel:
         xyz = (float(x), float(y), float(z))
         if not all(math.isfinite(value) for value in xyz):
             raise ValueError("Node coordinates must be finite.")
+        node_ndf = self.ndf if ndf is None else _strict_int(ndf, "Node ndf")
+        if node_ndf < 1 or node_ndf > 6:
+            raise ValueError("Node ndf must be between 1 and 6.")
         node = Node(
             tag,
             xyz,
-            fixity=(0,) * self.ndf,
-            mass=(0.0,) * self.ndf,
+            fixity=(0,) * node_ndf,
+            mass=(0.0,) * node_ndf,
+            ndf=node_ndf,
         )
         self.nodes[tag] = node
         return node
@@ -1389,6 +1580,7 @@ class StructuralModel:
         is_quad = element_type in QUAD_ELEMENT_TYPES
         is_embedded = element_type in EMBEDDED_ELEMENT_TYPES
         is_solid = element_type in SOLID_ELEMENT_TYPES
+        is_beam_contact = element_type in BEAM_CONTACT_ELEMENT_TYPES
         raw_nodes = [i, j]
         if is_solid:
             tail = (k, l, m, n, p, q)
@@ -1403,7 +1595,7 @@ class StructuralModel:
             p = _strict_int(p, "Element P-node tag")
             q = _strict_int(q, "Element Q-node tag")
             raw_nodes.extend([k, l, m, n, p, q])
-        elif is_quad or is_embedded:
+        elif is_quad or is_embedded or is_beam_contact:
             if k is None or l is None:
                 raise ValueError(
                     f"{element_type} element {tag} requires four nodes."
@@ -1417,7 +1609,7 @@ class StructuralModel:
                     f"{element_type} element {tag} requires eight distinct "
                     "node tags."
                 )
-            if is_quad or is_embedded:
+            if is_quad or is_embedded or is_beam_contact:
                 raise ValueError(
                     f"{element_type} element {tag} requires four distinct "
                     "node tags."
@@ -1441,6 +1633,48 @@ class StructuralModel:
                 f"{element_type} requires ndm=3/ndf=3; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
+        node_ndfs = {
+            node_tag: int(self.nodes[node_tag].ndf)
+            for node_tag in raw_nodes
+        }
+        if element_type == "zeroLengthContact2D":
+            if int(self.ndm) != 2 or any(
+                value != 2 for value in node_ndfs.values()
+            ):
+                raise ValueError(
+                    "zeroLengthContact2D requires ndm=2 and both nodes ndf=2."
+                )
+        if element_type == "zeroLengthContact3D":
+            if int(self.ndm) != 3 or any(
+                value != 3 for value in node_ndfs.values()
+            ):
+                raise ValueError(
+                    "zeroLengthContact3D requires ndm=3 and both nodes ndf=3."
+                )
+        if element_type == "BeamContact2D":
+            if (
+                int(self.ndm) != 2
+                or node_ndfs[i] != 3
+                or node_ndfs[j] != 3
+                or node_ndfs[int(k)] != 2
+                or node_ndfs[int(l)] != 2
+            ):
+                raise ValueError(
+                    "BeamContact2D requires master nodes ndf=3 and "
+                    "constrained/Lagrange nodes ndf=2 in ndm=2."
+                )
+        if element_type == "BeamContact3D":
+            if (
+                int(self.ndm) != 3
+                or node_ndfs[i] != 6
+                or node_ndfs[j] != 6
+                or node_ndfs[int(k)] != 3
+                or node_ndfs[int(l)] != 3
+            ):
+                raise ValueError(
+                    "BeamContact3D requires master nodes ndf=6 and "
+                    "constrained/Lagrange nodes ndf=3 in ndm=3."
+                )
         if (
             element_type == "CatenaryCable"
             and (int(self.ndm), int(self.ndf)) != (3, 3)
@@ -1695,8 +1929,11 @@ class StructuralModel:
             _strict_int(value, "Fixity value")
             for value in values
         )
-        if len(vals) != self.ndf:
-            raise ValueError(f"Expected {self.ndf} fixity values, got {len(vals)}")
+        expected_ndf = int(node.ndf)
+        if len(vals) != expected_ndf:
+            raise ValueError(
+                f"Expected {expected_ndf} fixity values, got {len(vals)}"
+            )
         if any(value not in {0, 1} for value in vals):
             raise ValueError("Fixity values must be 0 or 1.")
         node.fixity = vals
@@ -2103,6 +2340,7 @@ class StructuralModel:
                 self.nodes[tag].xyz,
                 self.nodes[tag].fixity,
                 self.nodes[tag].mass,
+                self.nodes[tag].ndf,
             )
             for tag in source_nodes
         }
@@ -2123,7 +2361,7 @@ class StructuralModel:
         for copy_index in range(1, copies + 1):
             node_map: dict[int, int] = {}
             for source_tag in sorted(source_nodes):
-                xyz, fixity, mass = base_nodes[source_tag]
+                xyz, fixity, mass, node_ndf = base_nodes[source_tag]
                 new_tag = next_node
                 next_node += 1
                 node = self.add_node(
@@ -2131,6 +2369,7 @@ class StructuralModel:
                     xyz[0] + float(dx) * copy_index,
                     xyz[1] + float(dy) * copy_index,
                     xyz[2] + float(dz) * copy_index,
+                    ndf=int(node_ndf),
                 )
                 node.fixity = tuple(fixity)
                 node.mass = tuple(mass)
@@ -2244,6 +2483,7 @@ class StructuralModel:
                     "xyz": list(node.xyz),
                     "fixity": list(node.fixity),
                     "mass": list(node.mass),
+                    "ndf": int(node.ndf),
                 }
                 for node in sorted(self.nodes.values(), key=lambda item: item.tag)
             ],
@@ -2345,14 +2585,16 @@ class StructuralModel:
                 float(xyz[0]),
                 float(xyz[1]),
                 float(xyz[2]) if len(xyz) > 2 else 0.0,
+                ndf=int(item.get("ndf", model.ndf)),
             )
             fixity = tuple(
                 _strict_int(value, "Fixity value")
-                for value in item.get("fixity", (0,) * model.ndf)
+                for value in item.get("fixity", (0,) * int(node.ndf))
             )
-            if len(fixity) != model.ndf:
+            if len(fixity) != int(node.ndf):
                 raise ValueError(
-                    f"Node {node.tag} has {len(fixity)} fixities; expected {model.ndf}."
+                    f"Node {node.tag} has {len(fixity)} fixities; "
+                    f"expected {node.ndf}."
                 )
             if any(value not in {0, 1} for value in fixity):
                 raise ValueError(
@@ -2361,12 +2603,12 @@ class StructuralModel:
             node.fixity = fixity
             mass = tuple(
                 float(value)
-                for value in item.get("mass", (0.0,) * model.ndf)
+                for value in item.get("mass", (0.0,) * int(node.ndf))
             )
-            if len(mass) != model.ndf:
+            if len(mass) != int(node.ndf):
                 raise ValueError(
                     f"Node {node.tag} has {len(mass)} mass values; "
-                    f"expected {model.ndf}."
+                    f"expected {node.ndf}."
                 )
             if any(not math.isfinite(value) for value in mass):
                 raise ValueError(
