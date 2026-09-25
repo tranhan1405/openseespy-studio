@@ -1208,7 +1208,7 @@ def test_rc_wall_wizard_hybrid_mode_roundtrip():
         assert "MEFI elements: 7" in dialog.preview_object_summary.text()
         assert "Boundary bar elements: 56" in dialog.preview_object_summary.text()
         assert (
-            "Horizontal web bar elements: 12"
+            "Horizontal bar elements: 12 (12 web + 0 boundary)"
             in dialog.preview_object_summary.text()
         )
         assert "Total elements: 75" in dialog.preview_object_summary.text()
@@ -1491,11 +1491,17 @@ def test_rc_wall_final_page_previews_objects_before_accept():
             "nodes": 16,
             "host_nodes": 16,
             "embedded_nodes": 0,
+            "horizontal_embedded_nodes": 0,
+            "vertical_embedded_nodes": 0,
             "mefi": 7,
             "boundary_rebar": 0,
             "horizontal_rebar": 0,
+            "web_horizontal_rebar": 0,
+            "boundary_horizontal_rebar": 0,
             "vertical_rebar": 0,
             "embedded_coupling": 0,
+            "horizontal_coupling": 0,
+            "vertical_coupling": 0,
             "discrete_rebar": 0,
             "elements": 7,
             "structural_elements": 7,
