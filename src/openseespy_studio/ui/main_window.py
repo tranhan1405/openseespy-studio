@@ -212,7 +212,7 @@ from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
 from .rc_wall_wizard import RCWallWizard
 from .rclms_section_dialog import RCLMSSectionDialog
-from .icons import studio_icon
+from .icons import create_visual_icon, studio_icon
 from .results_panel import ResultsPanel
 from .restraint_dialog import RestraintDialog
 from .selection import SelectionManager, parse_tag_expression
@@ -488,7 +488,7 @@ QStatusBar {
 
 
 class BrandWidget(QWidget):
-    """Compact SARE wordmark for the application ribbon."""
+    """Compact FEWIZ identity for the application ribbon."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -498,41 +498,44 @@ class BrandWidget(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        # Primary wordmark.
-        painter.setPen(QColor(BRAND_NAVY))
+        # Use the same mesh-W mark as the taskbar/application icon so the
+        # ribbon, installer and desktop identity stay visually consistent.
+        mark_size = 52
+        mark = create_visual_icon(mark_size).pixmap(mark_size, mark_size)
+        painter.drawPixmap(7, 6, mark)
+
+        # Wordmark: FE in engineering blue, WIZ in charcoal.
         font = QFont(self.font())
-        font.setPointSize(18)
+        font.setPointSize(16)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(8, 31, PRODUCT_NAME)
 
-        # Minimal deformation/response curve under the SARE wordmark.
-        path = QPainterPath()
-        path.moveTo(8, 43)
-        path.cubicTo(28, 43, 40, 42, 51, 35)
-        path.cubicTo(61, 29, 68, 24, 77, 27)
-        path.cubicTo(86, 30, 91, 40, 101, 43)
-        path.cubicTo(108, 45, 116, 44, 124, 43)
-        response_pen = QPen(QColor(BRAND_RED), 3.0)
-        response_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        response_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(response_pen)
-        painter.drawPath(path)
+        text_x = 70
+        baseline = 28
+        painter.setPen(QColor("#0B5DAA"))
+        painter.drawText(text_x, baseline, "FE")
+        fe_width = painter.fontMetrics().horizontalAdvance("FE")
 
-        # Descriptor: detailed enough for identity, compact enough for ribbon.
-        painter.setPen(QColor("#556B80"))
+        painter.setPen(QColor("#20272E"))
+        painter.drawText(text_x + fe_width, baseline, "WIZ")
+
+        # Primary descriptor from the selected FEWIZ wordmark.
+        painter.setPen(QColor("#465463"))
         font.setPointSize(7)
         font.setBold(False)
+        font.setLetterSpacing(QFont.AbsoluteSpacing, 1.4)
         painter.setFont(font)
-        painter.drawText(145, 25, "Structural Analysis & Research")
-        painter.drawText(145, 39, "Environment for OpenSees")
+        painter.drawText(text_x, 43, "FINITE ELEMENT WIZARD")
 
-        painter.setPen(QColor(BRAND_NAVY))
+        # Compact capability line replaces the former SARE research slogan.
+        painter.setPen(QColor("#0B5DAA"))
         font.setPointSize(6)
         font.setBold(True)
+        font.setLetterSpacing(QFont.AbsoluteSpacing, 0.8)
         painter.setFont(font)
-        painter.drawText(145, 52, "STRUCTURAL SIMULATION · RESEARCH")
+        painter.drawText(text_x, 57, "MODELING · ANALYSIS · RESULTS")
 
 
 class RibbonGroup(QWidget):
