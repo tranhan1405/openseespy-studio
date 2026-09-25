@@ -7139,11 +7139,22 @@ class ModelViewport(QWidget):
                 continue
             normal /= normal_norm
 
-            # A small camera-facing separation prevents z-fighting with the
-            # opaque MEFI surface. For the standard XY RC wall the element
-            # order is CCW and +Z is toward the XY camera.
+            # Offset crack glyphs toward the *current camera*.  MEFI
+            # connectivity may produce either +normal or -normal depending on
+            # node ordering; using a fixed normal can place every crack behind
+            # the opaque wall even though the crack states are valid.
+            face_center = 0.25 * (pi + pj + pk + pl)
+            try:
+                camera_position = np.asarray(
+                    self.plotter.camera.GetPosition(),
+                    dtype=float,
+                )
+                if float(np.dot(normal, camera_position - face_center)) < 0.0:
+                    normal = -normal
+            except Exception:
+                pass
             visual_offset = (
-                normal * max(width_geom, height_geom) * 2.5e-3
+                normal * max(width_geom, height_geom) * 5.0e-3
             )
 
             total_width = sum(
