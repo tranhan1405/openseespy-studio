@@ -212,7 +212,7 @@ def result_choices_for_analysis(
                 label,
                 "ShellDeformation",
                 f"Shell {component}",
-                {"component": component},
+                {"component": component, "location": "mid"},
             )
         )
 
