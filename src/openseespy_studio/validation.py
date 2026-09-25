@@ -158,7 +158,7 @@ def _element_geometry_checks(
     issues: list[ValidationIssue],
 ) -> None:
     model = project.model
-    seen_connectivity: dict[tuple[int, ...], int] = {}
+    seen_connectivity: dict[tuple[int, ...], list[int]] = {}
     shell_edge_owners: dict[
         tuple[int, int],
         list[tuple[int, int, int]],
@@ -188,28 +188,80 @@ def _element_geometry_checks(
             continue
 
         connectivity = tuple(sorted(node_tags))
-        if connectivity in seen_connectivity:
-            other = seen_connectivity[connectivity]
-            duplicate_message = (
-                f"Element {tag} duplicates the node pair of element {other}."
-                if len(node_tags) == 2
-                else (
-                    f"Element {tag} duplicates the shell connectivity of "
-                    f"element {other}."
+        previous_tags = seen_connectivity.setdefault(connectivity, [])
+        if previous_tags:
+            group = str(element.group or "")
+            is_rc_wall_rebar = group.startswith("rc-wall-rebar-")
+
+            duplicate_of: int | None = None
+            duplicate_is_same_rebar = False
+
+            if is_rc_wall_rebar and len(node_tags) == 2:
+                # RC-wall discrete bars intentionally share the same MEFI
+                # node pair under the current perfect-bond formulation.
+                # Different bar/layer groups are therefore parallel physical
+                # bars, not duplicate geometry. Only flag a repeated segment
+                # when the same bar identity/group appears on the same pair.
+                for previous_tag in previous_tags:
+                    previous = model.elements[previous_tag]
+                    previous_group = str(previous.group or "")
+                    if (
+                        previous_group.startswith("rc-wall-rebar-")
+                        and previous_group == group
+                    ):
+                        duplicate_of = previous_tag
+                        duplicate_is_same_rebar = True
+                        break
+
+                # A reinforcement bar overlapping a non-reinforcement
+                # two-node element is still suspicious and remains visible.
+                if duplicate_of is None:
+                    for previous_tag in previous_tags:
+                        previous = model.elements[previous_tag]
+                        if not str(previous.group or "").startswith(
+                            "rc-wall-rebar-"
+                        ):
+                            duplicate_of = previous_tag
+                            break
+            else:
+                duplicate_of = previous_tags[0]
+
+            if duplicate_of is not None:
+                if duplicate_is_same_rebar:
+                    duplicate_message = (
+                        f"Element {tag} duplicates the node pair and "
+                        f"reinforcement identity of element {duplicate_of}."
+                    )
+                    duplicate_suggestion = (
+                        "Remove the repeated reinforcement segment or assign "
+                        "it a distinct bar/layer identity if it is intentional."
+                    )
+                else:
+                    duplicate_message = (
+                        f"Element {tag} duplicates the node pair of element "
+                        f"{duplicate_of}."
+                        if len(node_tags) == 2
+                        else (
+                            f"Element {tag} duplicates the shell connectivity "
+                            f"of element {duplicate_of}."
+                        )
+                    )
+                    duplicate_suggestion = (
+                        "Confirm that the duplicate element is intentional."
+                    )
+
+                issues.append(
+                    ValidationIssue(
+                        "WARNING",
+                        "Geometry",
+                        duplicate_message,
+                        "element",
+                        tag,
+                        duplicate_suggestion,
+                    )
                 )
-            )
-            issues.append(
-                ValidationIssue(
-                    "WARNING",
-                    "Geometry",
-                    duplicate_message,
-                    "element",
-                    tag,
-                    "Confirm that the duplicate element is intentional.",
-                )
-            )
-        else:
-            seen_connectivity[connectivity] = tag
+
+        previous_tags.append(tag)
 
         if element.element_type not in SUPPORTED_ELEMENT_TYPES:
             issues.append(
