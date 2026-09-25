@@ -22,6 +22,7 @@ FORCE_COMPONENTS = ("Nxx", "Nyy", "Nxy", "Mxx", "Myy", "Mxy", "Qx", "Qy")
 DEFORMATION_COMPONENTS = (
     "Exx", "Eyy", "Gxy", "Kxx", "Kyy", "Kxy", "Gxz", "Gyz"
 )
+DISPLACEMENT_COMPONENTS = ("|U|", "UX", "UY", "UZ")
 
 
 class SurfaceResultDialog(QDialog):
@@ -86,6 +87,7 @@ class SurfaceResultDialog(QDialog):
         analysis_row.addWidget(self.analysis_new)
 
         self.result_type = QComboBox()
+        self.result_type.addItem("Shell Displacement", "ShellDisplacement")
         self.result_type.addItem("Shell Force", "ShellForce")
         self.result_type.addItem("Shell Deformation", "ShellDeformation")
         if result is not None:
@@ -103,8 +105,9 @@ class SurfaceResultDialog(QDialog):
         root.addLayout(form)
 
         note = QLabel(
-            "Only ShellForce and ShellDeformation are Geometry-managed here. "
-            "Direct FE-scoped result requests remain available as the "
+            "ShellDisplacement, ShellForce and ShellDeformation can use "
+            "Geometry-managed Surface scope here. Direct FE-scoped result "
+            "requests remain available as the "
             "low-level workflow and intentionally block remeshing."
         )
         note.setWordWrap(True)
@@ -166,11 +169,12 @@ class SurfaceResultDialog(QDialog):
     def _refresh_components(self) -> None:
         current = self.component.currentText()
         result_type = str(self.result_type.currentData())
-        options = (
-            FORCE_COMPONENTS
-            if result_type == "ShellForce"
-            else DEFORMATION_COMPONENTS
-        )
+        if result_type == "ShellDisplacement":
+            options = DISPLACEMENT_COMPONENTS
+        elif result_type == "ShellForce":
+            options = FORCE_COMPONENTS
+        else:
+            options = DEFORMATION_COMPONENTS
         self.component.clear()
         self.component.addItems(list(options))
         index = self.component.findText(current)
@@ -180,9 +184,13 @@ class SurfaceResultDialog(QDialog):
             "Surface Shell "
         ):
             self.name.setText(
-                "Surface Shell Force"
-                if result_type == "ShellForce"
-                else "Surface Shell Deformation"
+                "Surface Shell Displacement"
+                if result_type == "ShellDisplacement"
+                else (
+                    "Surface Shell Force"
+                    if result_type == "ShellForce"
+                    else "Surface Shell Deformation"
+                )
             )
 
     def data(self) -> SolutionResultData:
@@ -198,7 +206,16 @@ class SurfaceResultDialog(QDialog):
             name=self.name.text().strip(),
             result_type=str(self.result_type.currentData()),
             surface_scope=list(self.surface_tags),
-            settings={"component": self.component.currentText()},
+            settings=(
+                {
+                    "component": self.component.currentText(),
+                    "scale": 10.0,
+                    "display_mode": "deformed_only",
+                }
+                if str(self.result_type.currentData())
+                == "ShellDisplacement"
+                else {"component": self.component.currentText()}
+            ),
         )
 
     def _accept(self) -> None:
