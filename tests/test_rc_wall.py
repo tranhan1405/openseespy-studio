@@ -195,6 +195,8 @@ def test_rc_wall_hybrid_boundary_rebar_deducts_smeared_ratio():
         reinforcement_mode="hybrid",
         boundary_bar_count=4,
         boundary_bar_diameter=16.0,
+        boundary_cover=30.0,
+        boundary_layer_mode="front_back",
         boundary_truss_type="corotTruss",
     )
 
@@ -205,7 +207,11 @@ def test_rc_wall_hybrid_boundary_rebar_deducts_smeared_ratio():
     discrete_ratio = discrete_area / (228.6 * 152.4)
     expected_remaining = 0.0323 - discrete_ratio
 
-    assert len(result.reinforcement_element_tags) == 14
+    # Four physical bars per boundary × two boundaries × seven MEFI rows.
+    assert len(result.reinforcement_element_tags) == 56
+    assert result.web_horizontal_element_tags == []
+    assert result.boundary_bar_area == pytest.approx(bar_area)
+    assert result.boundary_bar_spacing == pytest.approx(152.6)
     assert result.boundary_discrete_rho_y == pytest.approx(discrete_ratio)
     assert result.boundary_smeared_rho_y == pytest.approx(
         expected_remaining
@@ -218,24 +224,36 @@ def test_rc_wall_hybrid_boundary_rebar_deducts_smeared_ratio():
     )
 
     boundary_material_tag = result.material_tags[2]
-    left_tags = result.reinforcement_element_tags[:7]
-    right_tags = result.reinforcement_element_tags[7:]
-    assert len(left_tags) == len(right_tags) == 7
+    left_tags = result.reinforcement_element_tags[:28]
+    right_tags = result.reinforcement_element_tags[28:]
+    assert len(left_tags) == len(right_tags) == 28
     for tag in result.reinforcement_element_tags:
         element = project.model.elements[tag]
         assert element.element_type == "corotTruss"
         assert element.group.startswith("rc-wall-rebar-")
-        assert element.truss_area == pytest.approx(discrete_area)
+        assert element.truss_area == pytest.approx(bar_area)
         assert element.truss_material_tag == boundary_material_tag
 
-    assert {
+    left_groups = {
         project.model.elements[tag].group
         for tag in left_tags
-    } == {"rc-wall-rebar-left"}
-    assert {
+    }
+    right_groups = {
         project.model.elements[tag].group
         for tag in right_tags
-    } == {"rc-wall-rebar-right"}
+    }
+    assert left_groups == {
+        "rc-wall-rebar-left-front-b01of02",
+        "rc-wall-rebar-left-front-b02of02",
+        "rc-wall-rebar-left-back-b01of02",
+        "rc-wall-rebar-left-back-b02of02",
+    }
+    assert right_groups == {
+        "rc-wall-rebar-right-front-b01of02",
+        "rc-wall-rebar-right-front-b02of02",
+        "rc-wall-rebar-right-back-b01of02",
+        "rc-wall-rebar-right-back-b02of02",
+    }
 
     first_left = project.model.elements[left_tags[0]]
     first_right = project.model.elements[right_tags[0]]
@@ -259,6 +277,66 @@ def test_rc_wall_hybrid_rejects_discrete_steel_above_total_ratio():
         build_rc_wall(project, spec)
 
     assert project.to_dict() == before
+
+
+def test_rc_wall_hybrid_mesh_aligned_horizontal_bars_reduce_rho_x():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    spec = RCWallSpec(
+        width=1220.0,
+        height=2209.8,
+        thickness=152.4,
+        boundary_width=228.6,
+        vertical_elements=7,
+        macro_fibers=8,
+        boundary_unconfined_thickness=50.8,
+        boundary_confined_thickness=101.6,
+        reinforcement_mode="hybrid",
+        boundary_bar_count=4,
+        boundary_bar_diameter=16.0,
+        boundary_cover=30.0,
+        web_horizontal_mode="mesh_aligned",
+        web_horizontal_bar_diameter=8.0,
+        web_horizontal_layer_mode="front_back",
+    )
+
+    result = build_rc_wall(project, spec)
+
+    horizontal_area = math.pi * 8.0 ** 2 / 4.0
+    expected_rho = (
+        6 * 2 * horizontal_area / (2209.8 * 152.4)
+    )
+    assert len(result.web_horizontal_element_tags) == 12
+    assert len(result.reinforcement_element_tags) == 68
+    assert result.web_horizontal_discrete_rho_x == pytest.approx(
+        expected_rho
+    )
+    assert result.web_smeared_rho_x == pytest.approx(
+        0.0027 - expected_rho
+    )
+    assert result.boundary_smeared_rho_x == pytest.approx(
+        0.0082 - expected_rho
+    )
+
+    web_steel = project.nd_materials[result.nd_material_tags[2]]
+    boundary_steel = project.nd_materials[result.nd_material_tags[3]]
+    assert web_steel.parameters["ratio1"] == pytest.approx(
+        0.0027 - expected_rho
+    )
+    assert boundary_steel.parameters["ratio1"] == pytest.approx(
+        0.0082 - expected_rho
+    )
+    for tag in result.web_horizontal_element_tags:
+        element = project.model.elements[tag]
+        assert element.group.startswith(
+            "rc-wall-rebar-web-horizontal-"
+        )
+        assert element.truss_area == pytest.approx(horizontal_area)
+        assert element.truss_material_tag == result.material_tags[0]
 
 
 def test_rc_wall_hybrid_export_contains_corot_truss():
@@ -559,13 +637,14 @@ def test_rc_wall_gui_exposes_reinforcement_tree_and_display_controls():
 
     assert '"reinforcement_root"' in tree_source
     assert '"reinforcement_group"' in tree_source
-    assert "Boundary Bars · Left" in tree_source
-    assert "Boundary Bars · Right" in tree_source
+    assert "Boundary Bars · Left · Front" in tree_source
+    assert "Boundary Bars · Right · Back" in tree_source
+    assert "Web Bars · Horizontal" in tree_source
     assert "rc-wall-rebar" in selection_source
     assert "Discrete Reinforcement" in root_source
     assert "Perfect Bond" in group_source
     assert '"reinforcement"' in viewport_source
-    assert "reinforcement_size" in viewport_source
+    assert "_batched_reinforcement_mesh" in viewport_source
     assert "Discrete reinforcement" in display_source
 
 
@@ -582,6 +661,12 @@ def test_rc_wall_wizard_hybrid_mode_roundtrip():
         dialog.reinforcement_mode.setCurrentIndex(hybrid_index)
         dialog.boundary_bar_count.setValue(4)
         dialog.boundary_bar_diameter.setValue(16.0)
+        dialog.boundary_cover.setValue(30.0)
+        horizontal_index = dialog.web_horizontal_mode.findData(
+            "mesh_aligned"
+        )
+        dialog.web_horizontal_mode.setCurrentIndex(horizontal_index)
+        dialog.web_horizontal_bar_diameter.setValue(8.0)
         _APP.processEvents()
 
         spec = dialog.data()
@@ -589,11 +674,17 @@ def test_rc_wall_wizard_hybrid_mode_roundtrip():
         assert spec.boundary_bar_count == 4
         assert math.isclose(spec.boundary_bar_diameter, 16.0)
         assert spec.boundary_truss_type == "corotTruss"
+        assert spec.boundary_layer_mode == "front_back"
+        assert math.isclose(spec.boundary_cover, 30.0)
+        assert spec.web_horizontal_mode == "mesh_aligned"
+        assert math.isclose(spec.web_horizontal_bar_diameter, 8.0)
         assert dialog.boundary_bar_count.isEnabled()
         assert dialog.preview.reinforcement_mode == "hybrid"
         assert dialog.preview.boundary_bars == 4
-        assert "As,discrete" in dialog.reinforcement_info.text()
+        assert "As,total" in dialog.reinforcement_info.text()
+        assert "center spacing" in dialog.reinforcement_info.text()
         assert "ρy,discrete" in dialog.reinforcement_info.text()
+        assert "Horizontal discrete" in dialog.reinforcement_info.text()
         assert "Hybrid" in dialog.review.text()
         assert "smeared remainder" in dialog.review.text()
     finally:
