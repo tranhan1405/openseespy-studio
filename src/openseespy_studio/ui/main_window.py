@@ -5441,6 +5441,7 @@ class MainWindow(QMainWindow):
             units=self.project.units,
             solution_results=self.project.solution_results,
             nd_materials=self.project.nd_materials,
+            friction_models=self.project.friction_models,
         )
 
     def _refresh_project_metadata(
@@ -33332,6 +33333,7 @@ class MainWindow(QMainWindow):
                 units=temporary_project.units,
                 solution_results=temporary_project.solution_results,
                 nd_materials=temporary_project.nd_materials,
+                friction_models=temporary_project.friction_models,
             )
         except (KeyError, TypeError, ValueError) as exc:
             QMessageBox.warning(
