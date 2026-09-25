@@ -19,6 +19,8 @@ from .model import (
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
+    TRUSS_MATERIAL_ELEMENT_TYPES,
+    TRUSS_SECTION_ELEMENT_TYPES,
     WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
 )
@@ -6006,38 +6008,72 @@ def to_openseespy(
             continue
 
         if e.element_type in TRUSS_ELEMENT_TYPES:
-            if e.truss_area <= 0.0:
-                lines.append(
-                    f"# ERROR: Truss element {tag} has non-positive area; "
-                    "element not generated."
+            if e.element_type in TRUSS_SECTION_ELEMENT_TYPES:
+                if e.section_tag is None:
+                    lines.append(
+                        f"# ERROR: {e.element_type} element {tag} has no "
+                        "section assigned; element not generated."
+                    )
+                    continue
+                assigned_section = (
+                    sections.get(int(e.section_tag))
+                    if sections is not None
+                    else None
                 )
-                continue
-            if e.truss_material_tag is None:
-                lines.append(
-                    f"# ERROR: Truss element {tag} has no material assigned; "
-                    "element not generated."
+                if assigned_section is None:
+                    lines.append(
+                        f"# ERROR: {e.element_type} element {tag} references "
+                        f"missing section {e.section_tag}; element not generated."
+                    )
+                    continue
+                if assigned_section.section_type in SHELL_SECTION_TYPES:
+                    lines.append(
+                        f"# ERROR: {e.element_type} element {tag} cannot use "
+                        f"shell section {e.section_tag}; element not generated."
+                    )
+                    continue
+                command = (
+                    "TrussSection"
+                    if e.element_type == "trussSection"
+                    else "corotTrussSection"
                 )
-                continue
-            if (
-                materials is None
-                or e.truss_material_tag not in materials
-            ):
-                lines.append(
-                    f"# ERROR: Truss element {tag} references missing material "
-                    f"{e.truss_material_tag}; element not generated."
+                args = (
+                    f"ops.element('{command}', "
+                    f"{tag}, {e.i}, {e.j}, {int(e.section_tag)}"
                 )
-                continue
+            else:
+                if e.truss_area <= 0.0:
+                    lines.append(
+                        f"# ERROR: Truss element {tag} has non-positive area; "
+                        "element not generated."
+                    )
+                    continue
+                if e.truss_material_tag is None:
+                    lines.append(
+                        f"# ERROR: Truss element {tag} has no material assigned; "
+                        "element not generated."
+                    )
+                    continue
+                if (
+                    materials is None
+                    or e.truss_material_tag not in materials
+                ):
+                    lines.append(
+                        f"# ERROR: Truss element {tag} references missing material "
+                        f"{e.truss_material_tag}; element not generated."
+                    )
+                    continue
 
-            command = (
-                "Truss"
-                if e.element_type == "truss"
-                else "corotTruss"
-            )
-            args = (
-                f"ops.element('{command}', "
-                f"{tag}, {e.i}, {e.j}, {e.truss_area:g}, "
-                f"{e.truss_material_tag}"
-            )
+                command = (
+                    "Truss"
+                    if e.element_type == "truss"
+                    else "corotTruss"
+                )
+                args = (
+                    f"ops.element('{command}', "
+                    f"{tag}, {e.i}, {e.j}, {e.truss_area:g}, "
+                    f"{e.truss_material_tag}"
+                )
             if e.mass_per_length > 0.0:
                 args += f", '-rho', {e.mass_per_length:g}"
             if e.consistent_mass:
