@@ -198,6 +198,8 @@ def result_choices_for_analysis(
         ("Membrane strain Exx", "Exx"),
         ("Membrane strain Eyy", "Eyy"),
         ("Membrane shear Gxy", "Gxy"),
+        ("Principal strain ε1", "E1"),
+        ("Principal strain ε2", "E2"),
         ("Curvature Kxx", "Kxx"),
         ("Curvature Kyy", "Kyy"),
         ("Twist curvature Kxy", "Kxy"),
