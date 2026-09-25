@@ -10402,6 +10402,15 @@ class ProjectDatabase:
                     f"Unsupported {result.result_type} component "
                     f"{component!r}."
                 )
+            if result.result_type == "ShellDeformation":
+                location = str(
+                    result.settings.get("location", "mid")
+                )
+                if location not in {"mid", "top", "bottom"}:
+                    raise ValueError(
+                        "ShellDeformation location must be one of "
+                        "'mid', 'top', or 'bottom'."
+                    )
             if result.surface_scope:
                 scope = list(result.element_scope)
             else:
