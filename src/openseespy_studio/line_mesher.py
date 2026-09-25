@@ -344,6 +344,7 @@ def mesh_line_geometry(
                     integration_points=line.integration_points,
                     mass_per_length=line.mass_per_length,
                     consistent_mass=line.consistent_mass,
+                    beam_center_ratio=line.center_rotation,
                 )
             else:
                 project.model.add_element(

@@ -64,7 +64,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 47
+PROJECT_FORMAT_VERSION = 48
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -1167,8 +1167,13 @@ class NDMaterialData:
 
 
 SECTION_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
-    "Elastic": ("E", "A", "Iz", "Iy", "G", "J"),
+    "Elastic": ("E", "A", "Iz", "Iy", "G", "J", "Avy", "Avz"),
     "Fiber": ("GJ",),
+    "FiberInt": (
+        "nStrip1", "thick1",
+        "nStrip2", "thick2",
+        "nStrip3", "thick3",
+    ),
     "ElasticMembranePlate": ("E", "nu", "h", "rho", "EpModifier"),
     "PlateFiber": ("h",),
     "LayeredShell": (),
@@ -1190,9 +1195,16 @@ SECTION_DEFAULTS: dict[str, dict[str, float]] = {
         "Iy": 8.0e-5,
         "G": 7.6923e10,
         "J": 8.0e-5,
+        "Avy": 0.02,
+        "Avz": 0.02,
     },
     "Fiber": {
         "GJ": 1.0e6,
+    },
+    "FiberInt": {
+        "nStrip1": 1.0, "thick1": 0.20,
+        "nStrip2": 1.0, "thick2": 0.20,
+        "nStrip3": 1.0, "thick3": 0.20,
     },
     "ElasticMembranePlate": {
         "E": 2.0e11,
@@ -1565,6 +1577,7 @@ class SectionData:
     fibers: list[FiberData] = field(default_factory=list)
     material_tag: int | None = None
     fiber_components: list[FiberComponentData] = field(default_factory=list)
+    horizontal_fibers: list[FiberData] = field(default_factory=list)
     display_geometry: dict[str, Any] = field(default_factory=dict)
     nd_material_tag: int | None = None
     shell_layers: list[ShellLayerData] = field(default_factory=list)
@@ -1672,6 +1685,49 @@ class SectionData:
             else FiberComponentData.from_dict(component)
             for component in self.fiber_components
         ]
+        self.horizontal_fibers = [
+            fiber if isinstance(fiber, FiberData) else FiberData.from_dict(fiber)
+            for fiber in self.horizontal_fibers
+        ]
+        if self.section_type == "Elastic":
+            for key in ("E", "A", "Iz", "Iy", "G", "J", "Avy", "Avz"):
+                if self.parameters[key] <= 0.0:
+                    raise ValueError(
+                        f"Elastic section parameter {key} must be positive."
+                    )
+        if self.section_type == "FiberInt":
+            for key in ("nStrip1", "nStrip2", "nStrip3"):
+                value = self.parameters[key]
+                if not float(value).is_integer() or value < 0.0:
+                    raise ValueError(
+                        f"FiberInt {key} must be a non-negative integer."
+                    )
+            for key in ("thick1", "thick2", "thick3"):
+                if self.parameters[key] <= 0.0:
+                    raise ValueError(f"FiberInt {key} must be positive.")
+            strip_count = sum(
+                int(self.parameters[key])
+                for key in ("nStrip1", "nStrip2", "nStrip3")
+            )
+            if strip_count < 1:
+                raise ValueError("FiberInt requires at least one strip.")
+            if not self.fibers:
+                raise ValueError(
+                    "FiberInt requires vertical concrete/steel fibers."
+                )
+            if not self.horizontal_fibers:
+                raise ValueError(
+                    "FiberInt requires at least one horizontal Hfiber."
+                )
+            unique_y = {round(float(fiber.y), 12) for fiber in self.fibers}
+            if len(unique_y) != strip_count:
+                raise ValueError(
+                    "FiberInt NStrip total must match the number of distinct "
+                    "vertical-fiber y locations."
+                )
+            self.fiber_components = []
+        elif self.section_type != "Fiber":
+            self.horizontal_fibers = []
         if self.section_type == "Elastic" and self.material_tag is not None:
             self.material_tag = _strict_int(
                 self.material_tag,
@@ -1714,15 +1770,20 @@ class SectionData:
         return compiled
 
     def fiber_material_tags(self) -> set[int]:
-        if self.section_type != "Fiber":
-            return set()
-        return {
-            fiber.material_tag
-            for fiber in self.fibers
-        } | {
-            component.material_tag
-            for component in self.fiber_components
-        }
+        if self.section_type == "Fiber":
+            return {
+                fiber.material_tag
+                for fiber in self.fibers
+            } | {
+                component.material_tag
+                for component in self.fiber_components
+            }
+        if self.section_type == "FiberInt":
+            return {
+                fiber.material_tag
+                for fiber in (*self.fibers, *self.horizontal_fibers)
+            }
+        return set()
 
     def fiber_area_and_centroid(
         self,
@@ -1803,6 +1864,9 @@ class SectionData:
                 component.to_dict()
                 for component in self.fiber_components
             ],
+            "horizontal_fibers": [
+                fiber.to_dict() for fiber in self.horizontal_fibers
+            ],
             "material_tag": self.material_tag,
             "nd_material_tag": self.nd_material_tag,
             "shell_layers": [
@@ -1839,6 +1903,10 @@ class SectionData:
                 FiberComponentData.from_dict(dict(item))
                 for item in data.get("fiber_components", [])
             ],
+            horizontal_fibers=[
+                FiberData.from_dict(dict(item))
+                for item in data.get("horizontal_fibers", [])
+            ],
             material_tag=data.get("material_tag"),
             display_geometry=dict(data.get("display_geometry", {})),
             nd_material_tag=data.get("nd_material_tag"),
@@ -1868,6 +1936,7 @@ class TransformationData:
             "Linear",
             "PDelta",
             "Corotational",
+            "LinearInt",
         }:
             raise ValueError(
                 f"Unsupported transformation type: {self.transformation_type}"
@@ -4176,6 +4245,7 @@ class LineGeometryData:
     integration_points: int = 5
     mass_per_length: float = 0.0
     consistent_mass: bool = False
+    center_rotation: float = 0.4
     do_rayleigh: bool = False
     generated_node_tags: list[int] = field(default_factory=list)
     owned_node_tags: list[int] = field(default_factory=list)
@@ -4268,6 +4338,16 @@ class LineGeometryData:
             self.consistent_mass,
             "Line consistent mass",
         )
+        self.center_rotation = float(self.center_rotation)
+        if (
+            not math.isfinite(self.center_rotation)
+            or not 0.0 <= self.center_rotation <= 1.0
+        ):
+            raise ValueError(
+                "Line dispBeamColumnInt cRot must satisfy 0 <= cRot <= 1."
+            )
+        if self.element_type == "dispBeamColumnInt":
+            self.consistent_mass = False
         self.do_rayleigh = _strict_bool(
             self.do_rayleigh,
             "Line Rayleigh flag",
@@ -4316,6 +4396,7 @@ class LineGeometryData:
             "integration_points": self.integration_points,
             "mass_per_length": self.mass_per_length,
             "consistent_mass": self.consistent_mass,
+            "center_rotation": self.center_rotation,
             "do_rayleigh": self.do_rayleigh,
             "generated_node_tags": list(self.generated_node_tags),
             "owned_node_tags": list(self.owned_node_tags),
@@ -4347,6 +4428,7 @@ class LineGeometryData:
             integration_points=data.get("integration_points", 5),
             mass_per_length=data.get("mass_per_length", 0.0),
             consistent_mass=data.get("consistent_mass", False),
+            center_rotation=data.get("center_rotation", 0.4),
             do_rayleigh=data.get("do_rayleigh", False),
             generated_node_tags=list(data.get("generated_node_tags", [])),
             owned_node_tags=list(
@@ -6890,16 +6972,33 @@ class ProjectDatabase:
             element.tag
             for element in self.model.elements.values()
             if (
-                element.element_type == "elasticBeamColumn"
+                element.element_type
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                 and element.section_tag == original_tag
             )
         )
         if elastic_beam_users and section.section_type != "Elastic":
             raise ValueError(
-                f"Section {original_tag} is used by elasticBeamColumn "
+                f"Section {original_tag} is used by elastic frame "
                 "element(s) "
                 + ", ".join(map(str, elastic_beam_users))
                 + " and must remain an Elastic section."
+            )
+
+        fiber_int_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type == "dispBeamColumnInt"
+                and element.section_tag == original_tag
+            )
+        )
+        if fiber_int_users and section.section_type != "FiberInt":
+            raise ValueError(
+                f"Section {original_tag} is used by dispBeamColumnInt "
+                "element(s) "
+                + ", ".join(map(str, fiber_int_users))
+                + " and must remain a FiberInt section."
             )
 
         shell_users = sorted(
@@ -7080,7 +7179,7 @@ class ProjectDatabase:
                     ) from exc
             return
 
-        if section.section_type != "Fiber":
+        if section.section_type not in {"Fiber", "FiberInt"}:
             return
 
         missing = sorted(
@@ -7090,9 +7189,45 @@ class ProjectDatabase:
         )
         if missing:
             raise ValueError(
-                "Fiber section references missing material tag(s): "
-                + ", ".join(map(str, missing))
+                f"{section.section_type} section references missing material "
+                "tag(s): " + ", ".join(map(str, missing))
             )
+        if section.section_type == "FiberInt":
+            concrete_types = {
+                "Concrete01", "Concrete02", "Concrete04", "ConcreteCM",
+                "FRPConfinedConcrete", "FRPConfinedConcrete02",
+            }
+            steel_types = {
+                "Steel01", "Steel02", "RambergOsgoodSteel", "Hardening",
+                "ElasticPP", "ElasticBilin", "ReinforcingSteel",
+            }
+            for fiber in section.fibers:
+                material = self.materials[fiber.material_tag]
+                if material.material_type in concrete_types:
+                    if fiber.material_tag > 1000:
+                        raise ValueError(
+                            "FiberInt concrete material tags must be <= 1000."
+                        )
+                elif material.material_type in steel_types:
+                    if fiber.material_tag <= 1000:
+                        raise ValueError(
+                            "FiberInt steel material tags must be > 1000."
+                        )
+                else:
+                    raise ValueError(
+                        "FiberInt vertical fibers must use concrete or steel "
+                        "uniaxial materials."
+                    )
+            for fiber in section.horizontal_fibers:
+                material = self.materials[fiber.material_tag]
+                if (
+                    material.material_type not in steel_types
+                    or fiber.material_tag <= 1000
+                ):
+                    raise ValueError(
+                        "FiberInt Hfiber reinforcement must use a steel "
+                        "material tag > 1000."
+                    )
 
     def sections_using_material(self, material_tag: int) -> list[int]:
         material_tag = _strict_int(material_tag, "Material tag")
@@ -8780,12 +8915,22 @@ class ProjectDatabase:
             section = self.sections.get(int(element.section_tag))
             if (
                 section is not None
-                and element.element_type == "elasticBeamColumn"
+                and element.element_type
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                 and section.section_type != "Elastic"
             ):
                 raise ValueError(
-                    f"elasticBeamColumn element {element_tag} requires an "
-                    "Elastic section."
+                    f"{element.element_type} element {element_tag} requires "
+                    "an Elastic section."
+                )
+            if (
+                section is not None
+                and element.element_type == "dispBeamColumnInt"
+                and section.section_type != "FiberInt"
+            ):
+                raise ValueError(
+                    f"dispBeamColumnInt element {element_tag} requires a "
+                    "FiberInt section."
                 )
             if (
                 section is not None
@@ -8802,6 +8947,22 @@ class ProjectDatabase:
                 int(element.transf_tag)
             )
             if transformation is not None:
+                if (
+                    element.element_type == "dispBeamColumnInt"
+                    and transformation.transformation_type != "LinearInt"
+                ):
+                    raise ValueError(
+                        f"dispBeamColumnInt element {element_tag} requires "
+                        "a LinearInt geometric transformation."
+                    )
+                if (
+                    element.element_type != "dispBeamColumnInt"
+                    and transformation.transformation_type == "LinearInt"
+                ):
+                    raise ValueError(
+                        "LinearInt geometric transformations are reserved "
+                        "for dispBeamColumnInt elements."
+                    )
                 self._validate_element_geometry(
                     element,
                     transformation=transformation,
@@ -9801,12 +9962,16 @@ class ProjectDatabase:
                 for tag in recorder.target_tags
                 if tag not in self.model.elements
                 or self.model.elements[tag].element_type
-                not in {"forceBeamColumn", "dispBeamColumn"}
+                not in {
+                    "forceBeamColumn",
+                    "dispBeamColumn",
+                    "dispBeamColumnInt",
+                }
             ]
             if incompatible:
                 raise ValueError(
-                    "Section/Fiber recorders require forceBeamColumn or "
-                    "dispBeamColumn element tag(s): "
+                    "Section/Fiber recorders require forceBeamColumn, "
+                    "dispBeamColumn, or dispBeamColumnInt element tag(s): "
                     + ", ".join(map(str, incompatible))
                 )
             too_short = [

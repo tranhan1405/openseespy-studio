@@ -9,6 +9,12 @@ Vec3 = Tuple[float, float, float]
 
 FRAME_ELEMENT_TYPES = {
     "elasticBeamColumn",
+    "ElasticTimoshenkoBeam",
+    "forceBeamColumn",
+    "dispBeamColumn",
+    "dispBeamColumnInt",
+}
+BEAM_INTEGRATION_ELEMENT_TYPES = {
     "forceBeamColumn",
     "dispBeamColumn",
 }
@@ -256,6 +262,7 @@ class Element:
     wall_nd_material_tags: tuple[int, ...] = ()
     wall_thick_mod: float = 0.63
     wall_poisson: float = 0.25
+    beam_center_ratio: float = 0.4
 
     @property
     def is_shell(self) -> bool:
@@ -749,6 +756,24 @@ class Element:
             self.wall_thick_mod = 0.63
             self.wall_poisson = 0.25
 
+        self.beam_center_ratio = float(self.beam_center_ratio)
+        if self.element_type == "dispBeamColumnInt":
+            if (
+                not math.isfinite(self.beam_center_ratio)
+                or not 0.0 <= self.beam_center_ratio <= 1.0
+            ):
+                raise ValueError(
+                    "dispBeamColumnInt center-of-rotation ratio cRot "
+                    "must satisfy 0 <= cRot <= 1."
+                )
+            if self.integration_points < 1:
+                raise ValueError(
+                    "dispBeamColumnInt needs at least one integration point."
+                )
+            self.consistent_mass = False
+        else:
+            self.beam_center_ratio = 0.4
+
         uses_section_reference = self.element_type not in (
             TRUSS_ELEMENT_TYPES
             | EMBEDDED_ELEMENT_TYPES
@@ -787,7 +812,7 @@ class Element:
         ):
             self.transf_tag = None
 
-        if self.element_type in FRAME_ELEMENT_TYPES and self.integration_type not in {
+        if self.element_type in BEAM_INTEGRATION_ELEMENT_TYPES and self.integration_type not in {
             "Lobatto",
             "Legendre",
             "Radau",
@@ -807,13 +832,13 @@ class Element:
             "HingeEndpoint",
         }
         if (
-            self.element_type in FRAME_ELEMENT_TYPES
+            self.element_type in BEAM_INTEGRATION_ELEMENT_TYPES
             and self.integration_type in {"Lobatto", "Legendre", "Radau"}
         ):
             if self.integration_points < 2:
                 raise ValueError("Beam integration needs at least 2 points.")
         elif (
-            self.element_type in FRAME_ELEMENT_TYPES
+            self.element_type in BEAM_INTEGRATION_ELEMENT_TYPES
             and self.integration_type in beam_hinge_types
         ):
             if (
@@ -827,7 +852,7 @@ class Element:
             if self.hinge_i_length < 0.0 or self.hinge_j_length < 0.0:
                 raise ValueError("Plastic hinge lengths cannot be negative.")
         elif (
-            self.element_type in FRAME_ELEMENT_TYPES
+            self.element_type in BEAM_INTEGRATION_ELEMENT_TYPES
             and self.integration_type == "ConcentratedPlasticity"
         ):
             if (
@@ -974,6 +999,7 @@ class StructuralModel:
         wall_nd_material_tags: tuple[int, ...] | list[int] = (),
         wall_thick_mod: float = 0.63,
         wall_poisson: float = 0.25,
+        beam_center_ratio: float = 0.4,
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -1039,6 +1065,14 @@ class StructuralModel:
         if is_solid and (self.ndm, self.ndf) != (3, 3):
             raise ValueError(
                 f"{element_type} requires ndm=3/ndf=3; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if (
+            element_type == "dispBeamColumnInt"
+            and (self.ndm, self.ndf) != (2, 3)
+        ):
+            raise ValueError(
+                "dispBeamColumnInt requires ndm=2/ndf=3; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
         if (
@@ -1227,6 +1261,7 @@ class StructuralModel:
             wall_nd_material_tags=tuple(wall_nd_material_tags),
             wall_thick_mod=wall_thick_mod,
             wall_poisson=wall_poisson,
+            beam_center_ratio=beam_center_ratio,
         )
         self.elements[tag] = ele
         return ele
@@ -1403,6 +1438,7 @@ class StructuralModel:
         interior_section_tag: int | None = None,
         hinge_i_length: float = 0.0,
         hinge_j_length: float = 0.0,
+        beam_center_ratio: float = 0.4,
     ) -> set[int]:
         updated: set[int] = set()
         for tag in element_tags:
@@ -1429,6 +1465,7 @@ class StructuralModel:
                 interior_section_tag=interior_section_tag,
                 hinge_i_length=hinge_i_length,
                 hinge_j_length=hinge_j_length,
+                beam_center_ratio=beam_center_ratio,
                 truss_area=element.truss_area,
                 truss_material_tag=element.truss_material_tag,
                 truss_do_rayleigh=element.truss_do_rayleigh,
@@ -1763,6 +1800,7 @@ class StructuralModel:
                     wall_nd_material_tags=source.wall_nd_material_tags,
                     wall_thick_mod=source.wall_thick_mod,
                     wall_poisson=source.wall_poisson,
+                    beam_center_ratio=source.beam_center_ratio,
                 )
                 created_elements.add(new_tag)
 
@@ -1847,6 +1885,7 @@ class StructuralModel:
                     ),
                     "wall_thick_mod": element.wall_thick_mod,
                     "wall_poisson": element.wall_poisson,
+                    "beam_center_ratio": element.beam_center_ratio,
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -1994,6 +2033,9 @@ class StructuralModel:
                 ),
                 wall_poisson=float(
                     item.get("wall_poisson", 0.25)
+                ),
+                beam_center_ratio=float(
+                    item.get("beam_center_ratio", 0.4)
                 ),
             )
 
