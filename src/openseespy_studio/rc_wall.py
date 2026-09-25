@@ -116,6 +116,8 @@ class RCWallBuildResult:
     web_vertical_node_tags: list[int] = field(default_factory=list)
     web_vertical_element_tags: list[int] = field(default_factory=list)
     embedded_coupling_element_tags: list[int] = field(default_factory=list)
+    web_vertical_selection_name: str = ""
+    embedded_coupling_selection_name: str = ""
     web_vertical_positions: tuple[float, ...] = ()
     web_vertical_actual_spacing: float = 0.0
     web_vertical_discrete_rho_y: float = 0.0
@@ -1084,11 +1086,27 @@ def build_rc_wall(
             )
         )
 
+    web_vertical_selection_name = ""
+    if web_vertical_element_tags:
+        web_vertical_selection_name = _unique_selection_name(
+            project,
+            f"{spec.name} · Vertical Web Bars",
+        )
+        project.add_selection_set(
+            SelectionSetData(
+                web_vertical_selection_name,
+                node_tags=set(web_vertical_node_tags),
+                element_tags=set(web_vertical_element_tags),
+            )
+        )
+
+    embedded_coupling_selection_name = ""
     if embedded_coupling_element_tags:
         coupling_selection_name = _unique_selection_name(
             project,
             f"{spec.name} · Embedded Coupling",
         )
+        embedded_coupling_selection_name = coupling_selection_name
         project.add_selection_set(
             SelectionSetData(
                 coupling_selection_name,
@@ -1123,6 +1141,8 @@ def build_rc_wall(
         web_vertical_node_tags=web_vertical_node_tags,
         web_vertical_element_tags=web_vertical_element_tags,
         embedded_coupling_element_tags=embedded_coupling_element_tags,
+        web_vertical_selection_name=web_vertical_selection_name,
+        embedded_coupling_selection_name=embedded_coupling_selection_name,
         web_vertical_positions=tuple(_web_vertical_positions(spec)),
         web_vertical_actual_spacing=float(
             _web_vertical_actual_spacing(spec)
