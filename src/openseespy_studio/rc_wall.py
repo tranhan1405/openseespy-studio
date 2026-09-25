@@ -883,6 +883,11 @@ def _validate(spec: RCWallSpec) -> None:
                 )
 
 
+def validate_rc_wall_spec(spec: RCWallSpec) -> None:
+    """Validate an RC-wall specification without mutating a project."""
+    _validate(spec)
+
+
 def _validate_append_location(
     project: ProjectDatabase,
     spec: RCWallSpec,
