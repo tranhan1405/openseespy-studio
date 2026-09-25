@@ -56,6 +56,8 @@ class RCWallPreview(QWidget):
         self.boundary_cover = 0.0
         self.web_horizontal_mode = "smeared"
         self.web_horizontal_layer_mode = "front_back"
+        self.detailed_annotations = False
+        self.warning_keys: set[str] = set()
         self.setMinimumHeight(190)
 
     def set_wall(
@@ -73,6 +75,8 @@ class RCWallPreview(QWidget):
         boundary_cover: float = 0.0,
         web_horizontal_mode: str = "smeared",
         web_horizontal_layer_mode: str = "front_back",
+        detailed_annotations: bool = False,
+        warning_keys: set[str] | None = None,
     ) -> None:
         self.width_value = max(float(width), 1.0e-12)
         self.height_value = max(float(height), 1.0e-12)
@@ -86,6 +90,8 @@ class RCWallPreview(QWidget):
         self.boundary_cover = max(float(boundary_cover), 0.0)
         self.web_horizontal_mode = str(web_horizontal_mode)
         self.web_horizontal_layer_mode = str(web_horizontal_layer_mode)
+        self.detailed_annotations = bool(detailed_annotations)
+        self.warning_keys = set(warning_keys or ())
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -126,7 +132,29 @@ class RCWallPreview(QWidget):
             QColor("#e7eef7"),
         )
 
-        painter.setPen(QPen(QColor("#49657f"), 1.2))
+        if "boundary" in self.warning_keys:
+            warning_pen = QPen(QColor("#c62828"), 2.4)
+            painter.setPen(warning_pen)
+            painter.drawRect(
+                int(left), int(top), int(boundary_px), int(wall_h)
+            )
+            painter.drawRect(
+                int(left + wall_w - boundary_px),
+                int(top),
+                int(boundary_px),
+                int(wall_h),
+            )
+
+        painter.setPen(
+            QPen(
+                QColor(
+                    "#c62828"
+                    if "geometry" in self.warning_keys
+                    else "#49657f"
+                ),
+                2.2 if "geometry" in self.warning_keys else 1.2,
+            )
+        )
         painter.drawRect(
             int(left), int(top), int(wall_w), int(wall_h)
         )
@@ -287,6 +315,54 @@ class RCWallPreview(QWidget):
                 f"{self.rows} MEFI rows · {self.fibers} fibers"
             ),
         )
+
+        if self.detailed_annotations:
+            # Boundary-width dimensions at the top of the wall.
+            boundary_dim_y = max(top - 25.0, 14.0)
+            painter.setPen(QPen(QColor("#52677b"), 1.0))
+            painter.drawLine(
+                int(left), int(boundary_dim_y),
+                int(left + boundary_px), int(boundary_dim_y),
+            )
+            painter.drawLine(
+                int(left + wall_w - boundary_px),
+                int(boundary_dim_y),
+                int(left + wall_w), int(boundary_dim_y),
+            )
+            painter.drawText(
+                int(left + 2.0),
+                int(boundary_dim_y - 3.0),
+                f"B={self.boundary_value:g}",
+            )
+            painter.drawText(
+                int(left + wall_w - boundary_px + 2.0),
+                int(boundary_dim_y - 3.0),
+                f"B={self.boundary_value:g}",
+            )
+
+            row_height = self.height_value / max(self.rows, 1)
+            painter.drawText(
+                int(left + wall_w + 8.0),
+                int(top + wall_h / 2.0),
+                f"Δh≈{row_height:g}",
+            )
+
+            if (
+                self.reinforcement_mode == "hybrid"
+                and self.boundary_bars
+            ):
+                painter.setPen(QPen(QColor("#d64545"), 1.0))
+                painter.drawText(
+                    int(left + 5.0),
+                    int(top + 16.0),
+                    f"cover={self.boundary_cover:g}",
+                )
+                painter.drawText(
+                    int(left + wall_w - boundary_px + 5.0),
+                    int(top + 16.0),
+                    f"{self.boundary_bars} bars",
+                )
+
         painter.end()
 
 
@@ -837,9 +913,25 @@ class RCWallWizard(QWizard):
         layout = QVBoxLayout(page)
 
         preview_row = QHBoxLayout()
+        preview_column = QVBoxLayout()
         self.final_preview = RCWallPreview()
-        self.final_preview.setMinimumSize(360, 320)
-        preview_row.addWidget(self.final_preview, 3)
+        self.final_preview.setMinimumSize(390, 350)
+        preview_column.addWidget(self.final_preview, 1)
+
+        self.preview_legend = QLabel(
+            "<b>Legend</b> · "
+            "<span style='color:#8fa3b5'>■</span> Concrete / web · "
+            "<span style='color:#7897b5'>■</span> Boundary zone · "
+            "<span style='color:#d64545'>━</span> Boundary bars · "
+            "<span style='color:#2f80c9'>━</span> Horizontal web bars · "
+            "<span style='color:#26394c'>━</span> MEFI mesh"
+        )
+        self.preview_legend.setWordWrap(True)
+        self.preview_legend.setStyleSheet(
+            "padding: 7px; background: #f7f9fb; color: #40566c;"
+        )
+        preview_column.addWidget(self.preview_legend)
+        preview_row.addLayout(preview_column, 3)
 
         summary_column = QVBoxLayout()
         self.preview_geometry_summary = QLabel()
@@ -855,6 +947,20 @@ class RCWallWizard(QWizard):
             "padding: 10px; background: #eef4fb; color: #26394c;"
         )
         summary_column.addWidget(self.preview_object_summary)
+
+        self.preview_material_summary = QLabel()
+        self.preview_material_summary.setWordWrap(True)
+        self.preview_material_summary.setStyleSheet(
+            "padding: 10px; background: #f7f9fb; color: #26394c;"
+        )
+        summary_column.addWidget(self.preview_material_summary)
+
+        self.preview_selection_summary = QLabel()
+        self.preview_selection_summary.setWordWrap(True)
+        self.preview_selection_summary.setStyleSheet(
+            "padding: 10px; background: #f7f9fb; color: #26394c;"
+        )
+        summary_column.addWidget(self.preview_selection_summary)
 
         self.preview_validation_status = QLabel()
         self.preview_validation_status.setWordWrap(True)
@@ -949,7 +1055,17 @@ class RCWallWizard(QWizard):
         )
         self.preview.set_wall(**preview_kwargs)
         if hasattr(self, "final_preview"):
-            self.final_preview.set_wall(**preview_kwargs)
+            warning_keys = set()
+            if hasattr(self, "_preview_validation_items"):
+                warning_keys = {
+                    key
+                    for key, _message in self._preview_validation_items()
+                }
+            self.final_preview.set_wall(
+                **preview_kwargs,
+                detailed_annotations=True,
+                warning_keys=warning_keys,
+            )
         self._update_reinforcement_info()
 
     def _from_mm(self, value_mm: float) -> float:
@@ -1288,22 +1404,28 @@ class RCWallWizard(QWizard):
             "fixed_nodes": 2,
         }
 
-    def _preview_validation_messages(self) -> list[str]:
-        messages: list[str] = []
+    def _preview_validation_items(
+        self,
+    ) -> list[tuple[str, str]]:
+        items: list[tuple[str, str]] = []
         width = float(self.width.value())
         height = float(self.height.value())
         thickness = float(self.thickness.value())
         boundary = float(self.boundary_width.value())
         if min(width, height, thickness) <= 0.0:
-            messages.append("Wall dimensions must be positive.")
+            items.append(
+                ("geometry", "Wall dimensions must be positive.")
+            )
         if not 0.0 < boundary < 0.5 * width:
-            messages.append(
-                "Boundary width must be positive and smaller than W/2."
-            )
+            items.append((
+                "boundary",
+                "Boundary width must be positive and smaller than W/2.",
+            ))
         if self.unconfined_layer.value() >= thickness:
-            messages.append(
-                "Boundary unconfined layer must be smaller than thickness."
-            )
+            items.append((
+                "boundary",
+                "Boundary unconfined layer must be smaller than thickness.",
+            ))
         if (
             not self.replace_geometry.isChecked()
             and (
@@ -1311,7 +1433,10 @@ class RCWallWizard(QWizard):
                 int(self.project.model.ndf),
             ) != (2, 3)
         ):
-            messages.append("Append mode requires an ndm=2 / ndf=3 model.")
+            items.append((
+                "domain",
+                "Append mode requires an ndm=2 / ndf=3 model.",
+            ))
 
         if self.reinforcement_mode.currentData() == "hybrid":
             count = int(self.boundary_bar_count.value())
@@ -1324,29 +1449,71 @@ class RCWallWizard(QWizard):
                 else float("inf")
             )
             if rho > float(self.rho_y_boundary.value()) / 100.0 + 1.0e-12:
-                messages.append(
-                    "Discrete boundary bars exceed total boundary rho-y."
-                )
+                items.append((
+                    "boundary",
+                    "Discrete boundary bars exceed total boundary rho-y.",
+                ))
             if (
                 self.boundary_layer_mode.currentData() == "front_back"
                 and count % 2
             ):
-                messages.append(
-                    "Front/back boundary layout needs an even bar count."
-                )
+                items.append((
+                    "boundary",
+                    "Front/back boundary layout needs an even bar count.",
+                ))
             if 2.0 * cover + diameter > boundary + 1.0e-12:
-                messages.append(
-                    "Boundary cover and bar diameter do not fit the zone."
-                )
+                items.append((
+                    "boundary",
+                    "Boundary cover and bar diameter do not fit the zone.",
+                ))
             if (
                 self.boundary_layer_mode.currentData() == "front_back"
                 and 2.0 * cover + diameter > thickness + 1.0e-12
             ):
-                messages.append(
-                    "Front/back cover and bar diameter do not fit thickness."
-                )
+                items.append((
+                    "boundary",
+                    "Front/back cover and bar diameter do not fit thickness.",
+                ))
 
-        return messages
+            if self.web_horizontal_mode.currentData() == "mesh_aligned":
+                h_diameter = float(
+                    self.web_horizontal_bar_diameter.value()
+                )
+                h_layers = (
+                    2
+                    if self.web_horizontal_layer_mode.currentData()
+                    == "front_back"
+                    else 1
+                )
+                h_lines = max(int(self.vertical_elements.value()) - 1, 0)
+                h_rho = (
+                    h_lines
+                    * h_layers
+                    * math.pi
+                    * h_diameter
+                    * h_diameter
+                    / 4.0
+                    / (height * thickness)
+                    if height > 0.0 and thickness > 0.0
+                    else float("inf")
+                )
+                available = min(
+                    float(self.rho_x_web.value()) / 100.0,
+                    float(self.rho_x_boundary.value()) / 100.0,
+                )
+                if h_rho > available + 1.0e-12:
+                    items.append((
+                        "web_rebar",
+                        "Discrete horizontal bars exceed available rho-x.",
+                    ))
+
+        return items
+
+    def _preview_validation_messages(self) -> list[str]:
+        return [
+            message
+            for _key, message in self._preview_validation_items()
+        ]
 
     def _update_review(self) -> None:
         if not hasattr(self, "review"):
@@ -1419,7 +1586,7 @@ class RCWallWizard(QWizard):
                 f"Mode = {mode}"
             )
             self.preview_object_summary.setText(
-                "<b>Will create</b><br>"
+                "<b>Objects to be created</b><br>"
                 f"Nodes: {counts['nodes']}<br>"
                 f"MEFI elements: {counts['mefi']}<br>"
                 f"Boundary bar elements: {counts['boundary_rebar']}<br>"
@@ -1433,15 +1600,53 @@ class RCWallWizard(QWizard):
                 f"Fixed base nodes: {counts['fixed_nodes']}"
             )
 
-            messages = self._preview_validation_messages()
+            truss_text = (
+                self.boundary_truss_type.currentText()
+                if reinforcement_mode == "hybrid"
+                else "—"
+            )
+            self.preview_material_summary.setText(
+                "<b>Materials & Sections</b><br>"
+                "Uniaxial: Steel02 ×3 · Concrete02 ×2<br>"
+                "nD: OrthotropicRAConcrete ×2 · "
+                "SmearedSteelDoubleLayer ×2<br>"
+                "Sections: RCLMS Web (1 layer) · "
+                "RCLMS Boundary (2 layers)<br>"
+                f"Discrete reinforcement formulation: {truss_text}"
+            )
+            selection_text = "Base · Top · MEFI"
+            if counts["discrete_rebar"]:
+                selection_text += " · Reinforcement"
+            self.preview_selection_summary.setText(
+                "<b>Selections & Boundary Conditions</b><br>"
+                f"Named selections: {selection_text}<br>"
+                "Base nodes: UX, UY, RZ fixed<br>"
+                "Top: two top wall nodes"
+            )
+
+            validation_items = self._preview_validation_items()
+            messages = [
+                message
+                for _key, message in validation_items
+            ]
             if messages:
                 self.preview_validation_status.setStyleSheet(
                     "padding: 9px; background: #fff0ee; color: #b42318; "
                     "font-weight: 600;"
                 )
+                category_labels = {
+                    "geometry": "Geometry",
+                    "boundary": "Boundary / reinforcement",
+                    "web_rebar": "Web reinforcement",
+                    "domain": "Project domain",
+                }
                 self.preview_validation_status.setText(
                     "<b>Preview check · needs attention</b><br>"
-                    + "<br>".join(f"• {message}" for message in messages)
+                    + "<br>".join(
+                        f"• <b>{category_labels.get(key, 'Model')}:</b> "
+                        f"{message}"
+                        for key, message in validation_items
+                    )
                 )
             else:
                 self.preview_validation_status.setStyleSheet(
@@ -1450,6 +1655,17 @@ class RCWallWizard(QWizard):
                 )
                 self.preview_validation_status.setText(
                     "✓ Preview check · Ready to create wall"
+                )
+
+            finish_button = self.button(
+                QWizard.WizardButton.FinishButton
+            )
+            if finish_button is not None:
+                finish_button.setEnabled(not messages)
+                finish_button.setToolTip(
+                    ""
+                    if not messages
+                    else "Resolve preview validation issues before creating."
                 )
 
             self.review.setText(
@@ -1469,5 +1685,12 @@ class RCWallWizard(QWizard):
                 "Complete the previous pages to preview the wall."
             )
             self.preview_object_summary.setText("")
+            self.preview_material_summary.setText("")
+            self.preview_selection_summary.setText("")
             self.preview_validation_status.setText("")
+            finish_button = self.button(
+                QWizard.WizardButton.FinishButton
+            )
+            if finish_button is not None:
+                finish_button.setEnabled(False)
             self.review.setText("")
