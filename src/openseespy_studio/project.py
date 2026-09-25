@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .model import (
+    BEARING_ELEMENT_TYPES,
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
@@ -64,7 +65,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 48
+PROJECT_FORMAT_VERSION = 49
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -6850,6 +6851,12 @@ class ProjectDatabase:
             for element in self.model.elements.values():
                 if element.truss_material_tag == original_tag:
                     element.truss_material_tag = material.tag
+                if element.element_type in BEARING_ELEMENT_TYPES:
+                    for key in (
+                        "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                    ):
+                        if element.special_parameters.get(key) == original_tag:
+                            element.special_parameters[key] = material.tag
                 if element.element_type in {"MVLEM", "MVLEM_3D"}:
                     element.wall_concrete_tags = tuple(
                         material.tag if int(tag) == original_tag else int(tag)
@@ -6933,6 +6940,22 @@ class ProjectDatabase:
                 )
             )
         )
+        dependent_bearings = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in BEARING_ELEMENT_TYPES
+                and tag in {
+                    int(value)
+                    for key in (
+                        "p_mat_tag", "t_mat_tag",
+                        "my_mat_tag", "mz_mat_tag"
+                    )
+                    for value in [element.special_parameters.get(key)]
+                    if value is not None
+                }
+            )
+        )
         dependent_connections = self.connections_using_material(tag)
         dependent_recorders = sorted(
             recorder.tag
@@ -6948,6 +6971,7 @@ class ProjectDatabase:
             or dependent_nd_materials
             or dependent_trusses
             or dependent_wall_elements
+            or dependent_bearings
             or dependent_connections
             or dependent_recorders
         ):
@@ -6974,6 +6998,11 @@ class ProjectDatabase:
                 details.append(
                     "wall macro-elements "
                     + ", ".join(map(str, dependent_wall_elements))
+                )
+            if dependent_bearings:
+                details.append(
+                    "bearing elements "
+                    + ", ".join(map(str, dependent_bearings))
                 )
             if dependent_connections:
                 details.append(
@@ -7464,6 +7493,8 @@ class ProjectDatabase:
         )
         length2 = sum(value * value for value in delta)
         if length2 <= 1.0e-24:
+            if element.element_type in BEARING_ELEMENT_TYPES:
+                return
             raise ValueError(
                 f"Element {element.tag} has coincident end nodes and zero length."
             )
@@ -8901,6 +8932,40 @@ class ProjectDatabase:
 
         element = self.model.elements[element_tag]
         self._validate_element_geometry(element)
+
+        if element.element_type in BEARING_ELEMENT_TYPES:
+            referenced = {
+                int(value)
+                for key in (
+                    "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                )
+                for value in [element.special_parameters.get(key)]
+                if value is not None
+            }
+            missing = sorted(
+                tag for tag in referenced if tag not in self.materials
+            )
+            if missing:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    "references missing uniaxial material tag(s): "
+                    + ", ".join(map(str, missing))
+                )
+            signature = (int(self.model.ndm), int(self.model.ndf))
+            if signature == (3, 6):
+                if (
+                    element.special_parameters.get("t_mat_tag") is None
+                    or element.special_parameters.get("my_mat_tag") is None
+                ):
+                    raise ValueError(
+                        "3D elastomericBearingPlasticity requires "
+                        "torsion and My material tags."
+                    )
+            elif signature != (2, 3):
+                raise ValueError(
+                    "elastomericBearingPlasticity requires a 2D/3DOF "
+                    "or 3D/6DOF model."
+                )
 
         if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
             material_tag = element.continuum_material_tag
