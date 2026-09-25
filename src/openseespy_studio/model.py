@@ -988,7 +988,11 @@ class Element:
                 raise ValueError(
                     f"{self.element_type} requires eight distinct node tags."
                 )
-        elif self.is_quad or self.is_embedded:
+        elif (
+            self.is_quad
+            or self.is_embedded
+            or self.element_type in BEAM_CONTACT_ELEMENT_TYPES
+        ):
             if self.k is None or self.l is None:
                 raise ValueError(
                     f"{self.element_type} requires four node tags."
