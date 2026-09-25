@@ -1530,6 +1530,7 @@ class PropertiesPanel(QWidget):
             "MemberForce",
             "ShellForce",
             "ShellDeformation",
+            "ShellDisplacement",
             "CrackPattern",
             "FiberStress",
             "FiberStrain",
@@ -1555,6 +1556,8 @@ class PropertiesPanel(QWidget):
             ]
         elif kind == "MemberForce":
             component_options = ["N", "Vy", "Vz", "T", "My", "Mz"]
+        elif kind == "ShellDisplacement":
+            component_options = ["|U|", "UX", "UY", "UZ"]
         elif kind == "ShellForce":
             component_options = [
                 "Nxx", "Nyy", "Nxy",
@@ -1582,13 +1585,21 @@ class PropertiesPanel(QWidget):
                 index if index >= 0 else 0
             )
 
-        if kind in {"DeformedShape", "MemberForce", "ModeShape", "Motion"}:
+        if kind in {
+            "DeformedShape",
+            "MemberForce",
+            "ModeShape",
+            "Motion",
+            "ShellDisplacement",
+        }:
             self._set_form_row_visible(self.result_scale, True)
             try:
                 self.result_scale.setValue(
                     float(options.get(
                         "scale",
-                        10.0 if kind == "DeformedShape" else 1.0,
+                        10.0
+                        if kind in {"DeformedShape", "ShellDisplacement"}
+                        else 1.0,
                     ))
                 )
             except (TypeError, ValueError):
@@ -1622,6 +1633,16 @@ class PropertiesPanel(QWidget):
             )
             self.result_smooth_curvature.setChecked(
                 bool(options.get("smooth_curvature", True))
+            )
+
+        if kind == "ShellDisplacement":
+            self._set_form_row_visible(self.result_display, True)
+            display_mode = str(
+                options.get("display_mode", "deformed_only")
+            )
+            index = self.result_display.findData(display_mode)
+            self.result_display.setCurrentIndex(
+                index if index >= 0 else 0
             )
 
         if kind == "ModeShape" or (
@@ -1707,10 +1728,17 @@ class PropertiesPanel(QWidget):
             "MemberForce",
             "ShellForce",
             "ShellDeformation",
+            "ShellDisplacement",
             "SectionResponse",
         }:
             settings["component"] = self.result_component.currentText()
-        if kind in {"DeformedShape", "MemberForce", "ModeShape", "Motion"}:
+        if kind in {
+            "DeformedShape",
+            "MemberForce",
+            "ModeShape",
+            "Motion",
+            "ShellDisplacement",
+        }:
             settings["scale"] = self.result_scale.value()
         if kind in {"DeformedShape", "ModeShape"}:
             settings["display_mode"] = str(
@@ -1721,6 +1749,10 @@ class PropertiesPanel(QWidget):
             )
             settings["smooth_curvature"] = (
                 self.result_smooth_curvature.isChecked()
+            )
+        if kind == "ShellDisplacement":
+            settings["display_mode"] = str(
+                self.result_display.currentData()
             )
         if kind == "ModeShape":
             settings["mode"] = self.result_mode.value()
@@ -2224,6 +2256,9 @@ class MainWindow(QMainWindow):
         )
         self.results_panel.node_contour_requested.connect(
             self._show_node_contour_result
+        )
+        self.results_panel.shell_displacement_requested.connect(
+            self._show_shell_displacement_result
         )
         self.results_panel.hinge_state_requested.connect(
             self._show_hinge_state_result
@@ -6290,6 +6325,7 @@ class MainWindow(QMainWindow):
                     "MemberForce": "result-member-force",
                     "ShellForce": "result-shell-force",
                     "ShellDeformation": "result-shell-deformation",
+                    "ShellDisplacement": "result-displacement",
                     "TimeHistory": "result-time-history",
                     "ForceDisplacement": "result-force-displacement",
                     "PushoverCurve": "result-pushover-curve",
@@ -6322,6 +6358,7 @@ class MainWindow(QMainWindow):
                     "MemberForce": "result-member-force",
                     "ShellForce": "result-shell-force",
                     "ShellDeformation": "result-shell-deformation",
+                    "ShellDisplacement": "result-displacement",
                     "TimeHistory": "result-time-history",
                     "ForceDisplacement": "result-force-displacement",
                     "PushoverCurve": "result-pushover-curve",
@@ -6402,6 +6439,7 @@ class MainWindow(QMainWindow):
                     "MemberForce": "result-member-force",
                     "ShellForce": "result-shell-force",
                     "ShellDeformation": "result-shell-deformation",
+                    "ShellDisplacement": "result-displacement",
                     "TimeHistory": "result-time-history",
                     "ForceDisplacement": "result-force-displacement",
                     "PushoverCurve": "result-pushover-curve",
@@ -14302,7 +14340,7 @@ class MainWindow(QMainWindow):
                     result.surface_scope
                     and set(result.surface_scope) == target_scope
                     and result.result_type
-                    in {"ShellForce", "ShellDeformation"}
+                    in {"ShellForce", "ShellDeformation", "ShellDisplacement"}
                 )
             ),
             key=lambda item: item.tag,
@@ -14400,7 +14438,7 @@ class MainWindow(QMainWindow):
                 if (
                     tag in result.surface_scope
                     and result.result_type
-                    in {"ShellForce", "ShellDeformation"}
+                    in {"ShellForce", "ShellDeformation", "ShellDisplacement"}
                 )
             ),
             key=lambda item: item.tag,
@@ -23998,7 +24036,11 @@ class MainWindow(QMainWindow):
             }
             elements = selected_mefi or set(mefi_tags)
 
-        elif kind in {"ShellForce", "ShellDeformation"}:
+        elif kind in {
+            "ShellForce",
+            "ShellDeformation",
+            "ShellDisplacement",
+        }:
             shell_tags = sorted(
                 int(tag)
                 for tag, element in self.model.elements.items()
@@ -25094,6 +25136,18 @@ class MainWindow(QMainWindow):
                 element_tags=elements or None,
                 cache_key=result_cache_key,
             )
+        elif result_type == "ShellDisplacement":
+            self.viewport.show_node_contour(
+                payload,
+                "Displacement",
+                str(options.get("component", "|U|")),
+                display_mode=str(
+                    options.get("display_mode", "deformed_only")
+                ),
+                deformation_scale=float(options.get("scale", 10.0)),
+                element_tags=elements or None,
+                cache_key=result_cache_key,
+            )
         elif result_type == "ShellForce":
             self.viewport.show_shell_force_contour(
                 payload,
@@ -25112,7 +25166,7 @@ class MainWindow(QMainWindow):
             crack_stats = self.viewport.show_crack_pattern(
                 payload,
                 accumulate=bool(options.get("accumulate", False)),
-                line_scale=float(options.get("line_scale", 0.82)),
+                line_scale=float(options.get("line_scale", 0.65)),
                 element_tags=elements or None,
                 cache_key=result_cache_key,
             )
@@ -33503,6 +33557,41 @@ class MainWindow(QMainWindow):
                 f"{crack_count}/{crack_panels} cracked · "
                 f"max epsilon1/epsilon_cr = {crack_ratio:.3f}"
             )
+
+    def _show_shell_displacement_result(
+        self,
+        component: str,
+        scale: float,
+        display_mode: str,
+        element_scope: object,
+    ) -> None:
+        if not self._last_result:
+            self._offer_result_analysis_run(
+                title="Shell Displacement",
+            )
+            return
+
+        elements: set[int] = set()
+        if isinstance(element_scope, (list, tuple, set)):
+            for raw_tag in element_scope:
+                try:
+                    elements.add(int(raw_tag))
+                except (TypeError, ValueError):
+                    continue
+
+        self.viewport.show_node_contour(
+            self._last_result,
+            "Displacement",
+            str(component),
+            display_mode=str(display_mode),
+            deformation_scale=float(scale),
+            element_tags=elements or None,
+            cache_key=self._last_result_cache_key,
+        )
+        self.status_message.setText(
+            f"Shell displacement fringe · {component} · "
+            f"{str(display_mode).replace('_', ' ')} · scale {float(scale):g}"
+        )
 
     def _show_node_contour_result(
         self,
