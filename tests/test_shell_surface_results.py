@@ -91,6 +91,53 @@ def test_managed_surface_result_round_trips_with_geometry_scope():
     assert item.settings["component"] == "Nxx"
 
 
+def test_managed_surface_principal_strain_location_round_trips():
+    project = _project()
+    result = SolutionResultData(
+        1,
+        1,
+        "Panel principal strain top",
+        "ShellDeformation",
+        surface_scope=[1],
+        settings={"component": "E1", "location": "top"},
+    )
+    project.add_solution_result(result)
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    item = restored.solution_results[1]
+    assert item.result_type == "ShellDeformation"
+    assert item.settings["component"] == "E1"
+    assert item.settings["location"] == "top"
+    assert item.element_scope == sorted(
+        restored.surfaces[1].generated_element_tags
+    )
+
+
+def test_managed_surface_shell_displacement_round_trips():
+    project = _project()
+    result = SolutionResultData(
+        1,
+        1,
+        "Panel displacement",
+        "ShellDisplacement",
+        surface_scope=[1],
+        settings={
+            "component": "|U|",
+            "scale": 10.0,
+            "display_mode": "deformed_only",
+        },
+    )
+    project.add_solution_result(result)
+
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    item = restored.solution_results[1]
+    assert item.result_type == "ShellDisplacement"
+    assert item.settings["component"] == "|U|"
+    assert item.element_scope == sorted(
+        restored.surfaces[1].generated_element_tags
+    )
+
+
 def test_remesh_rebinds_managed_shell_result_scope():
     project = _project(divisions_u=1, divisions_v=1)
     result = SolutionResultData(
@@ -233,4 +280,8 @@ def test_managed_surface_result_ui_locks_fe_scope_and_exposes_geometry_route():
     assert "Managed Shell results" in surface_properties
     assert "managed_surface_scope = bool(result.surface_scope)" in result_panel
     assert "result_use_selection.setEnabled(not managed_surface_scope)" in result_panel
-    assert "ShellForce" in dialog and "ShellDeformation" in dialog
+    assert "ShellForce" in dialog
+    assert "ShellDeformation" in dialog
+    assert "ShellDisplacement" in dialog
+    assert "E1" in dialog and "E2" in dialog
+    assert "Top (+z)" in dialog and "Bottom (-z)" in dialog
