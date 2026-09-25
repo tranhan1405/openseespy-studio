@@ -267,3 +267,38 @@ def test_triple_friction_pendulum_dialog_uses_opensees_semantic_labels():
         assert "Ubar1/Ubar2/Ubar3" in dialog.note.text()
     finally:
         _close(dialog)
+
+
+
+def test_tfp_auto_selects_single_available_dependencies():
+    materials = {
+        1: MaterialData(
+            1,
+            "Elastic",
+            "Elastic",
+            {"E": 1.0e8},
+        )
+    }
+    friction_models = {
+        2: FrictionModelData(
+            2,
+            "PTFE",
+            "Coulomb",
+            {"mu": 0.05},
+        )
+    }
+    dialog = TripleFrictionPendulumDialog(
+        tag=10,
+        node_i=1,
+        node_j=2,
+        materials=materials,
+        friction_models=friction_models,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        assert [combo.currentData() for combo in dialog.friction] == [2, 2, 2]
+        assert [combo.currentData() for combo in dialog.materials] == [1, 1, 1, 1]
+        assert "force/length" in dialog.kvt.toolTip()
+        assert "backward-compatible" in dialog.lengths["d1"].toolTip()
+    finally:
+        _close(dialog)
