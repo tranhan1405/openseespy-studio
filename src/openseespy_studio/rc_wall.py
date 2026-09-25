@@ -28,6 +28,16 @@ class RCWallSpec:
     vertical_elements: int = 7
     macro_fibers: int = 8
 
+    # Wall formulation selected by the unified RC Wall Wizard. MEFI remains
+    # the default/backward-compatible detailed formulation. The two 2D macro
+    # formulations use one centerline node chain and the same wall geometry.
+    formulation: str = "MEFI"
+    macro_center_ratio: float = 0.4
+    macro_density: float = 0.0
+    macro_shear_material_tag: int | None = None
+    macro_web_fsam_tag: int | None = None
+    macro_boundary_fsam_tag: int | None = None
+
     # Benchmark-inspired constitutive inputs, stored in SI stress units.
     steel_E: float = 200.0e9
     steel_fx: float = 469.93e6
@@ -941,12 +951,290 @@ def _unique_selection_name(
     return f"{candidate} {index}"
 
 
+def build_rc_wall_macro_2d(
+    project: ProjectDatabase,
+    spec: RCWallSpec,
+) -> RCWallBuildResult:
+    """Build a stacked 2D MVLEM or SFI_MVLEM wall from wizard geometry."""
+
+    _validate(spec)
+    formulation = str(spec.formulation).strip()
+    if formulation not in {"MVLEM", "SFI_MVLEM"}:
+        raise ValueError(
+            "2D macro wall builder requires MVLEM or SFI_MVLEM."
+        )
+    if not 0.0 <= float(spec.macro_center_ratio) <= 1.0:
+        raise ValueError("Wall center-of-rotation ratio must be in [0, 1].")
+    if float(spec.macro_density) < 0.0:
+        raise ValueError("Wall macro-element density cannot be negative.")
+
+    if spec.replace_geometry:
+        project.clear_model_linked_data()
+        project.model.clear()
+        project.model.ndm = 2
+        project.model.ndf = 3
+    elif (int(project.model.ndm), int(project.model.ndf)) != (2, 3):
+        raise ValueError(
+            "Appending a 2D macro wall requires an ndm=2/ndf=3 model."
+        )
+
+    model = project.model
+    rows = int(spec.vertical_elements)
+    center_x = float(spec.origin_x) + 0.5 * float(spec.width)
+    candidate_points = [
+        (
+            center_x,
+            float(spec.origin_y) + float(spec.height) * row / rows,
+            0.0,
+        )
+        for row in range(rows + 1)
+    ]
+    if not spec.replace_geometry:
+        span = max(float(spec.width), float(spec.height), 1.0)
+        tolerance2 = (1.0e-9 * span) ** 2
+        coordinates = [
+            tuple(float(value) for value in node.xyz)
+            for node in model.nodes.values()
+        ]
+        for point in candidate_points:
+            if any(
+                sum(
+                    (point[index] - existing[index]) ** 2
+                    for index in range(3)
+                ) <= tolerance2
+                for existing in coordinates
+            ):
+                raise ValueError(
+                    "Append macro-wall centerline overlaps an existing node "
+                    f"near ({point[0]:g}, {point[1]:g})."
+                )
+
+    material_tags: list[int] = []
+    nd_material_tags: list[int] = []
+    shear_tag: int | None = None
+    web_concrete = boundary_concrete = None
+    web_steel = boundary_steel = None
+    web_fsam = boundary_fsam = None
+
+    if formulation == "MVLEM":
+        if spec.macro_shear_material_tag is None:
+            raise ValueError(
+                "MVLEM requires an existing uniaxial shear material."
+            )
+        shear_tag = int(spec.macro_shear_material_tag)
+        if shear_tag not in project.materials:
+            raise ValueError(
+                f"MVLEM shear material {shear_tag} does not exist."
+            )
+
+        created = _next_tags(project.materials, 4)
+        web_steel, boundary_steel, web_concrete, boundary_concrete = created
+        steel_common = {
+            "E0": float(spec.steel_E),
+            "R0": 20.0,
+            "cR1": 0.925,
+            "cR2": 0.15,
+        }
+        project.add_material(
+            MaterialData(
+                web_steel,
+                f"{spec.name} · MVLEM Steel Web",
+                "Steel02",
+                parameters={
+                    **steel_common,
+                    "Fy": float(spec.steel_fy_web),
+                    "b": float(spec.steel_by_web),
+                },
+            )
+        )
+        project.add_material(
+            MaterialData(
+                boundary_steel,
+                f"{spec.name} · MVLEM Steel Boundary",
+                "Steel02",
+                parameters={
+                    **steel_common,
+                    "Fy": float(spec.steel_fy_boundary),
+                    "b": float(spec.steel_by_boundary),
+                },
+            )
+        )
+        project.add_material(
+            MaterialData(
+                web_concrete,
+                f"{spec.name} · MVLEM Concrete Web",
+                "Concrete02",
+                parameters={
+                    "fpc": float(spec.concrete_fc_web),
+                    "epsc0": float(spec.concrete_eps_web),
+                    "fpcu": float(spec.concrete_fcu_web),
+                    "epsU": float(spec.concrete_epsu_web),
+                    "lambda": float(spec.concrete_lambda),
+                    "ft": float(spec.concrete_ft),
+                    "Ets": float(spec.concrete_ets_web),
+                },
+            )
+        )
+        project.add_material(
+            MaterialData(
+                boundary_concrete,
+                f"{spec.name} · MVLEM Concrete Boundary",
+                "Concrete02",
+                parameters={
+                    "fpc": float(spec.concrete_fc_boundary),
+                    "epsc0": float(spec.concrete_eps_boundary),
+                    "fpcu": float(spec.concrete_fcu_boundary),
+                    "epsU": float(spec.concrete_epsu_boundary),
+                    "lambda": float(spec.concrete_lambda),
+                    "ft": float(spec.concrete_ft),
+                    "Ets": float(spec.concrete_ets_boundary),
+                },
+            )
+        )
+        material_tags = list(created)
+    else:
+        if spec.macro_web_fsam_tag is None or spec.macro_boundary_fsam_tag is None:
+            raise ValueError(
+                "SFI_MVLEM requires existing FSAM materials for web and "
+                "boundary macro-fibers."
+            )
+        web_fsam = int(spec.macro_web_fsam_tag)
+        boundary_fsam = int(spec.macro_boundary_fsam_tag)
+        for tag, role in (
+            (web_fsam, "web"),
+            (boundary_fsam, "boundary"),
+        ):
+            material = project.nd_materials.get(tag)
+            if material is None:
+                raise ValueError(
+                    f"SFI_MVLEM {role} FSAM material {tag} does not exist."
+                )
+            if material.material_type != "FSAM":
+                raise ValueError(
+                    f"SFI_MVLEM {role} material {tag} must be FSAM, got "
+                    f"{material.material_type}."
+                )
+        nd_material_tags = sorted({web_fsam, boundary_fsam})
+
+    first_node = model.next_node_tag()
+    node_tags: list[int] = []
+    for row, point in enumerate(candidate_points):
+        tag = first_node + row
+        while tag in model.nodes:
+            tag += 1
+        model.add_node(tag, *point)
+        node_tags.append(tag)
+        first_node = tag + 1
+    model.nodes[node_tags[0]].fixity = (1, 1, 1)
+
+    n_fib = int(spec.macro_fibers)
+    web_count = n_fib - 2
+    web_width = (
+        float(spec.width) - 2.0 * float(spec.boundary_width)
+    ) / web_count
+    widths = (
+        float(spec.boundary_width),
+        *([web_width] * web_count),
+        float(spec.boundary_width),
+    )
+    thicknesses = tuple(float(spec.thickness) for _ in range(n_fib))
+
+    if formulation == "MVLEM":
+        rhos = (
+            float(spec.rho_y_boundary),
+            *([float(spec.rho_y_web)] * web_count),
+            float(spec.rho_y_boundary),
+        )
+        concrete_tags = (
+            int(boundary_concrete),
+            *([int(web_concrete)] * web_count),
+            int(boundary_concrete),
+        )
+        steel_tags = (
+            int(boundary_steel),
+            *([int(web_steel)] * web_count),
+            int(boundary_steel),
+        )
+        fsam_tags: tuple[int, ...] = ()
+    else:
+        rhos = ()
+        concrete_tags = ()
+        steel_tags = ()
+        fsam_tags = (
+            int(boundary_fsam),
+            *([int(web_fsam)] * web_count),
+            int(boundary_fsam),
+        )
+
+    first_element = project.next_element_tag()
+    element_tags: list[int] = []
+    next_element = first_element
+    for row in range(rows):
+        while next_element in model.elements or next_element in project.connections:
+            next_element += 1
+        kwargs = dict(
+            element_type=formulation,
+            group="rc-wall-macro",
+            wall_center_ratio=float(spec.macro_center_ratio),
+            wall_density=float(spec.macro_density)
+            if formulation == "MVLEM"
+            else 0.0,
+            wall_thicknesses=thicknesses,
+            wall_widths=widths,
+            wall_rhos=rhos,
+            wall_concrete_tags=concrete_tags,
+            wall_steel_tags=steel_tags,
+            wall_shear_tag=shear_tag,
+            wall_nd_material_tags=fsam_tags,
+        )
+        model.add_element(
+            next_element,
+            node_tags[row],
+            node_tags[row + 1],
+            **kwargs,
+        )
+        project.validate_element_state(next_element)
+        element_tags.append(next_element)
+        next_element += 1
+
+    selection_set_names = (
+        _unique_selection_name(project, f"{spec.name} · Base"),
+        _unique_selection_name(project, f"{spec.name} · Top"),
+        _unique_selection_name(project, f"{spec.name} · {formulation}"),
+    )
+    project.add_selection_set(
+        SelectionSetData(selection_set_names[0], node_tags={node_tags[0]})
+    )
+    project.add_selection_set(
+        SelectionSetData(selection_set_names[1], node_tags={node_tags[-1]})
+    )
+    project.add_selection_set(
+        SelectionSetData(
+            selection_set_names[2],
+            element_tags=set(element_tags),
+        )
+    )
+
+    return RCWallBuildResult(
+        node_tags=node_tags,
+        element_tags=element_tags,
+        material_tags=material_tags,
+        nd_material_tags=nd_material_tags,
+        top_node_tags=(node_tags[-1], node_tags[-1]),
+        selection_set_names=selection_set_names,
+    )
+
+
 def build_rc_wall(
     project: ProjectDatabase,
     spec: RCWallSpec,
 ) -> RCWallBuildResult:
     """Build a planar cantilever RC wall using the OpenSees MEFI workflow."""
 
+    if str(spec.formulation).strip() != "MEFI":
+        raise ValueError(
+            "Detailed RC wall builder requires formulation='MEFI'."
+        )
     _validate(spec)
 
     if spec.replace_geometry:
