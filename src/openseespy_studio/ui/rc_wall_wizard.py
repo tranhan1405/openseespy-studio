@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -357,6 +359,23 @@ class RCWallWizard(QWizard):
         self.rho_x_boundary = _double(0.82, 0.0, 100.0, 4)
         self.rho_y_boundary = _double(3.23, 0.0, 100.0, 4)
 
+        self.reinforcement_mode = QComboBox()
+        self.reinforcement_mode.addItem(
+            "Smeared · RCLMS only",
+            "smeared",
+        )
+        self.reinforcement_mode.addItem(
+            "Hybrid · discrete boundary longitudinal steel",
+            "hybrid",
+        )
+        self.boundary_bar_count = QSpinBox()
+        self.boundary_bar_count.setRange(1, 200)
+        self.boundary_bar_count.setValue(4)
+        self.boundary_bar_diameter = _double(16.0, 1.0e-9)
+        self.boundary_truss_type = QComboBox()
+        self.boundary_truss_type.addItem("CorotTruss", "corotTruss")
+        self.boundary_truss_type.addItem("Truss", "truss")
+
         form.addRow(f"Steel modulus Es [{stress}]:", self.steel_E)
         form.addRow(f"Steel X fy [{stress}]:", self.fy_x)
         form.addRow(f"Steel Y web fy [{stress}]:", self.fy_y_web)
@@ -367,12 +386,28 @@ class RCWallWizard(QWizard):
         form.addRow("Web ρx [%]:", self.rho_x_web)
         form.addRow("Web ρy [%]:", self.rho_y_web)
         form.addRow("Boundary ρx [%]:", self.rho_x_boundary)
-        form.addRow("Boundary ρy [%]:", self.rho_y_boundary)
+        form.addRow("Boundary ρy total [%]:", self.rho_y_boundary)
+        form.addRow("Reinforcement model:", self.reinforcement_mode)
+        form.addRow(
+            "Longitudinal bars / boundary zone:",
+            self.boundary_bar_count,
+        )
+        form.addRow(
+            f"Boundary bar diameter [{self.units.length}]:",
+            self.boundary_bar_diameter,
+        )
+        form.addRow(
+            "Discrete element formulation:",
+            self.boundary_truss_type,
+        )
 
         note = QLabel(
-            "Direction 1 is horizontal and direction 2 is vertical; "
-            "orientation is generated as 0 rad. Separate vertical steel "
-            "materials are created for web and boundary zones."
+            "Hybrid V1 moves part of boundary vertical steel from the "
+            "smeared RCLMS ratio into discrete Truss/CorotTruss elements. "
+            "The discrete bars share the MEFI edge nodes (perfect bond), and "
+            "SARE automatically subtracts their area from boundary rho-y to "
+            "avoid double-counting. V1 is edge-lumped: one truss line per "
+            "boundary represents the total selected bar area."
         )
         note.setWordWrap(True)
         note.setStyleSheet(
@@ -389,12 +424,34 @@ class RCWallWizard(QWizard):
             self.rho_y_web,
             self.rho_x_boundary,
             self.rho_y_boundary,
+            self.boundary_bar_count,
+            self.boundary_bar_diameter,
         ):
             widget.valueChanged.connect(
                 lambda _value: self._mark_custom()
             )
+        self.reinforcement_mode.currentIndexChanged.connect(
+            self._reinforcement_mode_changed
+        )
+        self.boundary_truss_type.currentIndexChanged.connect(
+            lambda _index: self._mark_custom()
+        )
+        self._sync_reinforcement_mode()
 
         self.addPage(page)
+
+    def _reinforcement_mode_changed(self, *_args) -> None:
+        self._mark_custom()
+        self._sync_reinforcement_mode()
+
+    def _sync_reinforcement_mode(self) -> None:
+        enabled = (
+            str(self.reinforcement_mode.currentData()) == "hybrid"
+        )
+        self.boundary_bar_count.setEnabled(enabled)
+        self.boundary_bar_diameter.setEnabled(enabled)
+        self.boundary_truss_type.setEnabled(enabled)
+        self._update_review()
 
     def _build_review_page(self) -> None:
         page = QWizardPage()
@@ -493,6 +550,19 @@ class RCWallWizard(QWizard):
         self.rho_y_web.setValue(0.27)
         self.rho_x_boundary.setValue(0.82)
         self.rho_y_boundary.setValue(3.23)
+        smeared_index = self.reinforcement_mode.findData("smeared")
+        if smeared_index >= 0:
+            self.reinforcement_mode.blockSignals(True)
+            self.reinforcement_mode.setCurrentIndex(smeared_index)
+            self.reinforcement_mode.blockSignals(False)
+        self.boundary_bar_count.setValue(4)
+        self.boundary_bar_diameter.setValue(self._from_mm(16.0))
+        corot_index = self.boundary_truss_type.findData("corotTruss")
+        if corot_index >= 0:
+            self.boundary_truss_type.blockSignals(True)
+            self.boundary_truss_type.setCurrentIndex(corot_index)
+            self.boundary_truss_type.blockSignals(False)
+        self._sync_reinforcement_mode()
         self._applying_preset = False
         benchmark_index = self.preset.findData("rw-a20")
         if benchmark_index >= 0:
@@ -542,6 +612,16 @@ class RCWallWizard(QWizard):
             rho_y_web=float(self.rho_y_web.value()) / 100.0,
             rho_x_boundary=float(self.rho_x_boundary.value()) / 100.0,
             rho_y_boundary=float(self.rho_y_boundary.value()) / 100.0,
+            reinforcement_mode=str(
+                self.reinforcement_mode.currentData()
+            ),
+            boundary_bar_count=int(self.boundary_bar_count.value()),
+            boundary_bar_diameter=float(
+                self.boundary_bar_diameter.value()
+            ),
+            boundary_truss_type=str(
+                self.boundary_truss_type.currentData()
+            ),
             boundary_unconfined_thickness=unconfined,
             boundary_confined_thickness=confined,
             name=self.wall_name.text().strip() or "RC Wall",
@@ -617,6 +697,25 @@ class RCWallWizard(QWizard):
                         raise ValueError(
                             f"{label} must be between 0 and 100%."
                         )
+                if self.reinforcement_mode.currentData() == "hybrid":
+                    diameter = float(self.boundary_bar_diameter.value())
+                    count = int(self.boundary_bar_count.value())
+                    gross = (
+                        float(self.boundary_width.value())
+                        * float(self.thickness.value())
+                    )
+                    discrete_ratio = (
+                        count * math.pi * diameter * diameter / 4.0 / gross
+                    )
+                    total_ratio = (
+                        float(self.rho_y_boundary.value()) / 100.0
+                    )
+                    if discrete_ratio > total_ratio + 1.0e-12:
+                        raise ValueError(
+                            "Discrete boundary bars exceed total boundary "
+                            "rho-y. Reduce bar count/diameter or increase "
+                            "boundary rho-y."
+                        )
             else:
                 self.data()
         except ValueError as exc:
@@ -646,6 +745,33 @@ class RCWallWizard(QWizard):
                 if self.replace_geometry.isChecked()
                 else "Append to current 2D model"
             )
+            reinforcement_mode = str(
+                self.reinforcement_mode.currentData()
+            )
+            reinforcement_text = "Smeared reinforcement only"
+            if reinforcement_mode == "hybrid":
+                diameter = float(self.boundary_bar_diameter.value())
+                bars = int(self.boundary_bar_count.value())
+                discrete_area = bars * math.pi * diameter * diameter / 4.0
+                gross = (
+                    float(self.boundary_width.value())
+                    * float(self.thickness.value())
+                )
+                discrete_rho = (
+                    100.0 * discrete_area / gross
+                    if gross > 0.0 else 0.0
+                )
+                remaining = max(
+                    0.0,
+                    float(self.rho_y_boundary.value()) - discrete_rho,
+                )
+                reinforcement_text = (
+                    f"Hybrid · {bars} × Ø{diameter:g} per boundary zone "
+                    f"→ discrete rho-y {discrete_rho:.3g}% + "
+                    f"smeared remainder {remaining:.3g}% · "
+                    f"{self.boundary_truss_type.currentText()}"
+                )
+
             text = (
                 "<b>RC Wall V1 · MEFI / RCLMS</b><br><br>"
                 f"Name: {self.wall_name.text().strip() or 'RC Wall'}<br>"
@@ -657,10 +783,17 @@ class RCWallWizard(QWizard):
                 f"Macro-fibers: {count} · web fiber width "
                 f"{web_width:g} {self.units.length}<br>"
                 f"Mapping: <code>{mapping}</code><br>"
-                f"Mode: {mode}<br><br>"
+                f"Mode: {mode}<br>"
+                f"Reinforcement: {reinforcement_text}<br><br>"
                 "Generate chain:<br>"
                 "5 uniaxial materials → 4 nD materials → "
-                "2 RCLMS sections → MEFI wall mesh<br><br>"
+                "2 RCLMS sections → MEFI wall mesh"
+                + (
+                    " + discrete boundary truss lines"
+                    if reinforcement_mode == "hybrid"
+                    else ""
+                )
+                + "<br><br>"
                 "Base: both bottom nodes fixed in UX, UY and RZ.<br>"
                 "Named selections: Base · Top · MEFI."
             )
