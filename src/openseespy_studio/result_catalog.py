@@ -202,7 +202,7 @@ def result_choices_for_analysis(
             "Crack Pattern",
             {
                 "accumulate": False,
-                "line_scale": 0.82,
+                "line_scale": 0.65,
             },
         )
     )
