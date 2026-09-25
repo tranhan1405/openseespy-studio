@@ -5124,7 +5124,7 @@ class MainWindow(QMainWindow):
                         f"\n- ... {len(generated_errors) - 6} more error(s)"
                     )
                 raise ValueError(
-                    "Generated RC wall failed SARE Model Check:\n"
+                    "Generated RC wall failed FEWIZ Model Check:\n"
                     + preview
                 )
 
@@ -5222,7 +5222,7 @@ class MainWindow(QMainWindow):
                 if formulation == "MEFI"
                 else ""
             )
-            f"named selections: {named}"
+            + f"named selections: {named}"
         )
 
         # Update the Model Tree before touching VTK/PyVista.  If a graphics
@@ -5245,7 +5245,7 @@ class MainWindow(QMainWindow):
                 visible_tags = self.viewport._visible_element_tags()
             if not generated_tags.issubset(visible_tags):
                 raise RuntimeError(
-                    "generated MEFI elements are not in the FE viewport "
+                    f"generated {formulation} elements are not in the FE viewport "
                     "visibility set"
                 )
             self.viewport.plotter.render()
