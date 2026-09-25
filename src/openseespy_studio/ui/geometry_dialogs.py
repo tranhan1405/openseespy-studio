@@ -52,16 +52,49 @@ class _BaseDialog(QDialog):
 
 
 class NodeDialog(_BaseDialog):
-    def __init__(self, tag: int, parent=None):
+    def __init__(
+        self,
+        tag: int,
+        parent=None,
+        *,
+        default_ndf: int = 6,
+    ):
         super().__init__("Create Node", parent)
         self.tag = _tag_spin(tag)
         self.x = _coord_spin()
         self.y = _coord_spin()
         self.z = _coord_spin()
+        self.ndf = QComboBox()
+        for value in range(1, 7):
+            self.ndf.addItem(
+                (
+                    f"{value} DOF (model default)"
+                    if value == int(default_ndf)
+                    else f"{value} DOF"
+                ),
+                value,
+            )
+        index = self.ndf.findData(int(default_ndf))
+        if index >= 0:
+            self.ndf.setCurrentIndex(index)
         self.form.addRow("Tag:", self.tag)
         self.form.addRow("X:", self.x)
         self.form.addRow("Y:", self.y)
         self.form.addRow("Z:", self.z)
+        self.form.addRow("Node DOFs:", self.ndf)
+
+        note = QLabel(
+            "Most nodes should use the model default. A different node NDF "
+            "is mainly for mixed-DOF formulations such as BeamContact."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            "padding: 6px; background: #f3f6f9; color: #526476;"
+        )
+        self.root.insertWidget(1, note)
+
+    def node_ndf(self) -> int:
+        return int(self.ndf.currentData())
 
     def values(self):
         return self.tag.value(), self.x.value(), self.y.value(), self.z.value()
