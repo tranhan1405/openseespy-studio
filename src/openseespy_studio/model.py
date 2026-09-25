@@ -19,10 +19,13 @@ SHELL_ELEMENT_TYPES = {
     "ShellNLDKGQ",
 }
 MEMBRANE_ELEMENT_TYPES = {"MEFI"}
+TRUSS_ELEMENT_TYPES = {"truss", "corotTruss"}
 QUAD_ELEMENT_TYPES = SHELL_ELEMENT_TYPES | MEMBRANE_ELEMENT_TYPES
-SUPPORTED_ELEMENT_TYPES = FRAME_ELEMENT_TYPES | QUAD_ELEMENT_TYPES | {
-    "truss",
-}
+SUPPORTED_ELEMENT_TYPES = (
+    FRAME_ELEMENT_TYPES
+    | QUAD_ELEMENT_TYPES
+    | TRUSS_ELEMENT_TYPES
+)
 
 
 def _strict_int(value: object, label: str) -> int:
@@ -303,7 +306,7 @@ class Element:
                     self.truss_material_tag,
                     "Truss material tag",
                 )
-                if self.element_type == "truss"
+                if self.element_type in TRUSS_ELEMENT_TYPES
                 else int(self.truss_material_tag)
             )
         )
@@ -397,7 +400,7 @@ class Element:
             self.mefi_widths = ()
             self.mefi_section_tags = ()
 
-        uses_section_reference = self.element_type not in {"truss", "MEFI"}
+        uses_section_reference = self.element_type not in (TRUSS_ELEMENT_TYPES | {"MEFI"})
         uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
         self.section_tag = (
             None
@@ -812,7 +815,7 @@ class StructuralModel:
         for tag in element_tags:
             normalized_tag = _strict_int(tag, "Element tag")
             element = self.elements.get(normalized_tag)
-            if element is None or element.element_type == "truss":
+            if element is None or element.element_type in TRUSS_ELEMENT_TYPES:
                 continue
             element.section_tag = value
             assigned.add(element.tag)
@@ -823,7 +826,7 @@ class StructuralModel:
         element_tags: Iterable[int],
         material_tag: int | None,
     ) -> set[int]:
-        """Assign a uniaxial material only to Truss elements."""
+        """Assign a uniaxial material only to Truss/CorotTruss elements."""
         assigned: set[int] = set()
         value = (
             None
@@ -833,7 +836,7 @@ class StructuralModel:
         for tag in element_tags:
             normalized_tag = _strict_int(tag, "Element tag")
             element = self.elements.get(normalized_tag)
-            if element is None or element.element_type != "truss":
+            if element is None or element.element_type not in TRUSS_ELEMENT_TYPES:
                 continue
             element.truss_material_tag = value
             assigned.add(element.tag)
