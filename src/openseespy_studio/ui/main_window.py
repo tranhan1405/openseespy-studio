@@ -1180,9 +1180,9 @@ class PropertiesPanel(QWidget):
         self.result_shell_location.addItem("Top (+z)", "top")
         self.result_shell_location.addItem("Bottom (-z)", "bottom")
         self.result_shell_location.setToolTip(
-            "For Shell strain components, Top/Bottom follows OpenSees "
-            "plate-fiber kinematics ε(z)=ε0−zκ at z=±h/2 using the "
-            "assigned Shell section thickness."
+            "For membrane/principal Shell strain, Top/Bottom is derived "
+            "with the SARE display convention ε(z)=ε0+zκ at z=±h/2 "
+            "using the assigned Shell section thickness."
         )
         self.result_display = QComboBox()
         self.result_display.addItem("Deformed only", "deformed_only")
@@ -33657,7 +33657,7 @@ class MainWindow(QMainWindow):
                 except (TypeError, ValueError):
                     continue
 
-        self.viewport.show_shell_deformation_contour(
+        stats = self.viewport.show_shell_deformation_contour(
             self._last_result,
             str(component),
             location=str(location),
@@ -33673,8 +33673,16 @@ class MainWindow(QMainWindow):
             "top": "top (+z)",
             "bottom": "bottom (-z)",
         }.get(str(location), str(location))
+        rendered = int(stats.get("rendered_elements", 0))
+        missing = int(stats.get("missing_thickness", 0))
+        suffix = (
+            f" · {missing} shell(s) missing thickness"
+            if missing > 0
+            else ""
+        )
         self.status_message.setText(
-            f"Shell strain fringe · {label} · {location_label}"
+            f"Shell strain fringe · {label} · {location_label} · "
+            f"{rendered} element(s){suffix}"
         )
 
     def _show_shell_displacement_result(
