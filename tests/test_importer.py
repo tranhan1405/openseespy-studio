@@ -292,6 +292,42 @@ ops.element('Truss', 9, 1, 2, 0.005, 3)
     assert 3 in result.project.materials
 
 
+def test_safe_import_preserves_asd_embedded_node_element():
+    source = """
+import openseespy.opensees as ops
+ops.model('basic', '-ndm', 2, '-ndf', 3)
+ops.node(1, 0.0, 0.0)
+ops.node(2, 1.0, 0.0)
+ops.node(3, 0.0, 1.0)
+ops.node(4, 0.25, 0.25)
+ops.element(
+    'ASDEmbeddedNodeElement',
+    9,
+    4,
+    1,
+    2,
+    3,
+    '-rot',
+    '-K',
+    40000.0,
+)
+"""
+
+    result = import_openseespy_source(
+        source,
+        source_name="embedded_node.py",
+        units={"length": "mm", "force": "N", "time": "s"},
+    )
+
+    assert result.error_count == 0
+    element = result.project.model.elements[9]
+    assert element.element_type == "ASDEmbeddedNodeElement"
+    assert element.node_tags() == (4, 1, 2, 3)
+    assert element.embedded_constrain_rotation
+    # 40000 N/mm² = 40 GPa stored internally in SI Pa.
+    assert element.embedded_penalty == pytest.approx(40.0e9)
+
+
 def test_safe_import_preserves_corot_truss():
     source = """
 import openseespy.opensees as ops
