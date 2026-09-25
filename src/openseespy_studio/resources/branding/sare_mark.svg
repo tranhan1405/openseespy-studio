@@ -1,14 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="FEWIZ mark">
-  <rect x="12" y="12" width="232" height="232" rx="42" fill="#F7FAFC" stroke="#DCE5EE" stroke-width="2"/>
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M52 66 L88 188 L128 116 L168 188" stroke="#0B315C" stroke-width="13"/>
-    <path d="M168 188 L204 66" stroke="#E5252A" stroke-width="13"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="FEWIZ mesh W mark">
+  <defs>
+    <style>
+      .b{stroke:#0B5DAA}.c{stroke:#2D86D1}.o{stroke:#F28C00}.od{stroke:#C96E00}
+      .edge{fill:none;stroke-width:5.2;stroke-linecap:round;stroke-linejoin:round}
+      .cross{fill:none;stroke-width:3.2;stroke-linecap:round}
+    </style>
+  </defs>
+  <rect x="10" y="10" width="236" height="236" rx="44" fill="#0A2E55"/>
+  <g fill="#418BCA" fill-opacity=".28" stroke="none">
+    <path d="M42 64 59 84 77 150z"/><path d="M59 84 92 176 77 150z"/>
+    <path d="M77 150 92 176 130 120z"/><path d="M77 150 130 120 124 92z"/>
   </g>
-  <g fill="#F7FAFC" stroke="#0B315C" stroke-width="4">
-    <circle cx="52" cy="66" r="9"/>
-    <circle cx="88" cy="188" r="9"/>
-    <circle cx="168" cy="188" r="9"/>
+  <g fill="#F28C00" fill-opacity=".27" stroke="none">
+    <path d="M124 92 130 120 164 150z"/><path d="M130 120 180 176 164 150z"/>
+    <path d="M164 150 180 176 205 62z"/><path d="M180 176 220 82 205 62z"/>
   </g>
-  <circle cx="128" cy="116" r="8" fill="#2871B9" stroke="#2871B9" stroke-width="4"/>
-  <circle cx="204" cy="66" r="9" fill="#F7FAFC" stroke="#E5252A" stroke-width="4"/>
+  <path d="M42 64 77 150 124 92" class="edge" stroke="#fff"/>
+  <path d="M124 92 164 150 205 62" class="edge o"/>
+  <path d="M59 84 92 176 130 120" class="edge" stroke="#fff"/>
+  <path d="M130 120 180 176 220 82" class="edge o"/>
+  <path d="M42 64 59 84M77 150 92 176M124 92 130 120" class="cross c"/>
+  <path d="M164 150 180 176M205 62 220 82" class="cross od"/>
+  <path d="M59 84 77 150M77 150 130 120" class="cross c"/>
+  <path d="M130 120 164 150M164 150 220 82" class="cross od"/>
+  <g fill="#fff" stroke="#0B5DAA" stroke-width="2.2">
+    <circle cx="42" cy="64" r="5.2"/><circle cx="77" cy="150" r="5.2"/>
+    <circle cx="124" cy="92" r="5.2"/><circle cx="59" cy="84" r="5.2"/>
+    <circle cx="92" cy="176" r="5.2"/><circle cx="130" cy="120" r="5.2"/>
+  </g>
+  <g fill="#F28C00" stroke="#C96E00" stroke-width="2">
+    <circle cx="164" cy="150" r="5.2"/><circle cx="205" cy="62" r="5.2"/>
+    <circle cx="180" cy="176" r="5.2"/><circle cx="220" cy="82" r="5.2"/>
+  </g>
+  <path d="M218 29l4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="#F28C00"/>
 </svg>

@@ -15,6 +15,7 @@ PRODUCT_STAGE = "Beta"
 BRAND_NAVY = "#0B315C"
 BRAND_NAVY_DARK = "#082643"
 BRAND_RED = "#E5252A"
+BRAND_ORANGE = "#F28C00"
 BRAND_FIELD = "#F7FAFC"
 
 # Preserve the previous settings namespace so existing recent-project lists and

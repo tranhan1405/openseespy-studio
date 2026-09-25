@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="FEWIZ mesh W light mark">
+  <rect x="10" y="10" width="236" height="236" rx="44" fill="#F7FAFC" stroke="#DCE5EE" stroke-width="2"/>
+  <g fill="#0B5DAA" fill-opacity=".12"><path d="M42 64 59 84 77 150z"/><path d="M59 84 92 176 77 150z"/><path d="M77 150 92 176 130 120z"/><path d="M77 150 130 120 124 92z"/></g>
+  <g fill="#F28C00" fill-opacity=".15"><path d="M124 92 130 120 164 150z"/><path d="M130 120 180 176 164 150z"/><path d="M164 150 180 176 205 62z"/><path d="M180 176 220 82 205 62z"/></g>
+  <g fill="none" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M42 64 77 150 124 92M59 84 92 176 130 120" stroke="#0B315C"/>
+    <path d="M124 92 164 150 205 62M130 120 180 176 220 82" stroke="#F28C00"/>
+  </g>
+  <g fill="none" stroke-width="3.2" stroke-linecap="round">
+    <path d="M42 64 59 84M77 150 92 176M124 92 130 120M59 84 77 150M77 150 130 120" stroke="#2D86D1"/>
+    <path d="M164 150 180 176M205 62 220 82M130 120 164 150M164 150 220 82" stroke="#C96E00"/>
+  </g>
+  <g fill="#fff" stroke="#0B5DAA" stroke-width="2.2">
+    <circle cx="42" cy="64" r="5.2"/><circle cx="77" cy="150" r="5.2"/><circle cx="124" cy="92" r="5.2"/><circle cx="59" cy="84" r="5.2"/><circle cx="92" cy="176" r="5.2"/><circle cx="130" cy="120" r="5.2"/>
+  </g>
+  <g fill="#F28C00" stroke="#C96E00" stroke-width="2">
+    <circle cx="164" cy="150" r="5.2"/><circle cx="205" cy="62" r="5.2"/><circle cx="180" cy="176" r="5.2"/><circle cx="220" cy="82" r="5.2"/>
+  </g>
+  <path d="M218 29l4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="#F28C00"/>
+</svg>

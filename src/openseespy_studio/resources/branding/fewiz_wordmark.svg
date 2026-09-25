@@ -1,28 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 220" role="img" aria-label="FEWIZ wordmark">
-  <rect width="960" height="220" fill="white"/>
-  <g transform="translate(38 29)">
-    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M18 20 L45 150 L78 82 L111 150" stroke="#0B315C" stroke-width="10"/>
-      <path d="M111 150 L138 20" stroke="#E5252A" stroke-width="10"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 260" role="img" aria-label="FEWIZ — Finite Element Wizard">
+  <rect width="1100" height="260" fill="white"/>
+  <g transform="translate(22 18) scale(.82)">
+    <g fill="#0B5DAA" fill-opacity=".12"><path d="M42 64 59 84 77 150z"/><path d="M59 84 92 176 77 150z"/><path d="M77 150 92 176 130 120z"/><path d="M77 150 130 120 124 92z"/></g>
+    <g fill="#F28C00" fill-opacity=".15"><path d="M124 92 130 120 164 150z"/><path d="M130 120 180 176 164 150z"/><path d="M164 150 180 176 205 62z"/><path d="M180 176 220 82 205 62z"/></g>
+    <g fill="none" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M42 64 77 150 124 92M59 84 92 176 130 120" stroke="#0B315C"/>
+      <path d="M124 92 164 150 205 62M130 120 180 176 220 82" stroke="#F28C00"/>
     </g>
-    <g fill="white" stroke="#0B315C" stroke-width="3">
-      <circle cx="18" cy="20" r="7"/>
-      <circle cx="45" cy="150" r="7"/>
-      <circle cx="111" cy="150" r="7"/>
+    <g fill="none" stroke-width="3.2" stroke-linecap="round">
+      <path d="M42 64 59 84M77 150 92 176M124 92 130 120M59 84 77 150M77 150 130 120" stroke="#2D86D1"/>
+      <path d="M164 150 180 176M205 62 220 82M130 120 164 150M164 150 220 82" stroke="#C96E00"/>
     </g>
-    <circle cx="78" cy="82" r="7" fill="#2871B9"/>
-    <circle cx="138" cy="20" r="7" fill="white" stroke="#E5252A" stroke-width="3"/>
+    <g fill="#fff" stroke="#0B5DAA" stroke-width="2.2">
+      <circle cx="42" cy="64" r="5.2"/><circle cx="77" cy="150" r="5.2"/><circle cx="124" cy="92" r="5.2"/><circle cx="59" cy="84" r="5.2"/><circle cx="92" cy="176" r="5.2"/><circle cx="130" cy="120" r="5.2"/>
+    </g>
+    <g fill="#F28C00" stroke="#C96E00" stroke-width="2">
+      <circle cx="164" cy="150" r="5.2"/><circle cx="205" cy="62" r="5.2"/><circle cx="180" cy="176" r="5.2"/><circle cx="220" cy="82" r="5.2"/>
+    </g>
+    <path d="M218 29l4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="#F28C00"/>
   </g>
-  <text x="225" y="112"
-        font-family="Arial, Helvetica, sans-serif"
-        font-size="100" font-weight="800"
-        letter-spacing="4" fill="#0B315C">FEWIZ</text>
-  <text x="231" y="151"
-        font-family="Arial, Helvetica, sans-serif"
-        font-size="24" font-weight="600"
-        letter-spacing="5" fill="#52697D">FINITE ELEMENT WIZARD</text>
-  <text x="231" y="181"
-        font-family="Arial, Helvetica, sans-serif"
-        font-size="15" font-weight="700"
-        letter-spacing="2" fill="#2871B9">MODELING · ANALYSIS · RESULTS</text>
+  <text x="260" y="142" font-family="Arial, Helvetica, sans-serif" font-size="124" font-weight="800" letter-spacing="2">
+    <tspan fill="#0B5DAA">FE</tspan><tspan fill="#20272E">WIZ</tspan>
+  </text>
+  <text x="268" y="190" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="500" letter-spacing="7" fill="#465463">FINITE ELEMENT WIZARD</text>
 </svg>

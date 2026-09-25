@@ -3,54 +3,66 @@
 **FEWIZ** stands for **Finite Element Wizard**.
 
 FEWIZ is a structural finite-element modeling, analysis and results environment
-built around an automated **Wizard** workflow. In FEWIZ, a Wizard is not merely
-a Next/Back dialog: it is a parametric model builder that converts engineering
-inputs into model entities, previews the result, and creates the finite-element
-objects automatically.
+built around an automated **Wizard** workflow. In FEWIZ, a Wizard is a
+parametric model builder: engineering inputs are converted into model entities,
+previewed, then created automatically.
 
 The Python package and project format intentionally retain the historical
 `openseespy-studio` identifiers where changing them would break compatibility.
 
 ## Primary mark
 
-The application mark is a geometric **W** built from finite-element members and
-nodes. It deliberately looks like engineering/CAD geometry rather than an AI
-mascot or decorative illustration.
+The official FEWIZ mark is a **W-shaped finite-element mesh ribbon**.
 
-- Navy members and outlined nodes represent the FE model.
-- The blue central node provides the visual anchor.
-- One red terminal member indicates generated/active model content.
-- No gradients, magic wand, stars or sparkles are used.
+- The left/model side is navy and engineering blue.
+- The right side transitions to **Wizard orange**, representing geometry and
+  model content generated automatically by a Wizard.
+- Nodes, member edges, cross-members and triangular faces make the mark read as
+  an FE mesh rather than a generic connected-dot logo.
+- One small orange four-point spark is retained as the automation cue.
+- The app icon uses a dark navy field; light and monochrome marks are provided
+  for documentation and print use.
+- At 16-32 px the runtime icon simplifies the mesh automatically so the W
+  silhouette remains readable.
 
-The mark must remain recognizable at 16 x 16 px.
+This is the selected FEWIZ visual family. Avoid AI-style glow, 3-D rendering,
+heavy gradients, mascot imagery or decorative magic-wand graphics.
 
 ## Wordmark
 
-Use **FEWIZ** as the primary wordmark. When space permits, pair it with:
+Use **FEWIZ** as the primary wordmark, with **FE** in engineering blue and
+**WIZ** in charcoal. When space permits, pair it with:
 
-> Finite Element Wizard
+> FINITE ELEMENT WIZARD
 
-A useful product line is:
-
-> Build FE models, not commands.
-
-OpenSeesPy is the current backend, but it is not part of the primary product
-name so the FEWIZ identity remains independent of a single solver backend.
+The mesh mark may sit to the left of the wordmark for horizontal layouts or
+above it for vertical layouts.
 
 ## Core colors
 
-- FEWIZ Navy: `#0B315C`
-- Deep Navy: `#082643`
-- FE Node Blue: `#2871B9`
-- Generated/Active Red: `#E5252A`
+- FEWIZ Navy: `#0A2E55`
+- Structural Navy: `#0B315C`
+- Engineering Blue: `#0B5DAA`
+- Mesh Blue: `#2D86D1`
+- Wizard Orange: `#F28C00`
+- Dark Orange: `#C96E00`
+- Charcoal: `#20272E`
 - Light Field: `#F7FAFC`
 
 ## Usage
 
-- App icon: structural W made from FE nodes and members.
-- Ribbon/header: FEWIZ wordmark with the compact descriptor “Finite Element Wizard”.
+- App/taskbar icon: dark-field mesh W with the orange generated side.
+- Ribbon/header: horizontal FEWIZ wordmark.
+- Wizard commands: reuse the orange generation accent consistently so Wizard
+  functions are recognizable as one family.
 - About dialog: product name, description and current OpenSeesPy backend.
-- Wizard commands remain the signature automated model-generation workflow.
 - Technical/package identifiers may retain `openseespy-studio` for compatibility.
-- The legacy `sare_mark.svg` and `sare_wordmark.svg` paths are retained as
-  visual aliases during the transition so older references do not break.
+- The legacy `sare_mark.svg` and `sare_wordmark.svg` paths remain visual
+  aliases during the transition so older references do not break.
+
+## Assets
+
+- `fewiz_mark.svg` — primary dark-field app mark.
+- `fewiz_mark_light.svg` — light-background mark.
+- `fewiz_mark_mono.svg` — monochrome/print mark.
+- `fewiz_wordmark.svg` — horizontal wordmark.
