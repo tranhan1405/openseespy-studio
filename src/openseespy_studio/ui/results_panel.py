@@ -1224,6 +1224,11 @@ class ResultsPanel(QWidget):
                 self._sync_crack_table_frame(
                     self._motion_source_index(self._motion_frame_index)
                 )
+            # Selecting Crack Pattern must render the viewport immediately.
+            # Previously only the table was synchronized here; the crack
+            # overlay signal was emitted only after pressing Display or
+            # changing a crack control, leaving valid crack data invisible.
+            self._display_current_crack_frame()
             return
 
         if kind in {"FiberStress", "FiberStrain"}:
