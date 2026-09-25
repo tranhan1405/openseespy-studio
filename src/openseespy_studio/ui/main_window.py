@@ -81,6 +81,7 @@ from ..live_convergence import parse_opensees_convergence_line
 from ..model import (
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
+    TRUSS_ELEMENT_TYPES,
     StructuralModel,
     classify_fixity,
     dof_is_rotation,
@@ -4724,6 +4725,7 @@ class MainWindow(QMainWindow):
             {"geometry_root"},
             {"mesh_root"},
             {"fe_model_root"},
+            {"reinforcement_root"},
             {"properties_root"},
             {"loads_bc_root"},
             {"mass_root"},
@@ -5632,6 +5634,86 @@ class MainWindow(QMainWindow):
             type_items[element_type] = item
             elements.addChild(item)
 
+        reinforcement_tags = sorted(
+            tag
+            for tag, element in self.model.elements.items()
+            if str(element.group).startswith("rc-wall-rebar")
+        )
+        if reinforcement_tags:
+            reinforcement_root = QTreeWidgetItem([
+                f"Reinforcement ({len(reinforcement_tags)})"
+            ])
+            reinforcement_root.setIcon(0, studio_icon("truss"))
+            reinforcement_root.setData(
+                0,
+                Qt.UserRole,
+                ("reinforcement_root", None),
+            )
+            reinforcement_root.setExpanded(True)
+            fe_model.addChild(reinforcement_root)
+
+            reinforcement_groups = (
+                ("left", "Boundary Bars · Left"),
+                ("right", "Boundary Bars · Right"),
+            )
+            grouped_reinforcement_tags: set[int] = set()
+            for side, label in reinforcement_groups:
+                tags = [
+                    tag
+                    for tag in reinforcement_tags
+                    if str(self.model.elements[tag].group).endswith(
+                        f"-{side}"
+                    )
+                ]
+                if not tags:
+                    continue
+                grouped_reinforcement_tags.update(tags)
+                group_item = QTreeWidgetItem([
+                    f"{label} ({len(tags)})"
+                ])
+                group_item.setIcon(0, studio_icon("truss"))
+                group_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("reinforcement_group", side),
+                )
+                group_item.setExpanded(True)
+                reinforcement_root.addChild(group_item)
+                for tag in tags:
+                    element = self.model.elements[tag]
+                    item = QTreeWidgetItem([
+                        f"Element {tag} · {element.element_type}"
+                    ])
+                    item.setIcon(0, studio_icon("truss"))
+                    item.setData(0, Qt.UserRole, ("element", tag))
+                    group_item.addChild(item)
+
+            other_tags = [
+                tag
+                for tag in reinforcement_tags
+                if tag not in grouped_reinforcement_tags
+            ]
+            if other_tags:
+                group_item = QTreeWidgetItem([
+                    f"Discrete Reinforcement ({len(other_tags)})"
+                ])
+                group_item.setIcon(0, studio_icon("truss"))
+                group_item.setData(
+                    0,
+                    Qt.UserRole,
+                    ("reinforcement_group", "other"),
+                )
+                group_item.setExpanded(True)
+                reinforcement_root.addChild(group_item)
+                for tag in other_tags:
+                    element = self.model.elements[tag]
+                    item = QTreeWidgetItem([
+                        f"Element {tag} · {element.element_type}"
+                    ])
+                    item.setIcon(0, studio_icon("truss"))
+                    item.setData(0, Qt.UserRole, ("element", tag))
+                    group_item.addChild(item)
+
         for tag in sorted(self.model.nodes):
             item = QTreeWidgetItem([f"Node {tag}"])
             item.setIcon(0, studio_icon("node"))
@@ -6531,6 +6613,7 @@ class MainWindow(QMainWindow):
         constraint_tag: int | None = None
         connection_tag: int | None = None
         element_type_group: str | None = None
+        reinforcement_group: str | None = None
         boundary_group: str | None = None
         boundary_node_tag: int | None = None
         connection_group: str | None = None
@@ -6641,6 +6724,24 @@ class MainWindow(QMainWindow):
                     )
             elif kind == "element_type_group":
                 element_type_group = str(tag)
+            elif kind == "reinforcement_group":
+                reinforcement_group = str(tag)
+                group_suffix = (
+                    f"-{reinforcement_group}"
+                    if reinforcement_group in {"left", "right"}
+                    else ""
+                )
+                elements.update(
+                    int(element_tag)
+                    for element_tag, element in self.model.elements.items()
+                    if (
+                        str(element.group).startswith("rc-wall-rebar")
+                        and (
+                            not group_suffix
+                            or str(element.group).endswith(group_suffix)
+                        )
+                    )
+                )
             elif kind == "boundary_group":
                 boundary_group = str(tag)
             elif kind == "connection_group":
@@ -6727,6 +6828,9 @@ class MainWindow(QMainWindow):
         fe_model_root_selected = selected_payload_kinds == {
             "fe_model_root"
         }
+        reinforcement_root_selected = selected_payload_kinds == {
+            "reinforcement_root"
+        }
         loads_bc_root_selected = selected_payload_kinds == {
             "loads_bc_root"
         }
@@ -6757,6 +6861,7 @@ class MainWindow(QMainWindow):
             geometry_root_selected
             or mesh_root_selected
             or fe_model_root_selected
+            or reinforcement_root_selected
             or loads_bc_root_selected
             or analyses_root_selected
             or properties_root_selected
@@ -6796,6 +6901,7 @@ class MainWindow(QMainWindow):
                 {"geometry_root"},
                 {"mesh_root"},
                 {"fe_model_root"},
+                {"reinforcement_root"},
                 {"properties_root"},
                 {"analyses_root"},
                 {"jobs_root"},
@@ -6950,6 +7056,10 @@ class MainWindow(QMainWindow):
             self._show_recorder_properties(recorder_tag)
         elif element_type_group is not None:
             self._show_element_type_group_properties(element_type_group)
+        elif reinforcement_group is not None:
+            self._show_reinforcement_group_properties(
+                reinforcement_group
+            )
         elif boundary_group is not None:
             self._show_boundary_group_properties(boundary_group)
         elif boundary_node_tag is not None:
@@ -7026,6 +7136,7 @@ class MainWindow(QMainWindow):
                 "mesh_root",
                 "nodes_root",
                 "elements_root",
+                "reinforcement_root",
                 "boundary_root",
                 "named_sets_root",
                 "line_meshes_root",
@@ -7051,6 +7162,10 @@ class MainWindow(QMainWindow):
                 elif root_kind == "fe_model_root":
                     self.status_message.setText(
                         "FE Model overview · base FE display"
+                    )
+                elif root_kind == "reinforcement_root":
+                    self.status_message.setText(
+                        "Reinforcement overview · discrete RC wall bars"
                     )
                 elif root_kind == "mass_root":
                     self.status_message.setText(
@@ -25882,6 +25997,51 @@ class MainWindow(QMainWindow):
                 ],
             )
             return
+        if kind == "reinforcement_root":
+            reinforcement = [
+                element
+                for element in self.model.elements.values()
+                if str(element.group).startswith("rc-wall-rebar")
+            ]
+            left = sum(
+                1
+                for element in reinforcement
+                if str(element.group).endswith("-left")
+            )
+            right = sum(
+                1
+                for element in reinforcement
+                if str(element.group).endswith("-right")
+            )
+            materials = {
+                int(element.truss_material_tag)
+                for element in reinforcement
+                if element.truss_material_tag is not None
+            }
+            formulations = {
+                str(element.element_type)
+                for element in reinforcement
+            }
+            self.properties_panel.set_properties(
+                "Discrete Reinforcement",
+                [
+                    ("Elements", len(reinforcement)),
+                    ("Left Boundary", left),
+                    ("Right Boundary", right),
+                    ("Materials", len(materials)),
+                    (
+                        "Formulations",
+                        ", ".join(sorted(formulations)) or "None",
+                    ),
+                    (
+                        "Viewport",
+                        "Shown"
+                        if self.viewport.display_option("reinforcement")
+                        else "Hidden",
+                    ),
+                ],
+            )
+            return
         if kind == "properties_root":
             self.properties_panel.set_properties(
                 "Properties",
@@ -26631,6 +26791,63 @@ class MainWindow(QMainWindow):
                 ("Assigned Sections", assigned_sections),
                 ("Assigned Transformations", assigned_transforms),
                 ("Assigned Truss Materials", assigned_materials),
+            ],
+        )
+
+    def _show_reinforcement_group_properties(
+        self,
+        side: str,
+    ) -> None:
+        """Show summary properties for one RC-wall discrete bar group."""
+        target = str(side)
+        suffix = (
+            f"-{target}"
+            if target in {"left", "right"}
+            else ""
+        )
+        elements = [
+            element
+            for element in self.model.elements.values()
+            if (
+                str(element.group).startswith("rc-wall-rebar")
+                and (
+                    not suffix
+                    or str(element.group).endswith(suffix)
+                )
+            )
+        ]
+        total_area = sum(
+            float(element.truss_area)
+            for element in elements
+        )
+        materials = {
+            int(element.truss_material_tag)
+            for element in elements
+            if element.truss_material_tag is not None
+        }
+        formulations = {
+            str(element.element_type)
+            for element in elements
+        }
+        label = (
+            target.title() + " Boundary"
+            if target in {"left", "right"}
+            else "Discrete Reinforcement"
+        )
+        self.properties_panel.set_properties(
+            f"Reinforcement · {label}",
+            [
+                ("Elements", len(elements)),
+                ("Total Element Area", f"{total_area:g}"),
+                ("Materials", len(materials)),
+                (
+                    "Formulations",
+                    ", ".join(sorted(formulations)) or "None",
+                ),
+                (
+                    "Perfect Bond",
+                    "Shared FE nodes",
+                ),
             ],
         )
 
@@ -28304,6 +28521,79 @@ class MainWindow(QMainWindow):
             exec_menu()
             return
 
+        if kind == "reinforcement_root":
+            tags = {
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if str(element.group).startswith("rc-wall-rebar")
+            }
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "reinforcement_root"
+                )
+            )
+            select_all = menu.addAction(
+                f"Select All Discrete Reinforcement ({len(tags)})"
+            )
+            select_all.setEnabled(bool(tags))
+            select_all.triggered.connect(
+                lambda: self.selection.set_selection(elements=tags)
+            )
+            menu.addSeparator()
+            visible = menu.addAction("Show Discrete Reinforcement")
+            visible.setCheckable(True)
+            visible.setChecked(
+                self.viewport.display_option("reinforcement")
+            )
+            visible.toggled.connect(
+                lambda checked:
+                self.viewport.set_display_option(
+                    "reinforcement",
+                    checked,
+                )
+            )
+            exec_menu()
+            return
+
+        if kind == "reinforcement_group":
+            side = str(value)
+            suffix = f"-{side}" if side in {"left", "right"} else ""
+            tags = {
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if (
+                    str(element.group).startswith("rc-wall-rebar")
+                    and (
+                        not suffix
+                        or str(element.group).endswith(suffix)
+                    )
+                )
+            }
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda checked=False, s=side:
+                self._show_reinforcement_group_properties(s)
+            )
+            select_all = menu.addAction(
+                f"Select Reinforcement ({len(tags)})"
+            )
+            select_all.setEnabled(bool(tags))
+            select_all.triggered.connect(
+                lambda checked=False, values=tags:
+                self.selection.set_selection(elements=values)
+            )
+            zoom = menu.addAction("Zoom to Reinforcement")
+            zoom.setEnabled(bool(tags))
+            zoom.triggered.connect(
+                lambda checked=False, values=tags: (
+                    self.selection.set_selection(elements=values),
+                    self._zoom_selection(),
+                )
+            )
+            exec_menu()
+            return
+
         if kind == "elements_root":
             create = menu.addAction("New Frame...")
             create.triggered.connect(self._create_element)
@@ -28337,7 +28627,7 @@ class MainWindow(QMainWindow):
                 for tag, element in self.model.elements.items()
                 if element.element_type == element_type
             }
-            is_truss_group = element_type == "truss"
+            is_truss_group = element_type in TRUSS_ELEMENT_TYPES
             is_shell_group = element_type in SHELL_ELEMENT_TYPES
 
             if is_truss_group:
