@@ -1070,7 +1070,10 @@ class RCWallWizard(QWizard):
             "discrete_rho": float(
                 summary["web_vertical_discrete_rho_y"]
             ),
-            "remaining_rho": float(summary["web_smeared_rho_y"]),
+            "remaining_rho": (
+                float(spec.rho_y_web)
+                - float(summary["web_vertical_discrete_rho_y"])
+            ),
             "fits": bool(positions),
         }
 
