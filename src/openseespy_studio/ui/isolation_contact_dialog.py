@@ -267,8 +267,15 @@ class LeadRubberXDialog(_ScrollableDialog):
             minimum=1.0e-15,
         )
         self.flags = []
-        for index in range(1, 6):
-            flag = QCheckBox(f"tag{index}")
+        flag_labels = (
+            "tag1 · Cavitation / post-cavitation",
+            "tag2 · Buckling-load variation",
+            "tag3 · Horizontal-stiffness variation",
+            "tag4 · Vertical-stiffness variation",
+            "tag5 · Lead-core heating degradation",
+        )
+        for index, label in enumerate(flag_labels, start=1):
+            flag = QCheckBox(label)
             flag.setChecked(bool(int(p.get(f"tag{index}", 0))))
             self.flags.append(flag)
 
@@ -312,11 +319,14 @@ class LeadRubberXDialog(_ScrollableDialog):
             self.form.addRow("", flag)
 
         self.custom_orientation.toggled.connect(self._sync_orientation)
+        self.flags[4].toggled.connect(self._sync_heating_fields)
         self._sync_orientation(self.custom_orientation.isChecked())
+        self._sync_heating_fields(self.flags[4].isChecked())
         self.note.setText(
             "LeadRubberX is a 3D/6DOF isolation-bearing element. "
-            "The five tag flags expose the OpenSees optional behavior switches; "
-            "tag5 enables lead-heating strength degradation."
+            "Optional behavior switches are named by their physical effect. "
+            "Thermal lead/steel properties become editable when lead-core "
+            "heating degradation (tag5) is enabled."
         )
 
     def _length(self, stored, *, minimum=0.0):
@@ -330,9 +340,39 @@ class LeadRubberXDialog(_ScrollableDialog):
         for widget in self.orientation:
             widget.setEnabled(bool(checked))
 
+    def _sync_heating_fields(self, checked: bool) -> None:
+        for widget in (self.ql, self.cl, self.ks, self.a_s):
+            widget.setEnabled(bool(checked))
+
     def values(self):
         if self.node_i.value() == self.node_j.value():
             raise ValueError("LeadRubberX end-node tags must be different.")
+        if self.d1.value() >= self.d2.value():
+            raise ValueError(
+                "LeadRubberX requires lead-core diameter D1 < bearing diameter D2."
+            )
+        orientation = None
+        if self.custom_orientation.isChecked():
+            orientation = tuple(widget.value() for widget in self.orientation)
+            x = orientation[:3]
+            y = orientation[3:]
+            x_norm2 = sum(value * value for value in x)
+            y_norm2 = sum(value * value for value in y)
+            cross = (
+                x[1] * y[2] - x[2] * y[1],
+                x[2] * y[0] - x[0] * y[2],
+                x[0] * y[1] - x[1] * y[0],
+            )
+            cross_norm2 = sum(value * value for value in cross)
+            if (
+                x_norm2 <= 1.0e-24
+                or y_norm2 <= 1.0e-24
+                or cross_norm2 <= 1.0e-16 * x_norm2 * y_norm2
+            ):
+                raise ValueError(
+                    "LeadRubberX local x/y vectors must be non-zero "
+                    "and non-parallel."
+                )
         u = self.units
         params = {
             "Fy": u.force_to_n_value(self.fy.value()),
@@ -344,11 +384,7 @@ class LeadRubberXDialog(_ScrollableDialog):
             "ts": u.length_to_m_value(self.ts.value()),
             "tr": u.length_to_m_value(self.tr.value()),
             "n": self.layers.value(),
-            "orientation": (
-                tuple(widget.value() for widget in self.orientation)
-                if self.custom_orientation.isChecked()
-                else None
-            ),
+            "orientation": orientation,
             "kc": self.kc.value(),
             "PhiM": self.phim.value(),
             "ac": self.ac.value(),
@@ -480,24 +516,38 @@ class TripleFrictionPendulumDialog(_ScrollableDialog):
         for index, combo in enumerate(self.friction, start=1):
             self.form.addRow(f"Friction model {index}:", combo)
         for label, combo in zip(
-            ("Vertical material", "RotZ material", "RotX material", "RotY material"),
+            (
+                "Axial material (matP)",
+                "Torsional material (matT)",
+                "Moment-y material (matMy)",
+                "Moment-z material (matMz)",
+            ),
             self.materials,
         ):
             self.form.addRow(label + ":", combo)
-        for key in ("L1", "L2", "L3", "d1", "d2", "d3"):
-            self.form.addRow(f"{key} [{self.units.length}]:", self.lengths[key])
+        for index in range(1, 4):
+            self.form.addRow(
+                f"Effective pendulum length L{index} [{self.units.length}]:",
+                self.lengths[f"L{index}"],
+            )
+        for index in range(1, 4):
+            self.form.addRow(
+                f"Sliding capacity Ubar{index} [{self.units.length}]:",
+                self.lengths[f"d{index}"],
+            )
         self.form.addRow(f"Initial axial force W [{self.units.force}]:", self.w)
-        self.form.addRow(f"Sliding onset uy [{self.units.length}]:", self.uy)
+        self.form.addRow(f"Sliding onset Uy [{self.units.length}]:", self.uy)
         self.form.addRow(
-            f"Vertical tension flexibility [{self.units.length}/{self.units.force}]:",
+            f"Vertical tension stiffness Kvt [{self.units.force}/{self.units.length}]:",
             self.kvt,
         )
         self.form.addRow(f"Minimum vertical force [{self.units.force}]:", self.min_fv)
         self.form.addRow("Element tolerance:", self.tol)
         self.note.setText(
-            "TripleFrictionPendulum is a 3D/6DOF isolation element with "
-            "global Z vertical. Create reusable friction models under "
-            "Properties > Friction Models, then select all three here."
+            "TripleFrictionPendulum is a 3D/6DOF isolation element. "
+            "The three d1/d2/d3 storage keys are shown here using the "
+            "OpenSees names Ubar1/Ubar2/Ubar3 (sliding displacement "
+            "capacities). Material labels follow matP, matT, matMy and matMz."
         )
 
     @staticmethod
