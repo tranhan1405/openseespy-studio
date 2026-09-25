@@ -2541,6 +2541,15 @@ class ResultsPanel(QWidget):
                     item.setText(value)
                     if column == 0:
                         item.setData(Qt.UserRole, int(state.element_tag))
+                    elif column == 5:
+                        severity = crack_severity(state.ratio)
+                        severity_color = {
+                            "mild": "#f9a825",
+                            "moderate": "#ef6c00",
+                            "severe": "#c62828",
+                        }.get(severity)
+                        if severity_color:
+                            item.setForeground(QColor(severity_color))
         finally:
             self.crack_table.setUpdatesEnabled(True)
 
