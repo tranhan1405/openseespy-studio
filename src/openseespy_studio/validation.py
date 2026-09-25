@@ -6,6 +6,8 @@ from typing import Iterable
 
 from .beam_loads import resolve_self_weight_local
 from .model import (
+    BEARING_ELEMENT_TYPES,
+    CABLE_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
@@ -738,7 +740,10 @@ def _element_geometry_checks(
             for index in range(3)
         )
         length = _norm(axis)
-        if length <= 1.0e-12:
+        if (
+            length <= 1.0e-12
+            and element.element_type not in BEARING_ELEMENT_TYPES
+        ):
             issues.append(
                 ValidationIssue(
                     "ERROR",
@@ -783,6 +788,83 @@ def _element_geometry_checks(
                         "element",
                         tag,
                         "Assign an existing uniaxial material.",
+                    )
+                )
+            continue
+
+        if element.element_type in CABLE_ELEMENT_TYPES:
+            if (
+                int(model.ndm) != 3
+                or int(model.ndf) not in {3, 6}
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Cable formulation",
+                        f"CatenaryCable element {tag} requires ndm=3 with "
+                        f"ndf=3 or 6; got ndm={model.ndm}, ndf={model.ndf}.",
+                        "element",
+                        tag,
+                        "Use a 3D model with 3 or 6 DOF per node.",
+                    )
+                )
+            continue
+
+        if element.element_type in BEARING_ELEMENT_TYPES:
+            signature = (int(model.ndm), int(model.ndf))
+            if signature not in {(2, 3), (3, 6)}:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing formulation",
+                        f"elastomericBearingPlasticity element {tag} "
+                        f"requires 2D/3DOF or 3D/6DOF; got "
+                        f"ndm={model.ndm}, ndf={model.ndf}.",
+                        "element",
+                        tag,
+                        "Use a 2D/3DOF or 3D/6DOF structural model.",
+                    )
+                )
+            referenced = {
+                int(value)
+                for key in (
+                    "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                )
+                for value in [element.special_parameters.get(key)]
+                if value is not None
+            }
+            missing = sorted(
+                mat_tag for mat_tag in referenced
+                if mat_tag not in project.materials
+            )
+            if missing:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing material",
+                        f"elastomericBearingPlasticity element {tag} "
+                        "references missing uniaxial material tag(s): "
+                        + ", ".join(map(str, missing))
+                        + ".",
+                        "element",
+                        tag,
+                        "Assign existing uniaxial materials to all bearing "
+                        "directions.",
+                    )
+                )
+            if signature == (3, 6) and (
+                element.special_parameters.get("t_mat_tag") is None
+                or element.special_parameters.get("my_mat_tag") is None
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing material",
+                        f"3D elastomericBearingPlasticity element {tag} "
+                        "requires axial, torsion, My, and Mz materials.",
+                        "element",
+                        tag,
+                        "Assign all four 3D bearing material directions.",
                     )
                 )
             continue
