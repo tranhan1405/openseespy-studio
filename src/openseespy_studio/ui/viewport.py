@@ -6625,6 +6625,7 @@ class ModelViewport(QWidget):
             "result-contour",
             "result-contour-nodes",
             "result-shell-contour",
+            "result-shell-deformation-contour",
             "result-crack-pattern",
             "result-crack-pattern-mild",
             "result-crack-pattern-moderate",
