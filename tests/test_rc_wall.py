@@ -685,8 +685,61 @@ def test_rc_wall_wizard_hybrid_mode_roundtrip():
         assert "center spacing" in dialog.reinforcement_info.text()
         assert "ρy,discrete" in dialog.reinforcement_info.text()
         assert "Horizontal discrete" in dialog.reinforcement_info.text()
-        assert "Hybrid" in dialog.review.text()
-        assert "smeared remainder" in dialog.review.text()
+        assert "ρy discrete" in dialog.review.text()
+        assert "smeared remaining" in dialog.review.text()
+        assert dialog.final_preview.reinforcement_mode == "hybrid"
+        assert dialog.final_preview.boundary_bars == 4
+        assert "Nodes: 16" in dialog.preview_object_summary.text()
+        assert "MEFI elements: 7" in dialog.preview_object_summary.text()
+        assert "Boundary bar elements: 56" in dialog.preview_object_summary.text()
+        assert (
+            "Horizontal web bar elements: 12"
+            in dialog.preview_object_summary.text()
+        )
+        assert "Total elements: 75" in dialog.preview_object_summary.text()
+        assert "Ready to create wall" in dialog.preview_validation_status.text()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_rc_wall_final_page_previews_objects_before_accept():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    dialog = RCWallWizard(project)
+    try:
+        dialog._update_review()
+        counts = dialog._preview_object_counts()
+
+        assert counts == {
+            "nodes": 16,
+            "mefi": 7,
+            "boundary_rebar": 0,
+            "horizontal_rebar": 0,
+            "discrete_rebar": 0,
+            "elements": 7,
+            "uniaxial_materials": 5,
+            "nd_materials": 4,
+            "sections": 2,
+            "selection_sets": 3,
+            "fixed_nodes": 2,
+        }
+        assert dialog.final_preview.width_value == pytest.approx(1220.0)
+        assert dialog.final_preview.height_value == pytest.approx(2209.8)
+        assert dialog.final_preview.thickness_value == pytest.approx(152.4)
+        assert "W × H × t" in dialog.preview_geometry_summary.text()
+        assert "Will create" in dialog.preview_object_summary.text()
+        assert "Total elements: 7" in dialog.preview_object_summary.text()
+        assert "Ready to create wall" in dialog.preview_validation_status.text()
+        assert (
+            dialog.button(QWizard.WizardButton.FinishButton).text()
+            == "Create Wall"
+        )
     finally:
         dialog.close()
         dialog.deleteLater()
