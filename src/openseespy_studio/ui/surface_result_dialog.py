@@ -97,12 +97,21 @@ class SurfaceResultDialog(QDialog):
                 self.result_type.setCurrentIndex(index)
 
         self.component = QComboBox()
+        self.location = QComboBox()
+        self.location.addItem("Mid-surface", "mid")
+        self.location.addItem("Top (+z)", "top")
+        self.location.addItem("Bottom (-z)", "bottom")
+        self.location.setToolTip(
+            "For strain components, Top/Bottom derives ε(z)=ε0+zκ "
+            "at z=±h/2 using the Shell section thickness."
+        )
 
         form.addRow("Tag:", self.tag)
         form.addRow("Name:", self.name)
         form.addRow("Analysis:", self.analysis_holder)
         form.addRow("Result:", self.result_type)
         form.addRow("Component:", self.component)
+        form.addRow("Location:", self.location)
         root.addLayout(form)
 
         note = QLabel(
@@ -130,6 +139,10 @@ class SurfaceResultDialog(QDialog):
             index = self.component.findText(component)
             if index >= 0:
                 self.component.setCurrentIndex(index)
+            location = str(result.settings.get("location", "mid"))
+            location_index = self.location.findData(location)
+            if location_index >= 0:
+                self.location.setCurrentIndex(location_index)
 
     def _refresh_analysis_choices(self, select_tag=None) -> None:
         current = self.analysis.currentData() if self.analysis.count() else None
@@ -178,6 +191,12 @@ class SurfaceResultDialog(QDialog):
             options = DEFORMATION_COMPONENTS
         self.component.clear()
         self.component.addItems(list(options))
+        self.location.setVisible(result_type == "ShellDeformation")
+        location_label = self.layout().itemAt(1).layout().labelForField(
+            self.location
+        )
+        if location_label is not None:
+            location_label.setVisible(result_type == "ShellDeformation")
         index = self.component.findText(current)
         if index >= 0:
             self.component.setCurrentIndex(index)
@@ -218,7 +237,7 @@ class SurfaceResultDialog(QDialog):
                 else (
                     {
                         "component": self.component.currentText(),
-                        "location": "mid",
+                        "location": str(self.location.currentData()),
                     }
                     if str(self.result_type.currentData())
                     == "ShellDeformation"
