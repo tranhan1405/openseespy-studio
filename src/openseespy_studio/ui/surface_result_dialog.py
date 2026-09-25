@@ -105,7 +105,7 @@ class SurfaceResultDialog(QDialog):
         self.location.setToolTip(
             "For membrane/principal strain, Top/Bottom is derived from "
             "the generalized Shell section deformation with the SARE "
-            "display convention ε(z)=ε0+zκ at z=±h/2."
+            "plate-fiber convention ε(z)=ε0−zκ at z=±h/2."
         )
 
         form.addRow("Tag:", self.tag)
