@@ -39,7 +39,11 @@ WALL_MACRO_ELEMENT_TYPES = (
 )
 TRUSS_ELEMENT_TYPES = {"truss", "corotTruss"}
 CABLE_ELEMENT_TYPES = {"CatenaryCable"}
-BEARING_ELEMENT_TYPES = {"elastomericBearingPlasticity"}
+BEARING_ELEMENT_TYPES = {
+    "elastomericBearingPlasticity",
+    "LeadRubberX",
+    "TripleFrictionPendulum",
+}
 SPECIAL_TWO_NODE_ELEMENT_TYPES = CABLE_ELEMENT_TYPES | BEARING_ELEMENT_TYPES
 EMBEDDED_ELEMENT_TYPES = {"ASDEmbeddedNodeElement"}
 QUAD_ELEMENT_TYPES = (
@@ -158,6 +162,168 @@ def _normalize_special_element_parameters(
                 "CatenaryCable currently supports massType=0 "
                 "(lumped mass) only."
             )
+        return result
+
+    if element_type == "LeadRubberX":
+        required = (
+            "Fy", "alpha", "Gr", "Kbulk", "D1", "D2", "ts", "tr", "n",
+        )
+        optional = {
+            "orientation", "kc", "PhiM", "ac", "sDratio", "mass", "cd",
+            "tc", "qL", "cL", "kS", "aS",
+            "tag1", "tag2", "tag3", "tag4", "tag5",
+        }
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "LeadRubberX requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required) - optional)
+        if extra:
+            raise ValueError(
+                "Unsupported LeadRubberX parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {
+            key: float(raw[key])
+            for key in ("Fy", "alpha", "Gr", "Kbulk", "D1", "D2", "ts", "tr")
+        }
+        result["n"] = _strict_int(raw["n"], "LeadRubberX rubber layers")
+        defaults = {
+            "kc": 10.0,
+            "PhiM": 0.5,
+            "ac": 1.0,
+            "sDratio": 0.5,
+            "mass": 0.0,
+            "cd": 0.0,
+            "tc": 0.0,
+            "qL": 11200.0,
+            "cL": 130.0,
+            "kS": 50.0,
+            "aS": 1.41e-5,
+        }
+        for key, default in defaults.items():
+            result[key] = float(raw.get(key, default))
+        for key in ("tag1", "tag2", "tag3", "tag4", "tag5"):
+            result[key] = _strict_int(
+                raw.get(key, 0),
+                f"LeadRubberX {key}",
+            )
+        orientation = raw.get("orientation")
+        if orientation is None:
+            result["orientation"] = None
+        else:
+            try:
+                values = tuple(float(value) for value in orientation)
+            except TypeError as exc:
+                raise ValueError(
+                    "LeadRubberX orientation must contain six values."
+                ) from exc
+            if len(values) != 6 or any(
+                not math.isfinite(value) for value in values
+            ):
+                raise ValueError(
+                    "LeadRubberX orientation must contain six finite values."
+                )
+            x = values[:3]
+            y = values[3:]
+            x_norm2 = sum(value * value for value in x)
+            y_norm2 = sum(value * value for value in y)
+            cross = (
+                x[1] * y[2] - x[2] * y[1],
+                x[2] * y[0] - x[0] * y[2],
+                x[0] * y[1] - x[1] * y[0],
+            )
+            if (
+                x_norm2 <= 1.0e-24
+                or y_norm2 <= 1.0e-24
+                or sum(value * value for value in cross)
+                <= 1.0e-16 * x_norm2 * y_norm2
+            ):
+                raise ValueError(
+                    "LeadRubberX orientation x/y vectors must be "
+                    "non-zero and non-parallel."
+                )
+            result["orientation"] = values
+        finite_keys = (
+            "Fy", "alpha", "Gr", "Kbulk", "D1", "D2", "ts", "tr",
+            "kc", "PhiM", "ac", "sDratio", "mass", "cd", "tc",
+            "qL", "cL", "kS", "aS",
+        )
+        if any(
+            not math.isfinite(float(result[key]))
+            for key in finite_keys
+        ):
+            raise ValueError("LeadRubberX parameters must be finite.")
+        for key in ("Fy", "Gr", "Kbulk", "D2", "ts", "tr", "qL", "cL", "kS", "aS"):
+            if float(result[key]) <= 0.0:
+                raise ValueError(f"LeadRubberX {key} must be positive.")
+        if float(result["D1"]) < 0.0 or float(result["D1"]) >= float(result["D2"]):
+            raise ValueError("LeadRubberX requires 0 <= D1 < D2.")
+        if int(result["n"]) < 1:
+            raise ValueError("LeadRubberX n must be at least 1.")
+        if not 0.0 <= float(result["sDratio"]) <= 1.0:
+            raise ValueError("LeadRubberX sDratio must satisfy 0 <= value <= 1.")
+        if float(result["mass"]) < 0.0 or float(result["tc"]) < 0.0:
+            raise ValueError("LeadRubberX mass/tc cannot be negative.")
+        return result
+
+    if element_type == "TripleFrictionPendulum":
+        required = (
+            "frnTag1", "frnTag2", "frnTag3",
+            "vertMatTag", "rotZMatTag", "rotXMatTag", "rotYMatTag",
+            "L1", "L2", "L3", "d1", "d2", "d3",
+            "W", "uy", "kvt", "minFv", "tol",
+        )
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "TripleFrictionPendulum requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                "Unsupported TripleFrictionPendulum parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {}
+        for key in (
+            "frnTag1", "frnTag2", "frnTag3",
+            "vertMatTag", "rotZMatTag", "rotXMatTag", "rotYMatTag",
+        ):
+            result[key] = _strict_int(
+                raw[key],
+                f"TripleFrictionPendulum {key}",
+            )
+            if int(result[key]) <= 0:
+                raise ValueError(
+                    f"TripleFrictionPendulum {key} must be positive."
+                )
+        for key in (
+            "L1", "L2", "L3", "d1", "d2", "d3",
+            "W", "uy", "kvt", "minFv", "tol",
+        ):
+            result[key] = float(raw[key])
+            if not math.isfinite(float(result[key])):
+                raise ValueError(
+                    f"TripleFrictionPendulum {key} must be finite."
+                )
+        for key in ("L1", "L2", "L3", "uy", "kvt", "tol"):
+            if float(result[key]) <= 0.0:
+                raise ValueError(
+                    f"TripleFrictionPendulum {key} must be positive."
+                )
+        for key in ("d1", "d2", "d3", "W", "minFv"):
+            if float(result[key]) < 0.0:
+                raise ValueError(
+                    f"TripleFrictionPendulum {key} cannot be negative."
+                )
         return result
 
     required = (
@@ -1281,6 +1447,14 @@ class StructuralModel:
         ):
             raise ValueError(
                 "CatenaryCable requires ndm=3/ndf=3; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if (
+            element_type in {"LeadRubberX", "TripleFrictionPendulum"}
+            and (int(self.ndm), int(self.ndf)) != (3, 6)
+        ):
+            raise ValueError(
+                f"{element_type} requires ndm=3/ndf=6; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
         if (
