@@ -2260,6 +2260,9 @@ class MainWindow(QMainWindow):
         self.results_panel.shell_displacement_requested.connect(
             self._show_shell_displacement_result
         )
+        self.results_panel.shell_deformation_requested.connect(
+            self._show_shell_deformation_result
+        )
         self.results_panel.hinge_state_requested.connect(
             self._show_hinge_state_result
         )
@@ -33556,6 +33559,39 @@ class MainWindow(QMainWindow):
                 f"{crack_count}/{crack_panels} cracked · "
                 f"max epsilon1/epsilon_cr = {crack_ratio:.3f}"
             )
+
+    def _show_shell_deformation_result(
+        self,
+        component: str,
+        element_scope: object,
+    ) -> None:
+        if not self._last_result:
+            self._offer_result_analysis_run(
+                title="Shell Strain",
+            )
+            return
+
+        elements: set[int] = set()
+        if isinstance(element_scope, (list, tuple, set)):
+            for raw_tag in element_scope:
+                try:
+                    elements.add(int(raw_tag))
+                except (TypeError, ValueError):
+                    continue
+
+        self.viewport.show_shell_deformation_contour(
+            self._last_result,
+            str(component),
+            element_tags=elements or None,
+            cache_key=self._last_result_cache_key,
+        )
+        label = {
+            "E1": "ε1 (max principal)",
+            "E2": "ε2 (min principal)",
+        }.get(str(component), str(component))
+        self.status_message.setText(
+            f"Shell strain fringe · {label}"
+        )
 
     def _show_shell_displacement_result(
         self,
