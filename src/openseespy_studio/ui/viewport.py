@@ -7140,24 +7140,6 @@ class ModelViewport(QWidget):
                 continue
             normal /= normal_norm
 
-            # Offset crack glyphs toward the *current camera*.  MEFI
-            # connectivity may produce either +normal or -normal depending on
-            # node ordering; using a fixed normal can place every crack behind
-            # the opaque wall even though the crack states are valid.
-            face_center = 0.25 * (pi + pj + pk + pl)
-            try:
-                camera_position = np.asarray(
-                    self.plotter.camera.GetPosition(),
-                    dtype=float,
-                )
-                if float(np.dot(normal, camera_position - face_center)) < 0.0:
-                    normal = -normal
-            except Exception:
-                pass
-            visual_offset = (
-                normal * max(width_geom, height_geom) * 5.0e-3
-            )
-
             total_width = sum(
                 max(0.0, float(state.width))
                 for state in panel_states
@@ -7179,7 +7161,6 @@ class ModelViewport(QWidget):
                 u = (cumulative + 0.5 * raw_width) / total_width
                 bottom = (1.0 - u) * pi + u * pj
                 top = (1.0 - u) * pl + u * pk
-                center = 0.5 * (bottom + top) + visual_offset
                 panel_width_geom = (
                     raw_width / total_width * width_geom
                 )
