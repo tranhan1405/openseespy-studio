@@ -1947,10 +1947,6 @@ class StructuralModel:
             _strict_int(value, "Fixity value")
             for value in values
         )
-        if len(vals) != self.ndf:
-            raise ValueError(
-                f"Expected {self.ndf} fixity values, got {len(vals)}"
-            )
         if any(value not in {0, 1} for value in vals):
             raise ValueError("Fixity values must be 0 or 1.")
         updated: set[int] = set()
@@ -1959,20 +1955,33 @@ class StructuralModel:
             node = self.nodes.get(normalized_tag)
             if node is None:
                 continue
+            if len(vals) != int(node.ndf):
+                raise ValueError(
+                    f"Node {node.tag} has ndf={node.ndf}; received "
+                    f"{len(vals)} fixity values."
+                )
             node.fixity = vals
             updated.add(node.tag)
         return updated
 
     def clear_fixity_many(self, node_tags: Iterable[int]) -> set[int]:
-        return self.set_fixity_many(node_tags, (0,) * self.ndf)
+        updated: set[int] = set()
+        for tag in node_tags:
+            normalized_tag = _strict_int(tag, "Node tag")
+            node = self.nodes.get(normalized_tag)
+            if node is None:
+                continue
+            node.fixity = (0,) * int(node.ndf)
+            updated.add(node.tag)
+        return updated
 
     def set_mass(self, tag: int, values: Iterable[float]) -> None:
         tag = _strict_int(tag, "Node tag")
         node = self.nodes[tag]
         vals = tuple(float(v) for v in values)
-        if len(vals) != self.ndf:
+        if len(vals) != int(node.ndf):
             raise ValueError(
-                f"Expected {self.ndf} mass values, got {len(vals)}"
+                f"Expected {node.ndf} mass values, got {len(vals)}"
             )
         if any(not math.isfinite(value) for value in vals):
             raise ValueError("Nodal mass values must be finite.")
@@ -1986,10 +1995,6 @@ class StructuralModel:
         values: Iterable[float],
     ) -> set[int]:
         vals = tuple(float(v) for v in values)
-        if len(vals) != self.ndf:
-            raise ValueError(
-                f"Expected {self.ndf} mass values, got {len(vals)}"
-            )
         if any(not math.isfinite(value) for value in vals):
             raise ValueError("Nodal mass values must be finite.")
         if any(value < 0.0 for value in vals):
@@ -2000,12 +2005,25 @@ class StructuralModel:
             node = self.nodes.get(normalized_tag)
             if node is None:
                 continue
+            if len(vals) != int(node.ndf):
+                raise ValueError(
+                    f"Node {node.tag} has ndf={node.ndf}; received "
+                    f"{len(vals)} mass values."
+                )
             node.mass = vals
             updated.add(node.tag)
         return updated
 
     def clear_mass_many(self, node_tags: Iterable[int]) -> set[int]:
-        return self.set_mass_many(node_tags, (0.0,) * self.ndf)
+        updated: set[int] = set()
+        for tag in node_tags:
+            normalized_tag = _strict_int(tag, "Node tag")
+            node = self.nodes.get(normalized_tag)
+            if node is None:
+                continue
+            node.mass = (0.0,) * int(node.ndf)
+            updated.add(node.tag)
+        return updated
 
     def remove_element(self, tag: int) -> None:
         tag = _strict_int(tag, "Element tag")
