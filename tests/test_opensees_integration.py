@@ -27,6 +27,7 @@ from openseespy_studio.project import (
     ConnectionData,
     ElementLoadData,
     FiberData,
+    FrictionModelData,
     LoadPatternData,
     MaterialData,
     NDMaterialData,
@@ -2670,3 +2671,115 @@ def test_imported_rc_wall_produces_crack_history_in_real_opensees(
     assert summary["cracked"] >= 1
     assert summary["max_ratio"] >= 1.0
     assert len(results["history"]["mefi_panel_strains"]["1"]["1"]) == 100
+
+
+
+def test_advanced_isolation_elements_construct_in_real_opensees(
+    tmp_path: Path,
+):
+    lead = ProjectDatabase()
+    lead.units = {"length": "m", "force": "N", "time": "s"}
+    lead.model = StructuralModel(ndm=3, ndf=6)
+    lead.model.add_node(1, 0.0, 0.0, 0.0)
+    lead.model.add_node(2, 0.0, 0.0, 0.5)
+    lead.model.add_element(
+        1,
+        1,
+        2,
+        element_type="LeadRubberX",
+        special_parameters={
+            "Fy": 1.2e5,
+            "alpha": 0.1,
+            "Gr": 0.8e6,
+            "Kbulk": 2.0e9,
+            "D1": 0.10,
+            "D2": 0.80,
+            "ts": 0.003,
+            "tr": 0.010,
+            "n": 20,
+            "orientation": (0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
+        },
+    )
+    lead_script = to_openseespy(
+        lead.model,
+        units=lead.units,
+        friction_models=lead.friction_models,
+    )
+    lead_path = tmp_path / "lead-rubber-x.py"
+    lead_path.write_text(lead_script, encoding="utf-8")
+    lead_run = subprocess.run(
+        [sys.executable, str(lead_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert lead_run.returncode == 0, lead_run.stderr
+
+    tfp = ProjectDatabase()
+    tfp.units = {"length": "m", "force": "N", "time": "s"}
+    tfp.model = StructuralModel(ndm=3, ndf=6)
+    tfp.model.add_node(1, 0.0, 0.0, 0.0)
+    tfp.model.add_node(2, 0.0, 0.0, 0.5)
+    for tag in range(1, 5):
+        tfp.add_material(
+            MaterialData(
+                tag,
+                f"Elastic {tag}",
+                "Elastic",
+                {"E": 1.0e8},
+            )
+        )
+    for tag, mu in ((1, 0.03), (2, 0.05), (3, 0.08)):
+        tfp.add_friction_model(
+            FrictionModelData(
+                tag,
+                f"Friction {tag}",
+                "Coulomb",
+                {"mu": mu},
+            )
+        )
+    tfp.model.add_element(
+        2,
+        1,
+        2,
+        element_type="TripleFrictionPendulum",
+        special_parameters={
+            "frnTag1": 1,
+            "frnTag2": 2,
+            "frnTag3": 3,
+            "vertMatTag": 1,
+            "rotZMatTag": 2,
+            "rotXMatTag": 3,
+            "rotYMatTag": 4,
+            "L1": 0.36,
+            "L2": 1.25,
+            "L3": 1.25,
+            "d1": 0.10,
+            "d2": 0.20,
+            "d3": 0.20,
+            "W": 1.0e6,
+            "uy": 0.0005,
+            "kvt": 1000.0,
+            "minFv": 100.0,
+            "tol": 1.0e-5,
+        },
+    )
+    tfp_script = to_openseespy(
+        tfp.model,
+        materials=tfp.materials,
+        units=tfp.units,
+        friction_models=tfp.friction_models,
+    )
+    tfp_path = tmp_path / "triple-friction-pendulum.py"
+    tfp_path.write_text(tfp_script, encoding="utf-8")
+    tfp_run = subprocess.run(
+        [sys.executable, str(tfp_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert tfp_run.returncode == 0, tfp_run.stderr
