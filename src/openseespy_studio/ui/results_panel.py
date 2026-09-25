@@ -932,6 +932,7 @@ class ResultsPanel(QWidget):
     member_force_requested = Signal(str, float)
     node_contour_requested = Signal(str, str)
     shell_displacement_requested = Signal(str, float, str, object)
+    shell_deformation_requested = Signal(str, object)
     hinge_state_requested = Signal()
     element_selected = Signal(int)
     job_selected = Signal(int)
@@ -1201,6 +1202,10 @@ class ResultsPanel(QWidget):
             return
 
         if kind == "ShellForce":
+            self._active_shell_element_scope = {
+                int(tag)
+                for tag in options.get("_element_scope", [])
+            }
             component = str(options.get("component", "Nxx"))
             tab = (
                 1
@@ -1217,13 +1222,21 @@ class ResultsPanel(QWidget):
 
         if kind == "ShellDeformation":
             component = str(options.get("component", "Exx"))
-            tab = (
-                5
-                if component in {"Exx", "Eyy", "Gxy", "E1", "E2"}
-                else 6
-                if component.startswith("K")
-                else 7
-            )
+            self._active_shell_element_scope = {
+                int(tag)
+                for tag in options.get("_element_scope", [])
+            }
+            if component in {"Exx", "Eyy", "Gxy", "E1", "E2"}:
+                index = self.shell_strain_component.findData(component)
+                if index >= 0:
+                    self.shell_strain_component.blockSignals(True)
+                    self.shell_strain_component.setCurrentIndex(index)
+                    self.shell_strain_component.blockSignals(False)
+                tab = 5
+            elif component.startswith("K"):
+                tab = 6
+            else:
+                tab = 7
             self.shell_detail_tabs.setCurrentIndex(tab)
             self._select_tab("Shell Results")
             if self._motion_display_frame_count > 0:
@@ -2278,10 +2291,45 @@ class ResultsPanel(QWidget):
         gp_layout.addWidget(self.shell_gp_table, 1)
         self.shell_detail_tabs.addTab(gp_host, "Force Gauss Points")
 
-        add_summary_tab(
-            "Strain",
-            ("Exx", "Eyy", "Gxy", "ε1", "ε2"),
+        strain_host = QWidget()
+        strain_layout = QVBoxLayout(strain_host)
+        strain_layout.setContentsMargins(3, 3, 3, 3)
+        strain_layout.setSpacing(4)
+
+        strain_controls = QHBoxLayout()
+        strain_controls.addWidget(QLabel("Fringe:"))
+        self.shell_strain_component = QComboBox()
+        self.shell_strain_component.addItem("Exx", "Exx")
+        self.shell_strain_component.addItem("Eyy", "Eyy")
+        self.shell_strain_component.addItem("Gxy", "Gxy")
+        self.shell_strain_component.addItem("ε1 (max principal)", "E1")
+        self.shell_strain_component.addItem("ε2 (min principal)", "E2")
+        strain_controls.addWidget(self.shell_strain_component)
+
+        show_strain = QPushButton("Apply Fringe")
+        show_strain.setToolTip(
+            "Contour the selected membrane/principal strain on the active "
+            "Shell result scope."
         )
+        show_strain.clicked.connect(self._display_shell_strain)
+        strain_controls.addWidget(show_strain)
+        strain_controls.addStretch(1)
+        strain_layout.addLayout(strain_controls)
+
+        strain_table = QTableWidget(0, 6)
+        strain_table.setHorizontalHeaderLabels(
+            ["Element", "Exx", "Eyy", "Gxy", "ε1", "ε2"]
+        )
+        strain_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        strain_table.horizontalHeader().setStretchLastSection(True)
+        strain_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        strain_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        strain_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        strain_layout.addWidget(strain_table, 1)
+        self.shell_tables["Strain"] = strain_table
+        self.shell_detail_tabs.addTab(strain_host, "Strain")
         add_summary_tab(
             "Curvature",
             ("Kxx", "Kyy", "Kxy"),
@@ -2326,6 +2374,12 @@ class ResultsPanel(QWidget):
 
         self.tabs.addTab(page, "Shell Results")
 
+
+    def _display_shell_strain(self) -> None:
+        self.shell_deformation_requested.emit(
+            str(self.shell_strain_component.currentData()),
+            sorted(self._active_shell_element_scope),
+        )
 
     def _display_shell_displacement(self) -> None:
         self.shell_displacement_requested.emit(
