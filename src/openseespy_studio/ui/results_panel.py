@@ -984,6 +984,8 @@ class ResultsPanel(QWidget):
         self._active_solution_kind = ""
         self._active_crack_element_scope: set[int] = set()
         self._active_shell_element_scope: set[int] = set()
+        self._active_shell_deformation_component = "Exx"
+        self._active_shell_deformation_location = "mid"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 5, 6, 5)
@@ -1227,13 +1229,20 @@ class ResultsPanel(QWidget):
                 int(tag)
                 for tag in options.get("_element_scope", [])
             }
+            location = (
+                str(options.get("location", "mid"))
+                if component in {"Exx", "Eyy", "Gxy", "E1", "E2"}
+                else "mid"
+            )
+            self._active_shell_deformation_component = component
+            self._active_shell_deformation_location = location
+
             if component in {"Exx", "Eyy", "Gxy", "E1", "E2"}:
                 index = self.shell_strain_component.findData(component)
                 if index >= 0:
                     self.shell_strain_component.blockSignals(True)
                     self.shell_strain_component.setCurrentIndex(index)
                     self.shell_strain_component.blockSignals(False)
-                location = str(options.get("location", "mid"))
                 location_index = self.shell_strain_location.findData(
                     location
                 )
@@ -1243,13 +1252,29 @@ class ResultsPanel(QWidget):
                     self.shell_strain_location.blockSignals(False)
                 tab = 5
             elif component.startswith("K"):
+                combo = self.shell_deformation_component_controls.get(
+                    "Curvature"
+                )
+                if combo is not None:
+                    combo.blockSignals(True)
+                    combo.setCurrentText(component)
+                    combo.blockSignals(False)
                 tab = 6
             else:
+                combo = self.shell_deformation_component_controls.get(
+                    "Shear Strain"
+                )
+                if combo is not None:
+                    combo.blockSignals(True)
+                    combo.setCurrentText(component)
+                    combo.blockSignals(False)
                 tab = 7
             self.shell_detail_tabs.setCurrentIndex(tab)
             self._select_tab("Shell Results")
             if self._motion_display_frame_count > 0:
                 self._set_motion_index(self._motion_display_frame_count - 1)
+            else:
+                self._emit_shell_deformation_fringe(component, location)
             return
 
         if kind == "CrackPattern":
@@ -2241,13 +2266,50 @@ class ResultsPanel(QWidget):
         displacement_layout.addStretch(1)
         self.shell_detail_tabs.addTab(displacement_host, "Displacement")
 
+        self.shell_deformation_component_controls: dict[
+            str, QComboBox
+        ] = {}
+
         def add_summary_tab(
             title: str,
             components: tuple[str, ...],
+            *,
+            deformation_fringe: bool = False,
         ) -> None:
             host = QWidget()
             host_layout = QVBoxLayout(host)
             host_layout.setContentsMargins(3, 3, 3, 3)
+            host_layout.setSpacing(4)
+
+            if deformation_fringe:
+                controls = QHBoxLayout()
+                controls.addWidget(QLabel("Fringe:"))
+                component_combo = QComboBox()
+                component_combo.addItems(list(components))
+                component_combo.currentTextChanged.connect(
+                    lambda value, tab_title=title:
+                    self._shell_deformation_summary_component_changed(
+                        tab_title,
+                        value,
+                    )
+                )
+                controls.addWidget(component_combo)
+                apply_button = QPushButton("Apply Fringe")
+                apply_button.setToolTip(
+                    "Contour the selected generalized Shell deformation "
+                    "component on the active result scope."
+                )
+                apply_button.clicked.connect(
+                    lambda _checked=False, tab_title=title:
+                    self._display_shell_deformation_summary(tab_title)
+                )
+                controls.addWidget(apply_button)
+                controls.addStretch(1)
+                host_layout.addLayout(controls)
+                self.shell_deformation_component_controls[
+                    title
+                ] = component_combo
+
             table = QTableWidget(0, 1 + len(components))
             table.setHorizontalHeaderLabels(
                 ["Element", *components]
@@ -2324,8 +2386,9 @@ class ResultsPanel(QWidget):
         self.shell_strain_location.addItem("Top (+z)", "top")
         self.shell_strain_location.addItem("Bottom (-z)", "bottom")
         self.shell_strain_location.setToolTip(
-            "Top/Bottom strains are derived from membrane strain + z × "
-            "curvature using the assigned Shell section thickness."
+            "Top/Bottom strains follow OpenSees plate-fiber kinematics "
+            "ε(z)=ε0−zκ at z=±h/2 using the assigned Shell section "
+            "thickness."
         )
         self.shell_strain_location.currentIndexChanged.connect(
             self._shell_strain_controls_changed
@@ -2369,10 +2432,12 @@ class ResultsPanel(QWidget):
         add_summary_tab(
             "Curvature",
             ("Kxx", "Kyy", "Kxy"),
+            deformation_fringe=True,
         )
         add_summary_tab(
             "Shear Strain",
             ("Gxz", "Gyz"),
+            deformation_fringe=True,
         )
 
         def_host = QWidget()
@@ -2413,9 +2478,18 @@ class ResultsPanel(QWidget):
         self.tabs.addTab(page, "Shell Results")
 
 
-    def _display_shell_strain(self) -> None:
-        component = str(self.shell_strain_component.currentData())
-        location = str(self.shell_strain_location.currentData())
+    def _emit_shell_deformation_fringe(
+        self,
+        component: str,
+        location: str = "mid",
+    ) -> None:
+        component = str(component)
+        location = str(location or "mid")
+        if component not in {"Exx", "Eyy", "Gxy", "E1", "E2"}:
+            location = "mid"
+        self._active_shell_deformation_component = component
+        self._active_shell_deformation_location = location
+
         scope = sorted(self._active_shell_element_scope)
         if (
             self._active_solution_kind == "ShellDeformation"
@@ -2437,10 +2511,34 @@ class ResultsPanel(QWidget):
             scope,
         )
 
+    def _display_shell_strain(self) -> None:
+        self._emit_shell_deformation_fringe(
+            str(self.shell_strain_component.currentData()),
+            str(self.shell_strain_location.currentData()),
+        )
+
     def _shell_strain_controls_changed(self, *_args) -> None:
         if self._active_solution_kind != "ShellDeformation":
             return
         self._display_shell_strain()
+
+    def _display_shell_deformation_summary(self, title: str) -> None:
+        combo = self.shell_deformation_component_controls.get(str(title))
+        if combo is None:
+            return
+        self._emit_shell_deformation_fringe(
+            str(combo.currentText()),
+            "mid",
+        )
+
+    def _shell_deformation_summary_component_changed(
+        self,
+        title: str,
+        _value: str,
+    ) -> None:
+        if self._active_solution_kind != "ShellDeformation":
+            return
+        self._display_shell_deformation_summary(title)
 
     def _display_shell_displacement(self) -> None:
         self.shell_displacement_requested.emit(
@@ -4790,8 +4888,8 @@ class ResultsPanel(QWidget):
         if self._active_solution_kind == "ShellDeformation":
             self.shell_deformation_frame_requested.emit(
                 int(source_index),
-                str(self.shell_strain_component.currentData()),
-                str(self.shell_strain_location.currentData()),
+                str(self._active_shell_deformation_component),
+                str(self._active_shell_deformation_location),
                 sorted(self._active_shell_element_scope),
             )
             return
