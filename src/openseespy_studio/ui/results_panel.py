@@ -932,7 +932,7 @@ class ResultsPanel(QWidget):
     member_force_requested = Signal(str, float)
     node_contour_requested = Signal(str, str)
     shell_displacement_requested = Signal(str, float, str, object)
-    shell_deformation_requested = Signal(str, object)
+    shell_deformation_requested = Signal(str, str, object)
     hinge_state_requested = Signal()
     element_selected = Signal(int)
     job_selected = Signal(int)
@@ -1232,6 +1232,14 @@ class ResultsPanel(QWidget):
                     self.shell_strain_component.blockSignals(True)
                     self.shell_strain_component.setCurrentIndex(index)
                     self.shell_strain_component.blockSignals(False)
+                location = str(options.get("location", "mid"))
+                location_index = self.shell_strain_location.findData(
+                    location
+                )
+                if location_index >= 0:
+                    self.shell_strain_location.blockSignals(True)
+                    self.shell_strain_location.setCurrentIndex(location_index)
+                    self.shell_strain_location.blockSignals(False)
                 tab = 5
             elif component.startswith("K"):
                 tab = 6
@@ -2306,6 +2314,17 @@ class ResultsPanel(QWidget):
         self.shell_strain_component.addItem("ε2 (min principal)", "E2")
         strain_controls.addWidget(self.shell_strain_component)
 
+        strain_controls.addWidget(QLabel("Location:"))
+        self.shell_strain_location = QComboBox()
+        self.shell_strain_location.addItem("Mid-surface", "mid")
+        self.shell_strain_location.addItem("Top (+z)", "top")
+        self.shell_strain_location.addItem("Bottom (-z)", "bottom")
+        self.shell_strain_location.setToolTip(
+            "Top/Bottom strains are derived from membrane strain + z × "
+            "curvature using the assigned Shell section thickness."
+        )
+        strain_controls.addWidget(self.shell_strain_location)
+
         self.shell_strain_show_button = QPushButton("Apply Fringe")
         self.shell_strain_show_button.setToolTip(
             "Contour the selected membrane/principal strain on the active "
@@ -2317,6 +2336,14 @@ class ResultsPanel(QWidget):
         strain_controls.addWidget(self.shell_strain_show_button)
         strain_controls.addStretch(1)
         strain_layout.addLayout(strain_controls)
+
+        self.shell_strain_info = QLabel(
+            "Table values are mid-surface generalized strains. Top/Bottom "
+            "changes the fringe only and uses ε(z)=ε0+zκ with z=±h/2 in "
+            "the Shell local section normal."
+        )
+        self.shell_strain_info.setWordWrap(True)
+        strain_layout.addWidget(self.shell_strain_info)
 
         strain_table = QTableWidget(0, 6)
         strain_table.setHorizontalHeaderLabels(
@@ -2382,6 +2409,7 @@ class ResultsPanel(QWidget):
     def _display_shell_strain(self) -> None:
         self.shell_deformation_requested.emit(
             str(self.shell_strain_component.currentData()),
+            str(self.shell_strain_location.currentData()),
             sorted(self._active_shell_element_scope),
         )
 
