@@ -12,7 +12,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QDialog, QWizard
 
 from openseespy_studio.generator import build_mefi_crack_specs, to_openseespy
-from openseespy_studio.project import (\n    AnalysisSettingsData,\n    MaterialData,\n    NDMaterialData,\n    ProjectDatabase,\n)
+from openseespy_studio.project import (
+    AnalysisSettingsData,
+    MaterialData,
+    NDMaterialData,
+    ProjectDatabase,
+)
 from openseespy_studio.rc_wall import (
     RCWallSpec,
     build_rc_wall,
