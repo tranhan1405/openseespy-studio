@@ -2339,8 +2339,8 @@ class ResultsPanel(QWidget):
 
         self.shell_strain_info = QLabel(
             "Table values are mid-surface generalized strains. Top/Bottom "
-            "changes the fringe only and uses ε(z)=ε0+zκ with z=±h/2 in "
-            "the Shell local section normal."
+            "changes the fringe only and follows OpenSees plate-fiber "
+            "kinematics ε(z)=ε0−zκ with z=±h/2 in the Shell local normal."
         )
         self.shell_strain_info.setWordWrap(True)
         strain_layout.addWidget(self.shell_strain_info)
