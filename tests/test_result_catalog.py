@@ -100,6 +100,8 @@ def test_shell_catalog_exposes_principal_strain_components():
         assert shell_deformation["E1"].label == "Principal strain ε1"
         assert shell_deformation["E2"].label == "Principal strain ε2"
         assert shell_deformation["E1"].category == "Shell Results"
+        assert shell_deformation["E1"].settings["location"] == "mid"
+        assert shell_deformation["E2"].settings["location"] == "mid"
 
 
 def test_nonmodal_catalog_exposes_concrete_crack_pattern():
