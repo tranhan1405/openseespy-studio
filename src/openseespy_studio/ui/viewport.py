@@ -7061,7 +7061,7 @@ class ModelViewport(QWidget):
         *,
         frame_index: int | None = None,
         accumulate: bool = False,
-        line_scale: float = 0.82,
+        line_scale: float = 0.65,
         element_tags: set[int] | None = None,
         cache_key: object | None = None,
     ) -> dict[str, float | int]:
@@ -7090,8 +7090,8 @@ class ModelViewport(QWidget):
 
         points: list[np.ndarray] = []
         lines: list[int] = []
-        faces: list[int] = []
         intensity: list[float] = []
+        stroke_scales: list[float] = []
 
         for tag, panel_states in sorted(by_element.items()):
             element = self._model.elements.get(tag)
@@ -7189,25 +7189,15 @@ class ModelViewport(QWidget):
                     continue
                 direction = direction / direction_norm
 
-                # Draw a real surface strip as well as a center line.  GPU
-                # line/tube rendering can disappear on some Qt/VTK/OpenGL
-                # combinations, while a filled quad remains reliable.
-                side = np.cross(normal, direction)
-                side_norm = float(np.linalg.norm(side))
-                if side_norm <= 1.0e-12:
-                    cumulative += raw_width
-                    continue
-                side = side / side_norm
-                half_thickness = max(
-                    max(width_geom, height_geom) * 0.006,
-                    min(panel_width_geom, height_geom) * 0.012,
-                )
-                surface_offset = (
-                    normal * max(width_geom, height_geom) * 5.0e-3
-                )
+                # Build thin 3D crack strokes rather than wide ribbons.
+                # The line cells are converted to real polygonal tubes below,
+                # which stays visible on Qt/VTK while looking much closer to
+                # engineering post-processing crack glyphs.
+                stroke_scale = max(width_geom, height_geom)
+                surface_offset = normal * stroke_scale * 8.0e-3
 
-                # Duplicate the crack on both wall faces.  This keeps cracks
-                # visible after the user rotates from the front to the back.
+                # Duplicate the stroke on both wall faces so it remains visible
+                # when the wall is viewed from either side.
                 for face_sign in (1.0, -1.0):
                     face_center = (
                         0.5 * (bottom + top)
@@ -7215,25 +7205,12 @@ class ModelViewport(QWidget):
                     )
                     start_point = face_center - half_length * direction
                     end_point = face_center + half_length * direction
-                    edge = half_thickness * side
 
                     base = len(points)
-                    points.extend((
-                        start_point,
-                        end_point,
-                        start_point - edge,
-                        start_point + edge,
-                        end_point + edge,
-                        end_point - edge,
-                    ))
+                    points.extend((start_point, end_point))
                     lines.extend((2, base, base + 1))
-                    faces.extend((
-                        4,
-                        base + 2,
-                        base + 3,
-                        base + 4,
-                        base + 5,
-                    ))
+
+                stroke_scales.append(stroke_scale)
                 intensity.append(float(state.ratio))
                 cumulative += raw_width
 
@@ -7244,16 +7221,30 @@ class ModelViewport(QWidget):
             self.plotter.render()
             return stats
 
-        mesh = pv.PolyData(np.asarray(points, dtype=float))
-        mesh.lines = np.asarray(lines, dtype=np.int64)
-        mesh.faces = np.asarray(faces, dtype=np.int64)
+        line_mesh = pv.PolyData(np.asarray(points, dtype=float))
+        line_mesh.lines = np.asarray(lines, dtype=np.int64)
+
+        # Pre-generate tube polygons instead of relying on the OpenGL
+        # "render_lines_as_tubes" path.  The latter was unreliable on some
+        # Windows/Qt/VTK combinations; polygonal tubes are both robust and
+        # visually much cleaner than the previous wide rectangular strips.
+        typical_scale = float(np.median(stroke_scales)) if stroke_scales else 1.0
+        crack_radius = max(typical_scale * 2.8e-3, 1.0e-6)
+        try:
+            mesh = line_mesh.tube(
+                radius=crack_radius,
+                n_sides=8,
+                capping=True,
+            )
+        except Exception:
+            mesh = line_mesh
+
         self.plotter.add_mesh(
             mesh,
             name="result-crack-pattern",
             color="#c62828",
-            style="surface",
-            opacity=1.0,
-            line_width=9,
+            opacity=0.96,
+            line_width=3,
             render_lines_as_tubes=True,
             lighting=False,
             show_edges=False,
