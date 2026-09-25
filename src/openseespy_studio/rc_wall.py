@@ -76,6 +76,17 @@ class RCWallSpec:
     web_horizontal_bar_diameter: float = 0.008
     web_horizontal_layer_mode: str = "front_back"
 
+    # Embedded vertical web reinforcement is independent of the MEFI node
+    # grid. Each steel node is interpolated from a retained triangle using
+    # ASDEmbeddedNodeElement. This backend option is intentionally not yet
+    # exposed as the default GUI workflow.
+    web_vertical_mode: str = "smeared"
+    web_vertical_bar_diameter: float = 0.006
+    web_vertical_spacing: float = 0.200
+    web_vertical_edge_offset: float = 0.050
+    web_vertical_layer_mode: str = "front_back"
+    embedded_penalty_factor: float = 1.0
+
     boundary_unconfined_thickness: float = 0.0508
     boundary_confined_thickness: float = 0.1016
 
@@ -102,6 +113,14 @@ class RCWallBuildResult:
     boundary_smeared_rho_y: float = 0.0
     web_horizontal_element_tags: list[int] = field(default_factory=list)
     web_horizontal_discrete_rho_x: float = 0.0
+    web_vertical_node_tags: list[int] = field(default_factory=list)
+    web_vertical_element_tags: list[int] = field(default_factory=list)
+    embedded_coupling_element_tags: list[int] = field(default_factory=list)
+    web_vertical_positions: tuple[float, ...] = ()
+    web_vertical_actual_spacing: float = 0.0
+    web_vertical_discrete_rho_y: float = 0.0
+    web_smeared_rho_y: float = 0.0
+    embedded_penalty: float = 0.0
     web_smeared_rho_x: float = 0.0
     boundary_smeared_rho_x: float = 0.0
 
@@ -181,6 +200,78 @@ def _web_horizontal_discrete_ratio(spec: RCWallSpec) -> float:
     )
     gross = float(spec.height) * float(spec.thickness)
     return steel_area / gross if gross > 0.0 else 0.0
+
+
+def _web_vertical_layer_names(
+    spec: RCWallSpec,
+) -> tuple[str, ...]:
+    mode = str(spec.web_vertical_layer_mode).strip().lower()
+    return ("front", "back") if mode == "front_back" else ("center",)
+
+
+def _web_vertical_positions(spec: RCWallSpec) -> tuple[float, ...]:
+    if str(spec.web_vertical_mode).strip().lower() != "embedded":
+        return ()
+    diameter = float(spec.web_vertical_bar_diameter)
+    left = (
+        float(spec.boundary_width)
+        + float(spec.web_vertical_edge_offset)
+        + 0.5 * diameter
+    )
+    right = (
+        float(spec.width)
+        - float(spec.boundary_width)
+        - float(spec.web_vertical_edge_offset)
+        - 0.5 * diameter
+    )
+    if right < left:
+        return ()
+    span = right - left
+    if span <= 1.0e-12:
+        return (left,)
+    intervals = max(
+        1,
+        int(math.ceil(span / float(spec.web_vertical_spacing))),
+    )
+    return tuple(
+        left + span * index / intervals
+        for index in range(intervals + 1)
+    )
+
+
+def _web_vertical_actual_spacing(spec: RCWallSpec) -> float:
+    positions = _web_vertical_positions(spec)
+    if len(positions) < 2:
+        return 0.0
+    return float(positions[1] - positions[0])
+
+
+def _web_vertical_discrete_ratio(spec: RCWallSpec) -> float:
+    positions = _web_vertical_positions(spec)
+    if not positions:
+        return 0.0
+    web_width = float(spec.width) - 2.0 * float(spec.boundary_width)
+    gross = web_width * float(spec.thickness)
+    if gross <= 0.0:
+        return 0.0
+    steel_area = (
+        len(positions)
+        * len(_web_vertical_layer_names(spec))
+        * _single_bar_area(spec.web_vertical_bar_diameter)
+    )
+    return steel_area / gross
+
+
+def _embedded_penalty(spec: RCWallSpec) -> float:
+    # Concrete02 initial tangent is approximately 2*fpc/epsc0. Store the
+    # penalty in SI Pa, matching SARE material storage. The generator converts
+    # it to the active project stress unit before writing OpenSees commands.
+    concrete_tangent = (
+        2.0
+        * abs(float(spec.concrete_fc_web))
+        / abs(float(spec.concrete_eps_web))
+    )
+    return concrete_tangent * float(spec.embedded_penalty_factor)
 
 
 def _boundary_discrete_ratio(spec: RCWallSpec) -> float:
@@ -324,6 +415,31 @@ def _validate(spec: RCWallSpec) -> None:
         raise ValueError(
             "web_horizontal_layer_mode must be 'single' or 'front_back'."
         )
+    if str(spec.web_vertical_mode).strip().lower() not in {
+        "smeared",
+        "embedded",
+    }:
+        raise ValueError(
+            "web_vertical_mode must be 'smeared' or 'embedded'."
+        )
+    if str(spec.web_vertical_layer_mode).strip().lower() not in {
+        "single",
+        "front_back",
+    }:
+        raise ValueError(
+            "web_vertical_layer_mode must be 'single' or 'front_back'."
+        )
+    if float(spec.embedded_penalty_factor) <= 0.0:
+        raise ValueError("embedded_penalty_factor must be positive.")
+
+    if (
+        reinforcement_mode != "hybrid"
+        and str(spec.web_vertical_mode).strip().lower() == "embedded"
+    ):
+        raise ValueError(
+            "Embedded vertical web reinforcement currently requires "
+            "reinforcement_mode='hybrid'."
+        )
 
     if reinforcement_mode == "hybrid":
         if int(spec.boundary_bar_count) < 1:
@@ -383,6 +499,36 @@ def _validate(spec: RCWallSpec) -> None:
                 "Discrete boundary longitudinal steel exceeds the specified "
                 "boundary rho-y. Reduce bar count/diameter or increase rho-y."
             )
+
+        if str(spec.web_vertical_mode).strip().lower() == "embedded":
+            if float(spec.web_vertical_bar_diameter) <= 0.0:
+                raise ValueError(
+                    "Embedded vertical web bar diameter must be positive."
+                )
+            if float(spec.web_vertical_spacing) <= 0.0:
+                raise ValueError(
+                    "Embedded vertical web bar spacing must be positive."
+                )
+            if float(spec.web_vertical_edge_offset) < 0.0:
+                raise ValueError(
+                    "Embedded vertical web edge offset cannot be negative."
+                )
+            positions = _web_vertical_positions(spec)
+            if not positions:
+                raise ValueError(
+                    "No embedded vertical web bar fits between the boundary "
+                    "zones with the selected edge offset and diameter."
+                )
+            vertical_ratio = _web_vertical_discrete_ratio(spec)
+            tolerance_y = max(
+                1.0e-12,
+                1.0e-9 * float(spec.rho_y_web),
+            )
+            if float(spec.rho_y_web) - vertical_ratio < -tolerance_y:
+                raise ValueError(
+                    "Embedded vertical web steel exceeds the available "
+                    "smeared rho-y in the web."
+                )
 
         if str(spec.web_horizontal_mode).strip().lower() == "mesh_aligned":
             if int(spec.vertical_elements) < 2:
@@ -597,6 +743,11 @@ def build_rc_wall(
         )
     )
     web_horizontal_discrete_rho_x = _web_horizontal_discrete_ratio(spec)
+    web_vertical_discrete_rho_y = _web_vertical_discrete_ratio(spec)
+    web_smeared_rho_y = max(
+        0.0,
+        float(spec.rho_y_web) - web_vertical_discrete_rho_y,
+    )
     web_smeared_rho_x = max(
         0.0,
         float(spec.rho_x_web) - web_horizontal_discrete_rho_x,
@@ -614,7 +765,7 @@ def build_rc_wall(
                 "mat1": float(sx),
                 "mat2": float(syw),
                 "ratio1": float(web_smeared_rho_x),
-                "ratio2": float(spec.rho_y_web),
+                "ratio2": float(web_smeared_rho_y),
                 "orientation": 0.0,
             },
         )
@@ -732,6 +883,9 @@ def build_rc_wall(
 
     reinforcement_element_tags: list[int] = []
     web_horizontal_element_tags: list[int] = []
+    web_vertical_node_tags: list[int] = []
+    web_vertical_element_tags: list[int] = []
+    embedded_coupling_element_tags: list[int] = []
     reinforcement_selection_name = ""
     if str(spec.reinforcement_mode).strip().lower() == "hybrid":
         bar_area = _boundary_bar_area(spec)
@@ -801,6 +955,99 @@ def build_rc_wall(
                     web_horizontal_element_tags.append(next_rebar_tag)
                     next_rebar_tag += 1
 
+        if str(spec.web_vertical_mode).strip().lower() == "embedded":
+            positions = _web_vertical_positions(spec)
+            layers = _web_vertical_layer_names(spec)
+            vertical_area = _single_bar_area(
+                spec.web_vertical_bar_diameter
+            )
+            penalty = _embedded_penalty(spec)
+            next_node_tag = model.next_node_tag()
+
+            for layer_name in layers:
+                for bar_index, local_x in enumerate(positions):
+                    chain_nodes: list[int] = []
+                    for grid_row in range(rows + 1):
+                        node_tag = next_node_tag
+                        next_node_tag += 1
+                        y = (
+                            float(spec.origin_y)
+                            + float(spec.height) * grid_row / rows
+                        )
+                        model.add_node(
+                            node_tag,
+                            float(spec.origin_x) + float(local_x),
+                            y,
+                            0.0,
+                        )
+                        web_vertical_node_tags.append(node_tag)
+                        chain_nodes.append(node_tag)
+
+                        # Split each MEFI quad along LL -> UR. Base nodes use
+                        # the lower triangle; all other row-boundary nodes use
+                        # the upper triangle of the row immediately below.
+                        if grid_row == 0:
+                            host_row = 0
+                            retained = (
+                                node_tags[2 * host_row],
+                                node_tags[2 * host_row + 1],
+                                node_tags[2 * (host_row + 1) + 1],
+                            )
+                        else:
+                            host_row = grid_row - 1
+                            retained = (
+                                node_tags[2 * host_row],
+                                node_tags[2 * (host_row + 1) + 1],
+                                node_tags[2 * (host_row + 1)],
+                            )
+
+                        while (
+                            next_rebar_tag in model.elements
+                            or next_rebar_tag in project.connections
+                        ):
+                            next_rebar_tag += 1
+                        model.add_element(
+                            next_rebar_tag,
+                            node_tag,
+                            retained[0],
+                            element_type="ASDEmbeddedNodeElement",
+                            group=(
+                                "rc-wall-embedded-coupling-web-vertical-"
+                                f"{layer_name}-b{bar_index + 1:02d}-"
+                                f"n{grid_row:02d}"
+                            ),
+                            k=retained[1],
+                            l=retained[2],
+                            embedded_penalty=float(penalty),
+                            embedded_constrain_rotation=True,
+                        )
+                        embedded_coupling_element_tags.append(
+                            next_rebar_tag
+                        )
+                        next_rebar_tag += 1
+
+                    for row in range(rows):
+                        while (
+                            next_rebar_tag in model.elements
+                            or next_rebar_tag in project.connections
+                        ):
+                            next_rebar_tag += 1
+                        model.add_element(
+                            next_rebar_tag,
+                            chain_nodes[row],
+                            chain_nodes[row + 1],
+                            element_type=str(spec.boundary_truss_type),
+                            group=(
+                                "rc-wall-rebar-web-vertical-"
+                                f"{layer_name}-b{bar_index + 1:02d}"
+                            ),
+                            truss_area=float(vertical_area),
+                            truss_material_tag=int(syw),
+                        )
+                        reinforcement_element_tags.append(next_rebar_tag)
+                        web_vertical_element_tags.append(next_rebar_tag)
+                        next_rebar_tag += 1
+
     selection_set_names = (
         _unique_selection_name(project, f"{spec.name} · Base"),
         _unique_selection_name(project, f"{spec.name} · Top"),
@@ -832,7 +1079,20 @@ def build_rc_wall(
         project.add_selection_set(
             SelectionSetData(
                 reinforcement_selection_name,
+                node_tags=set(web_vertical_node_tags),
                 element_tags=set(reinforcement_element_tags),
+            )
+        )
+
+    if embedded_coupling_element_tags:
+        coupling_selection_name = _unique_selection_name(
+            project,
+            f"{spec.name} · Embedded Coupling",
+        )
+        project.add_selection_set(
+            SelectionSetData(
+                coupling_selection_name,
+                element_tags=set(embedded_coupling_element_tags),
             )
         )
 
@@ -860,6 +1120,20 @@ def build_rc_wall(
         web_horizontal_discrete_rho_x=float(
             web_horizontal_discrete_rho_x
         ),
+        web_vertical_node_tags=web_vertical_node_tags,
+        web_vertical_element_tags=web_vertical_element_tags,
+        embedded_coupling_element_tags=embedded_coupling_element_tags,
+        web_vertical_positions=tuple(_web_vertical_positions(spec)),
+        web_vertical_actual_spacing=float(
+            _web_vertical_actual_spacing(spec)
+        ),
+        web_vertical_discrete_rho_y=float(
+            web_vertical_discrete_rho_y
+        ),
+        web_smeared_rho_y=float(web_smeared_rho_y),
+        embedded_penalty=float(_embedded_penalty(spec))
+        if str(spec.web_vertical_mode).strip().lower() == "embedded"
+        else 0.0,
         web_smeared_rho_x=float(web_smeared_rho_x),
         boundary_smeared_rho_x=float(boundary_smeared_rho_x),
     )
