@@ -1502,36 +1502,57 @@ class _Importer:
             self.count("Elements")
             return
 
-        if kind.lower() in {"truss", "corottruss"}:
-            if len(args) < 6:
+        if kind.lower() in {
+            "truss", "corottruss", "trusssection", "corottrusssection",
+        }:
+            normalized = kind.lower()
+            section_based = normalized in {
+                "trusssection", "corottrusssection",
+            }
+            minimum = 5 if section_based else 6
+            if len(args) < minimum:
                 raise ValueError(
-                    f"{kind} needs area and material tag"
+                    f"{kind} needs "
+                    + (
+                        "a section tag"
+                        if section_based
+                        else "area and material tag"
+                    )
                 )
-            rest = args[6:]
-            element_type = (
-                "corotTruss"
-                if kind.lower() == "corottruss"
-                else "truss"
-            )
-            self.project.model.add_element(
-                tag,
-                ni,
-                nj,
-                element_type=element_type,
-                group="truss",
-                mass_per_length=float(
+            rest = args[5:] if section_based else args[6:]
+            if normalized == "truss":
+                element_type = "truss"
+            elif normalized == "corottruss":
+                element_type = "corotTruss"
+            elif normalized == "trusssection":
+                element_type = "trussSection"
+            else:
+                element_type = "corotTrussSection"
+            kwargs = {
+                "element_type": element_type,
+                "group": "truss",
+                "mass_per_length": float(
                     self.flag_value(rest, "-rho", 0.0) or 0.0
                 ),
-                consistent_mass=bool(
+                "consistent_mass": bool(
                     int(self.flag_value(rest, "-cMass", 0) or 0)
                 )
                 if "-cMass" in rest
                 else False,
-                truss_area=float(args[4]),
-                truss_material_tag=int(args[5]),
-                truss_do_rayleigh=bool(
+                "truss_do_rayleigh": bool(
                     int(self.flag_value(rest, "-doRayleigh", 0) or 0)
                 ),
+            }
+            if section_based:
+                kwargs["section_tag"] = int(args[4])
+            else:
+                kwargs["truss_area"] = float(args[4])
+                kwargs["truss_material_tag"] = int(args[5])
+            self.project.model.add_element(
+                tag,
+                ni,
+                nj,
+                **kwargs,
             )
             self.count("Elements")
             return
