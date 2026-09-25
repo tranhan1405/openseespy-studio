@@ -161,3 +161,30 @@ def test_section_truss_validation_rejects_missing_section():
 
     with pytest.raises(ValueError, match="existing section"):
         project.validate_element_state(31)
+
+
+
+def test_section_based_truss_reassigns_section_but_cannot_clear_it():
+    project = ProjectDatabase()
+    project.model = StructuralModel(ndm=2, ndf=2)
+    project.model.add_node(1, 0.0, 0.0)
+    project.model.add_node(2, 3.0, 0.0)
+    project.add_section(_elastic_section(5))
+    project.add_section(_elastic_section(6))
+    project.model.add_element(
+        51,
+        1,
+        2,
+        element_type="trussSection",
+        section_tag=5,
+    )
+
+    changed = project.assign_section_to_elements({51}, 6)
+    assert changed == {51}
+    assert project.model.elements[51].section_tag == 6
+
+    with pytest.raises(ValueError, match="requires an existing section"):
+        project.assign_section_to_elements({51}, None)
+
+    # The project mutation is transactional, so the valid assignment remains.
+    assert project.model.elements[51].section_tag == 6
