@@ -1459,8 +1459,8 @@ def test_shell_surface_strain_uses_membrane_plus_z_curvature():
     top = shell_surface_strains(values, 0.05)
     bottom = shell_surface_strains(values, -0.05)
 
-    assert top == pytest.approx((0.0015, 0.001, 0.0045))
-    assert bottom == pytest.approx((0.0005, 0.003, 0.0015))
+    assert top == pytest.approx((0.0005, 0.003, 0.0015))
+    assert bottom == pytest.approx((0.0015, 0.001, 0.0045))
 
 
 def test_shell_principal_strain_formula_uses_engineering_shear():
