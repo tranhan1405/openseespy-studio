@@ -28068,36 +28068,6 @@ class MainWindow(QMainWindow):
             )
             self.properties_panel.set_properties("Materials", rows)
             return
-        if kind == "friction_models_root":
-            create_action = menu.addAction("New Friction Model...")
-            create_action.triggered.connect(self._create_friction_model)
-            menu.addSeparator()
-            properties = menu.addAction("Properties")
-            properties.triggered.connect(
-                lambda: self._show_tree_root_properties(
-                    "friction_models_root"
-                )
-            )
-            exec_menu()
-            return
-
-        if kind == "friction_model":
-            tag = int(value)
-            properties = menu.addAction("Properties")
-            properties.triggered.connect(
-                lambda: self._show_friction_model_properties(tag)
-            )
-            edit = menu.addAction("Edit...")
-            edit.triggered.connect(
-                lambda: self._edit_friction_model(tag)
-            )
-            delete = menu.addAction("Delete")
-            delete.triggered.connect(
-                lambda: self._delete_friction_model(tag)
-            )
-            exec_menu()
-            return
-
         if kind == "nd_materials_root":
             material_types: dict[str, int] = {}
             for material in self.project.nd_materials.values():
@@ -33108,6 +33078,36 @@ class MainWindow(QMainWindow):
                 lambda: self._show_tree_root_properties(
                     "materials_root"
                 )
+            )
+            exec_menu()
+            return
+
+        if kind == "friction_models_root":
+            create_action = menu.addAction("New Friction Model...")
+            create_action.triggered.connect(self._create_friction_model)
+            menu.addSeparator()
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "friction_models_root"
+                )
+            )
+            exec_menu()
+            return
+
+        if kind == "friction_model":
+            tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_friction_model_properties(tag)
+            )
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(
+                lambda: self._edit_friction_model(tag)
+            )
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(
+                lambda: self._delete_friction_model(tag)
             )
             exec_menu()
             return
