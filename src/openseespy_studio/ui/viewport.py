@@ -46,7 +46,11 @@ from ..model import (
     classify_fixity,
     shell_surface_geometry,
 )
-from ..postprocess import component_end_resultants, nodal_result_scalar
+from ..postprocess import (
+    component_end_resultants,
+    nodal_result_scalar,
+    shell_principal_strains,
+)
 from ..shell_quality import shell_element_quality_from_model
 from ..surface_mesher import surface_mesh_preview_segments
 from ..project import (
@@ -7312,7 +7316,11 @@ class ModelViewport(QWidget):
             "Gxz": 6,
             "Gyz": 7,
         }.get(component)
-        if component_index is None:
+        principal_index = {
+            "E1": 0,
+            "E2": 1,
+        }.get(component)
+        if component_index is None and principal_index is None:
             self.clear_result_overlay()
             return
 
@@ -7347,15 +7355,23 @@ class ModelViewport(QWidget):
             if not isinstance(payload, dict):
                 continue
             average = payload.get("average", [])
-            if (
-                not isinstance(average, (list, tuple))
-                or len(average) <= component_index
-            ):
+            if not isinstance(average, (list, tuple)):
                 continue
-            try:
-                value = float(average[component_index])
-            except (TypeError, ValueError):
-                continue
+            if principal_index is not None:
+                principal = shell_principal_strains(average)
+                if principal is None:
+                    continue
+                value = float(principal[principal_index])
+            else:
+                if (
+                    component_index is None
+                    or len(average) <= component_index
+                ):
+                    continue
+                try:
+                    value = float(average[component_index])
+                except (TypeError, ValueError):
+                    continue
             if not np.isfinite(value):
                 continue
             element = self._model.elements.get(tag)
@@ -7401,10 +7417,14 @@ class ModelViewport(QWidget):
             if component.startswith("K") and length_unit
             else "-"
         )
+        component_title = {
+            "E1": "ε1 (max principal strain)",
+            "E2": "ε2 (min principal strain)",
+        }.get(component, component)
         title = (
-            f"{component} [{unit_text}]"
+            f"{component_title} [{unit_text}]"
             if unit_text and unit_text != "-"
-            else component
+            else component_title
         )
 
         self.clear_result_overlay(render=False)
