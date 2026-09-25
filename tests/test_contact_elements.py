@@ -176,7 +176,7 @@ def test_beam_contact_2d_mixed_dof_generation():
     script = _script(project)
     assert (
         "ops.element('BeamContact2D', 20, 1, 2, 3, 4, "
-        "31, 0.3, 1e-08, 0.0001, 0)"
+        "31, 0.3, 1e-08, 1e-07, 0)"
     ) in script
     assert script.count("'-ndf', 2") >= 1
 
@@ -225,7 +225,7 @@ def test_beam_contact_3d_mixed_dof_generation():
     script = _script(project)
     assert (
         "ops.element('BeamContact3D', 21, 1, 2, 3, 4, "
-        "0.15, 9, 32, 1e-08, 0.0001, 1)"
+        "0.15, 9, 32, 1e-08, 1e-07, 1)"
     ) in script
 
 
