@@ -833,6 +833,31 @@ def section_to_openseespy(
             f"{p['Iz']:g}, {p['Iy']:g}, {p['G']:g}, {p['J']:g})"
         ]
 
+    if section.section_type == "FiberInt":
+        n1 = int(round(p["nStrip1"]))
+        n2 = int(round(p["nStrip2"]))
+        n3 = int(round(p["nStrip3"]))
+        lines = [
+            "ops.section('FiberInt', "
+            f"{section.tag}, '-NStrip', "
+            f"{n1}, {p['thick1']:g}, "
+            f"{n2}, {p['thick2']:g}, "
+            f"{n3}, {p['thick3']:g})"
+        ]
+        for fiber in section.fibers:
+            lines.append(
+                "ops.fiber("
+                f"{fiber.y:g}, {fiber.z:g}, {fiber.area:g}, "
+                f"{fiber.material_tag})"
+            )
+        for fiber in section.horizontal_fibers:
+            lines.append(
+                "ops.Hfiber("
+                f"{fiber.y:g}, {fiber.z:g}, {fiber.area:g}, "
+                f"{fiber.material_tag})"
+            )
+        return lines
+
     if section.section_type == "Fiber":
         lines = [
             f"ops.section('Fiber', {section.tag}, '-GJ', {p['GJ']:g})"
@@ -4127,6 +4152,12 @@ def transformation_to_openseespy(
     ndm: int = 3,
     model: StructuralModel | None = None,
 ) -> str:
+    if transformation.transformation_type == "LinearInt":
+        if int(ndm) != 2:
+            raise ValueError(
+                "LinearInt geometric transformation is available only in 2D."
+            )
+        return f"ops.geomTransf('LinearInt', {transformation.tag})"
     if int(ndm) == 2:
         return (
             f"ops.geomTransf('{transformation.transformation_type}', "
@@ -4520,8 +4551,10 @@ def to_openseespy(
     )
     frame_element_types = {
         "elasticBeamColumn",
+        "ElasticTimoshenkoBeam",
         "forceBeamColumn",
         "dispBeamColumn",
+        "dispBeamColumnInt",
     }
     for element in model.elements.values():
         if element.element_type not in frame_element_types:
@@ -5702,10 +5735,10 @@ def to_openseespy(
             )
             continue
 
-        if e.element_type == "elasticBeamColumn":
+        if e.element_type in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}:
             if assigned_section.section_type != "Elastic":
                 lines.append(
-                    f"# ERROR: elasticBeamColumn element {tag} requires an "
+                    f"# ERROR: {e.element_type} element {tag} requires an "
                     "Elastic section in the current Studio generator; "
                     "element not generated."
                 )
@@ -5715,7 +5748,23 @@ def to_openseespy(
                 materials,
                 units,
             )
-            if int(model.ndm) == 2:
+            if e.element_type == "ElasticTimoshenkoBeam":
+                if int(model.ndm) == 2:
+                    args = (
+                        "ops.element('ElasticTimoshenkoBeam', "
+                        f"{tag}, {e.i}, {e.j}, {p['E']:g}, {p['G']:g}, "
+                        f"{p['A']:g}, {p['Iz']:g}, {p['Avy']:g}, "
+                        f"{transf_tag}"
+                    )
+                else:
+                    args = (
+                        "ops.element('ElasticTimoshenkoBeam', "
+                        f"{tag}, {e.i}, {e.j}, {p['E']:g}, {p['G']:g}, "
+                        f"{p['A']:g}, {p['J']:g}, {p['Iy']:g}, "
+                        f"{p['Iz']:g}, {p['Avy']:g}, {p['Avz']:g}, "
+                        f"{transf_tag}"
+                    )
+            elif int(model.ndm) == 2:
                 args = (
                     "ops.element('elasticBeamColumn', "
                     f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
@@ -5732,6 +5781,38 @@ def to_openseespy(
                 args += f", '-mass', {e.mass_per_length:g}"
                 if e.consistent_mass:
                     args += ", '-cMass'"
+            args += ")"
+            lines.append(args)
+            continue
+
+        if e.element_type == "dispBeamColumnInt":
+            if (int(model.ndm), int(model.ndf)) != (2, 3):
+                lines.append(
+                    f"# ERROR: dispBeamColumnInt element {tag} requires "
+                    "ndm=2/ndf=3; element not generated."
+                )
+                continue
+            if assigned_section.section_type != "FiberInt":
+                lines.append(
+                    f"# ERROR: dispBeamColumnInt element {tag} requires "
+                    "a FiberInt section; element not generated."
+                )
+                continue
+            transformation = transformations.get(transf_tag)
+            if transformation.transformation_type != "LinearInt":
+                lines.append(
+                    f"# ERROR: dispBeamColumnInt element {tag} requires "
+                    "a LinearInt transformation; element not generated."
+                )
+                continue
+            args = (
+                "ops.element('dispBeamColumnInt', "
+                f"{tag}, {e.i}, {e.j}, {e.integration_points}, "
+                f"{assigned_section.tag}, {transf_tag}, "
+                f"{e.beam_center_ratio:g}"
+            )
+            if e.mass_per_length > 0.0:
+                args += f", '-mass', {e.mass_per_length:g}"
             args += ")"
             lines.append(args)
             continue
