@@ -103,7 +103,7 @@ from ..mass_source import apply_mass_source, evaluate_mass_source
 from ..moment_curvature import build_moment_curvature_project
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
 from ..test_column import build_test_column
-from ..rc_wall import build_rc_wall
+from ..rc_wall import build_rc_wall, build_rc_wall_macro_2d
 from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
@@ -5091,10 +5091,16 @@ class MainWindow(QMainWindow):
             if issue.severity == "ERROR"
         }
         try:
-            result = build_rc_wall(
-                self.project,
-                spec,
-            )
+            if str(spec.formulation) == "MEFI":
+                result = build_rc_wall(
+                    self.project,
+                    spec,
+                )
+            else:
+                result = build_rc_wall_macro_2d(
+                    self.project,
+                    spec,
+                )
             generated_errors = [
                 issue
                 for issue in validate_project(self.project)
@@ -5126,7 +5132,12 @@ class MainWindow(QMainWindow):
             # entities are really present in the live Project model.  This
             # turns any silent/partial RC-wall generation into a visible
             # error before the wizard workflow continues.
-            expected_node_count = 2 * (int(spec.vertical_elements) + 1)
+            formulation = str(spec.formulation)
+            expected_node_count = (
+                2 * (int(spec.vertical_elements) + 1)
+                if formulation == "MEFI"
+                else int(spec.vertical_elements) + 1
+            )
             expected_element_count = int(spec.vertical_elements)
             if len(result.node_tags) != expected_node_count:
                 raise ValueError(
@@ -5135,7 +5146,7 @@ class MainWindow(QMainWindow):
                 )
             if len(result.element_tags) != expected_element_count:
                 raise ValueError(
-                    "RC Wall builder returned an unexpected MEFI count: "
+                    "RC Wall builder returned an unexpected element count: "
                     f"{len(result.element_tags)} "
                     f"(expected {expected_element_count})."
                 )
@@ -5152,7 +5163,7 @@ class MainWindow(QMainWindow):
                 if (
                     int(tag) in self.project.model.elements
                     and self.project.model.elements[int(tag)].element_type
-                    != "MEFI"
+                    != formulation
                 )
             ]
             if missing_nodes or missing_elements or wrong_elements:
@@ -5169,7 +5180,7 @@ class MainWindow(QMainWindow):
                     )
                 if wrong_elements:
                     details.append(
-                        "non-MEFI generated element(s): "
+                        f"non-{formulation} generated element(s): "
                         + ", ".join(map(str, wrong_elements))
                     )
                 raise ValueError(
@@ -5202,10 +5213,15 @@ class MainWindow(QMainWindow):
         self.viewport.set_display_domain("fe")
 
         named = ", ".join(result.selection_set_names)
+        formulation = str(spec.formulation)
         message = (
             f"Created {spec.name} · {len(result.node_tags)} nodes · "
-            f"{len(result.element_tags)} MEFI elements · "
-            f"{len(result.section_tags)} RCLMS sections · "
+            f"{len(result.element_tags)} {formulation} elements · "
+            + (
+                f"{len(result.section_tags)} RCLMS sections · "
+                if formulation == "MEFI"
+                else ""
+            )
             f"named selections: {named}"
         )
 
