@@ -1071,7 +1071,9 @@ def test_crack_pattern_renderer_is_high_contrast_and_diagnostic():
     assert "mefi_crack_panel_states" in source
     assert "mefi_crack_summary" in source
     assert 'color="#c62828"' in source
-    assert "line_width=9" in source
+    assert ".tube(" in source
+    assert "n_sides=8" in source
+    assert "line_width=3" in source
     assert "lighting=False" in source
     assert "return stats" in source
 
