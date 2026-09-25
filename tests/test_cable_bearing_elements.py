@@ -74,6 +74,64 @@ def test_catenary_cable_generator_and_round_trip():
     assert params["massType"] == 0
 
 
+def test_catenary_cable_rejects_3d_six_dof_nodes():
+    model = StructuralModel(ndm=3, ndf=6)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    try:
+        model.add_element(
+            1,
+            1,
+            2,
+            element_type="CatenaryCable",
+            special_parameters={
+                "weight": 1.0,
+                "E": 2.0e11,
+                "A": 0.001,
+                "L0": 1.0,
+                "alpha": 0.0,
+                "temperature_change": 0.0,
+                "rho": 1.0,
+                "errorTol": 1.0e-8,
+                "Nsubsteps": 5,
+                "massType": 0,
+            },
+        )
+    except ValueError as exc:
+        assert "ndm=3/ndf=3" in str(exc)
+    else:
+        raise AssertionError("CatenaryCable accepted 3D/6DOF nodes")
+
+
+def test_catenary_cable_rejects_unsupported_mass_type():
+    model = StructuralModel(ndm=3, ndf=3)
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    try:
+        model.add_element(
+            1,
+            1,
+            2,
+            element_type="CatenaryCable",
+            special_parameters={
+                "weight": 1.0,
+                "E": 2.0e11,
+                "A": 0.001,
+                "L0": 1.0,
+                "alpha": 0.0,
+                "temperature_change": 0.0,
+                "rho": 1.0,
+                "errorTol": 1.0e-8,
+                "Nsubsteps": 5,
+                "massType": 1,
+            },
+        )
+    except ValueError as exc:
+        assert "massType=0" in str(exc)
+    else:
+        raise AssertionError("Unsupported CatenaryCable massType was accepted")
+
+
 def test_catenary_cable_rejects_incompatible_model_dimension():
     model = StructuralModel(ndm=2, ndf=3)
     model.add_node(1, 0.0, 0.0)
