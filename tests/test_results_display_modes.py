@@ -139,6 +139,26 @@ def test_solution_result_restores_display_mode(qapp):
 
 
 
+def test_shell_displacement_renderer_and_main_window_are_shell_scoped():
+    viewport_source = inspect.getsource(
+        ModelViewport.show_shell_displacement_contour
+    )
+    render_source = inspect.getsource(MainWindow._render_result_data)
+    prereq_source = inspect.getsource(
+        MainWindow._prepare_solution_result_prerequisites
+    )
+    handler_source = inspect.getsource(
+        MainWindow._show_shell_displacement_result
+    )
+
+    assert "SHELL_ELEMENT_TYPES" in viewport_source
+    assert "show_node_contour" in viewport_source
+    assert 'result_type == "ShellDisplacement"' in render_source
+    assert "show_shell_displacement_contour" in render_source
+    assert '"ShellDisplacement"' in prereq_source
+    assert "show_shell_displacement_contour" in handler_source
+
+
 def test_shell_displacement_has_dedicated_shell_fringe_controls(qapp):
     panel = ResultsPanel()
     captured = []
