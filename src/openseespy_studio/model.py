@@ -1012,8 +1012,11 @@ class Element:
             or self.is_embedded
             or self.is_solid
             or self.is_wall_macro
+            or self.element_type in SPECIAL_TWO_NODE_ELEMENT_TYPES
         ):
             self.transf_tag = None
+        if self.element_type in SPECIAL_TWO_NODE_ELEMENT_TYPES:
+            self.section_tag = None
 
         if self.element_type in BEAM_INTEGRATION_ELEMENT_TYPES and self.integration_type not in {
             "Lobatto",
