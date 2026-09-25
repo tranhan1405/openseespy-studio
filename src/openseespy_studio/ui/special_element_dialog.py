@@ -148,13 +148,10 @@ class CatenaryCableDialog(_SpecialElementDialog):
         self.substeps.setRange(1, 1_000_000)
         self.substeps.setValue(int(p.get("Nsubsteps", 10)))
         self.mass_type = QComboBox()
-        for value, label in (
-            (0, "0 — lumped translational mass"),
-            (1, "1 — consistent mass"),
-            (2, "2 — lumped mass variant"),
-            (3, "3 — consistent mass variant"),
-        ):
-            self.mass_type.addItem(label, value)
+        self.mass_type.addItem(
+            "0 — lumped mass (supported)",
+            0,
+        )
         index = self.mass_type.findData(int(p.get("massType", 0)))
         if index >= 0:
             self.mass_type.setCurrentIndex(index)
@@ -192,7 +189,7 @@ class CatenaryCableDialog(_SpecialElementDialog):
         self.form.addRow("Substeps:", self.substeps)
         self.form.addRow("Mass formulation:", self.mass_type)
         self._add_note(
-            "CatenaryCable is a 3D cable formulation with geometric sag. "
+            "CatenaryCable is a 3D/3DOF cable formulation with geometric sag. "
             "L0 is the unstressed cable length; no beam Section or "
             "Geometric Transformation is used."
         )
