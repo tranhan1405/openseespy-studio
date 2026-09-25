@@ -2612,7 +2612,7 @@ class MainWindow(QMainWindow):
         self._make_action(
             "rc_wall_wizard",
             "RC Wall",
-            "model-shell-section",
+            "wall",
             self._show_rc_wall_wizard,
             "Build a planar reinforced-concrete wall with RCLMS and MEFI",
         )
