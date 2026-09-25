@@ -16240,13 +16240,23 @@ class MainWindow(QMainWindow):
         )
 
     def _create_node(self) -> None:
-        dialog = NodeDialog(self.model.next_node_tag(), self)
+        dialog = NodeDialog(
+            self.model.next_node_tag(),
+            self,
+            default_ndf=self.model.ndf,
+        )
         if not dialog.exec():
             return
         tag, x, y, z = dialog.values()
         before = self.project.to_dict()
         try:
-            self.model.add_node(tag, x, y, z)
+            self.model.add_node(
+                tag,
+                x,
+                y,
+                z,
+                ndf=dialog.node_ndf(),
+            )
         except ValueError as exc:
             QMessageBox.warning(self, "Create Node", str(exc))
             return
