@@ -5688,6 +5688,21 @@ class MainWindow(QMainWindow):
                     "Web Bars · Horizontal",
                     "rc-wall-rebar-web-horizontal-",
                 ),
+                (
+                    "boundary-horizontal-left",
+                    "Boundary Bars · Horizontal · Left",
+                    "rc-wall-rebar-boundary-horizontal-left-",
+                ),
+                (
+                    "boundary-horizontal-right",
+                    "Boundary Bars · Horizontal · Right",
+                    "rc-wall-rebar-boundary-horizontal-right-",
+                ),
+                (
+                    "web-vertical",
+                    "Web Bars · Vertical · Embedded",
+                    "rc-wall-rebar-web-vertical-",
+                ),
             )
             grouped_reinforcement_tags: set[int] = set()
             for group_key, label, prefix in reinforcement_groups:
@@ -6765,6 +6780,13 @@ class MainWindow(QMainWindow):
                     "right-back": "rc-wall-rebar-right-back-",
                     "right-center": "rc-wall-rebar-right-center-",
                     "web-horizontal": "rc-wall-rebar-web-horizontal-",
+                    "boundary-horizontal-left": (
+                        "rc-wall-rebar-boundary-horizontal-left-"
+                    ),
+                    "boundary-horizontal-right": (
+                        "rc-wall-rebar-boundary-horizontal-right-"
+                    ),
+                    "web-vertical": "rc-wall-rebar-web-vertical-",
                 }
                 prefix = reinforcement_prefixes.get(
                     reinforcement_group,
@@ -26046,11 +26068,25 @@ class MainWindow(QMainWindow):
                 for element in reinforcement
                 if str(element.group).startswith("rc-wall-rebar-right-")
             )
-            horizontal = sum(
+            horizontal_web = sum(
                 1
                 for element in reinforcement
                 if str(element.group).startswith(
                     "rc-wall-rebar-web-horizontal-"
+                )
+            )
+            horizontal_boundary = sum(
+                1
+                for element in reinforcement
+                if str(element.group).startswith(
+                    "rc-wall-rebar-boundary-horizontal-"
+                )
+            )
+            vertical_web = sum(
+                1
+                for element in reinforcement
+                if str(element.group).startswith(
+                    "rc-wall-rebar-web-vertical-"
                 )
             )
             materials = {
@@ -26068,7 +26104,9 @@ class MainWindow(QMainWindow):
                     ("Elements", len(reinforcement)),
                     ("Left Boundary", left),
                     ("Right Boundary", right),
-                    ("Horizontal Web", horizontal),
+                    ("Horizontal Web", horizontal_web),
+                    ("Horizontal Boundary", horizontal_boundary),
+                    ("Vertical Web", vertical_web),
                     ("Materials", len(materials)),
                     (
                         "Formulations",
@@ -26877,6 +26915,9 @@ class MainWindow(QMainWindow):
             "right-back": "Right Boundary · Back",
             "right-center": "Right Boundary · Center",
             "web-horizontal": "Web · Horizontal",
+            "boundary-horizontal-left": "Boundary · Horizontal · Left",
+            "boundary-horizontal-right": "Boundary · Horizontal · Right",
+            "web-vertical": "Web · Vertical · Embedded",
         }
         label = labels.get(target, "Discrete Reinforcement")
         self.properties_panel.set_properties(
@@ -26890,14 +26931,36 @@ class MainWindow(QMainWindow):
                     ", ".join(sorted(formulations)) or "None",
                 ),
                 (
-                    "Perfect Bond",
-                    "Shared FE nodes",
+                    "Bond / Coupling",
+                    (
+                        "ASDEmbeddedNodeElement"
+                        if target in {
+                            "web-vertical",
+                            "boundary-horizontal-left",
+                            "boundary-horizontal-right",
+                        }
+                        else (
+                            "Shared / embedded interface nodes"
+                            if target == "web-horizontal"
+                            else "Shared FE nodes"
+                        )
+                    ),
                 ),
                 (
                     "Display",
-                    "Schematic bar separation"
-                    if target != "web-horizontal"
-                    else "MEFI mesh-aligned",
+                    (
+                        "Embedded vertical bars"
+                        if target == "web-vertical"
+                        else (
+                            "Segmented horizontal bars"
+                            if target.startswith("boundary-horizontal")
+                            else (
+                                "MEFI row / embedded segment"
+                                if target == "web-horizontal"
+                                else "Schematic bar separation"
+                            )
+                        )
+                    ),
                 ),
             ],
         )
