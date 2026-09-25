@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWizardPage,
 )
 
+from ..material_library import load_verified_material_library
 from ..project import ProjectDatabase
 from ..rc_wall import (
     RCWallSpec,
@@ -511,6 +512,11 @@ class RCWallWizard(QWizard):
         self.project = project
         self.units = UnitSystem.from_mapping(project.units)
         self._applying_preset = False
+        self._verified_material_records = {
+            record.id: record
+            for record in load_verified_material_library()
+        }
+        self._rw_a20_hidden_parameters: dict[str, dict[str, float]] = {}
         self.setWindowTitle("RC Wall Wizard · MEFI / MVLEM Family")
         self.resize(760, 650)
         self.setOption(
@@ -1750,20 +1756,60 @@ class RCWallWizard(QWizard):
         self.vertical_elements.setValue(7)
         self.macro_fibers.setValue(8)
 
-        self.fc_web.setValue(self._stress_display(47.09e6))
-        self.eps_web.setValue(-0.00232)
-        self.fc_boundary.setValue(self._stress_display(53.78e6))
-        self.eps_boundary.setValue(-0.00397)
-        self.ft.setValue(self._stress_display(2.13e6))
+        records = self._verified_material_records
+        steel_x = records["opensees-mefi-rwa20-steel-x-steel02"]
+        steel_y_web = records[
+            "opensees-mefi-rwa20-steel-y-web-steel02"
+        ]
+        steel_y_boundary = records[
+            "opensees-mefi-rwa20-steel-y-boundary-steel02"
+        ]
+        concrete_web = records[
+            "opensees-mefi-rwa20-unconfined-concrete02"
+        ]
+        concrete_boundary = records[
+            "opensees-mefi-rwa20-confined-concrete02"
+        ]
+        self._rw_a20_hidden_parameters = {
+            "steel_x": dict(steel_x.parameters_si),
+            "steel_y_web": dict(steel_y_web.parameters_si),
+            "steel_y_boundary": dict(steel_y_boundary.parameters_si),
+            "concrete_web": dict(concrete_web.parameters_si),
+            "concrete_boundary": dict(concrete_boundary.parameters_si),
+        }
+
+        self.fc_web.setValue(
+            self._stress_display(abs(concrete_web.parameters_si["fpc"]))
+        )
+        self.eps_web.setValue(concrete_web.parameters_si["epsc0"])
+        self.fc_boundary.setValue(
+            self._stress_display(
+                abs(concrete_boundary.parameters_si["fpc"])
+            )
+        )
+        self.eps_boundary.setValue(
+            concrete_boundary.parameters_si["epsc0"]
+        )
+        self.ft.setValue(
+            self._stress_display(concrete_web.parameters_si["ft"])
+        )
         self.cracking_strain.setValue(0.00008)
         self.damage1.setValue(0.175)
         self.damage2.setValue(0.5)
         self.unconfined_layer.setValue(self._from_mm(50.8))
 
-        self.steel_E.setValue(self._stress_display(200.0e9))
-        self.fy_x.setValue(self._stress_display(469.93e6))
-        self.fy_y_web.setValue(self._stress_display(409.71e6))
-        self.fy_y_boundary.setValue(self._stress_display(429.78e6))
+        self.steel_E.setValue(
+            self._stress_display(steel_x.parameters_si["E0"])
+        )
+        self.fy_x.setValue(
+            self._stress_display(steel_x.parameters_si["Fy"])
+        )
+        self.fy_y_web.setValue(
+            self._stress_display(steel_y_web.parameters_si["Fy"])
+        )
+        self.fy_y_boundary.setValue(
+            self._stress_display(steel_y_boundary.parameters_si["Fy"])
+        )
         self.rho_x_web.setValue(0.27)
         self.rho_y_web.setValue(0.27)
         self.rho_x_boundary.setValue(0.82)
@@ -1876,11 +1922,61 @@ class RCWallWizard(QWizard):
             steel_fy_boundary=self._stress_store(
                 self.fy_y_boundary.value()
             ),
+            steel_bx=float(
+                self._rw_a20_hidden_parameters.get("steel_x", {}).get(
+                    "b", 0.02
+                )
+            ),
+            steel_by_web=float(
+                self._rw_a20_hidden_parameters.get("steel_y_web", {}).get(
+                    "b", 0.02
+                )
+            ),
+            steel_by_boundary=float(
+                self._rw_a20_hidden_parameters.get(
+                    "steel_y_boundary", {}
+                ).get("b", 0.01)
+            ),
             concrete_fc_web=-abs(fc_web),
             concrete_eps_web=float(self.eps_web.value()),
+            concrete_fcu_web=float(
+                self._rw_a20_hidden_parameters.get(
+                    "concrete_web", {}
+                ).get("fpcu", 0.0)
+            ),
+            concrete_epsu_web=float(
+                self._rw_a20_hidden_parameters.get(
+                    "concrete_web", {}
+                ).get("epsU", -0.037)
+            ),
             concrete_fc_boundary=-abs(fc_boundary),
             concrete_eps_boundary=float(self.eps_boundary.value()),
+            concrete_fcu_boundary=float(
+                self._rw_a20_hidden_parameters.get(
+                    "concrete_boundary", {}
+                ).get("fpcu", -9.42e6)
+            ),
+            concrete_epsu_boundary=float(
+                self._rw_a20_hidden_parameters.get(
+                    "concrete_boundary", {}
+                ).get("epsU", -0.047)
+            ),
             concrete_ft=abs(ft),
+            concrete_ets_web=float(
+                self._rw_a20_hidden_parameters.get(
+                    "concrete_web", {}
+                ).get("Ets", 1.73833e9)
+            ),
+            concrete_ets_boundary=float(
+                self._rw_a20_hidden_parameters.get(
+                    "concrete_boundary", {}
+                ).get("Ets", 1.82712e9)
+            ),
+            concrete_lambda=float(
+                self._rw_a20_hidden_parameters.get(
+                    "concrete_web", {}
+                ).get("lambda", 0.1)
+            ),
             cracking_strain=float(self.cracking_strain.value()),
             damage_cte1=float(self.damage1.value()),
             damage_cte2=float(self.damage2.value()),
