@@ -993,6 +993,7 @@ def test_rc_wall_gui_exposes_reinforcement_tree_and_display_controls():
     assert "Perfect Bond" in group_source
     assert '"reinforcement"' in viewport_source
     assert "_batched_reinforcement_mesh" in viewport_source
+    assert "rc-wall-rebar-web-vertical-" in viewport_source
     assert "Discrete reinforcement" in display_source
 
 
@@ -1126,6 +1127,38 @@ def test_rc_wall_wizard_exposes_embedded_vertical_web_bars():
         assert "Ready to create wall" in (
             dialog.preview_validation_status.text()
         )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_rc_wall_wizard_switching_back_to_smeared_clears_embedded_mode():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    dialog = RCWallWizard(project)
+    try:
+        dialog.reinforcement_mode.setCurrentIndex(
+            dialog.reinforcement_mode.findData("hybrid")
+        )
+        dialog.web_vertical_mode.setCurrentIndex(
+            dialog.web_vertical_mode.findData("embedded")
+        )
+        assert dialog.web_vertical_mode.currentData() == "embedded"
+
+        dialog.reinforcement_mode.setCurrentIndex(
+            dialog.reinforcement_mode.findData("smeared")
+        )
+        spec = dialog.data()
+
+        assert spec.reinforcement_mode == "smeared"
+        assert spec.web_vertical_mode == "smeared"
+        assert spec.web_horizontal_mode == "smeared"
+        assert not dialog.web_vertical_bar_diameter.isEnabled()
     finally:
         dialog.close()
         dialog.deleteLater()
