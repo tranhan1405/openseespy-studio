@@ -87,6 +87,21 @@ def test_nonmodal_catalog_exposes_shell_displacement_fringe():
         )
 
 
+def test_shell_catalog_exposes_principal_strain_components():
+    for analysis_type in ("Static", "Transient", "Pushover", "Cyclic"):
+        choices = result_choices_for_analysis(analysis_type)
+        shell_deformation = {
+            choice.settings.get("component"): choice
+            for choice in choices
+            if choice.result_type == "ShellDeformation"
+        }
+        assert "E1" in shell_deformation
+        assert "E2" in shell_deformation
+        assert shell_deformation["E1"].label == "Principal strain ε1"
+        assert shell_deformation["E2"].label == "Principal strain ε2"
+        assert shell_deformation["E1"].category == "Shell Results"
+
+
 def test_nonmodal_catalog_exposes_concrete_crack_pattern():
     for analysis_type in ("Static", "Transient", "Pushover", "Cyclic"):
         choices = result_choices_for_analysis(analysis_type)
