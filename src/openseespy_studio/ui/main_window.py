@@ -25137,9 +25137,8 @@ class MainWindow(QMainWindow):
                 cache_key=result_cache_key,
             )
         elif result_type == "ShellDisplacement":
-            self.viewport.show_node_contour(
+            self.viewport.show_shell_displacement_contour(
                 payload,
-                "Displacement",
                 str(options.get("component", "|U|")),
                 display_mode=str(
                     options.get("display_mode", "deformed_only")
@@ -33579,9 +33578,8 @@ class MainWindow(QMainWindow):
                 except (TypeError, ValueError):
                     continue
 
-        self.viewport.show_node_contour(
+        self.viewport.show_shell_displacement_contour(
             self._last_result,
-            "Displacement",
             str(component),
             display_mode=str(display_mode),
             deformation_scale=float(scale),
