@@ -10372,7 +10372,11 @@ class ProjectDatabase:
                         f"for ndf={self.model.ndf}."
                     )
 
-        if result.result_type in {"ShellForce", "ShellDeformation"}:
+        if result.result_type in {
+            "ShellForce",
+            "ShellDeformation",
+            "ShellDisplacement",
+        }:
             if result.result_type == "ShellForce":
                 allowed_components = {
                     "Nxx", "Nyy", "Nxy",
@@ -10380,13 +10384,16 @@ class ProjectDatabase:
                     "Qx", "Qy",
                 }
                 default_component = "Nxx"
-            else:
+            elif result.result_type == "ShellDeformation":
                 allowed_components = {
                     "Exx", "Eyy", "Gxy", "E1", "E2",
                     "Kxx", "Kyy", "Kxy",
                     "Gxz", "Gyz",
                 }
                 default_component = "Exx"
+            else:
+                allowed_components = {"|U|", "UX", "UY", "UZ"}
+                default_component = "|U|"
             component = str(
                 result.settings.get("component", default_component)
             )
