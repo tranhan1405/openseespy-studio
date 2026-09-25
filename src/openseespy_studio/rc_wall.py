@@ -563,6 +563,7 @@ def build_rc_wall(
         discrete_area = _boundary_discrete_area(spec)
         next_rebar_tag = project.next_element_tag()
         for side in (0, 1):
+            side_name = "left" if side == 0 else "right"
             for row in range(rows):
                 while (
                     next_rebar_tag in model.elements
@@ -576,7 +577,7 @@ def build_rc_wall(
                     i,
                     j,
                     element_type=str(spec.boundary_truss_type),
-                    group="rc-wall-rebar",
+                    group=f"rc-wall-rebar-{side_name}",
                     truss_area=float(discrete_area),
                     truss_material_tag=int(syb),
                 )
