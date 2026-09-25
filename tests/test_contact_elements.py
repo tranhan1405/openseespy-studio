@@ -132,11 +132,11 @@ def test_contact_material_generation():
 
     script = _script(project)
     assert (
-        "ops.nDMaterial('ContactMaterial2D', 21, 0.3, 100, 2, 1)"
+        "ops.nDMaterial('ContactMaterial2D', 21, 0.3, 100000, 2000, 1000)"
         in script
     )
     assert (
-        "ops.nDMaterial('ContactMaterial3D', 22, 0.4, 200, 3, 1.5)"
+        "ops.nDMaterial('ContactMaterial3D', 22, 0.4, 200000, 3000, 1500)"
         in script
     )
 
