@@ -155,6 +155,26 @@ def result_choices_for_analysis(
         )
 
     for label, component in (
+        ("Shell Total Displacement", "|U|"),
+        ("Shell Displacement UX", "UX"),
+        ("Shell Displacement UY", "UY"),
+        ("Shell Displacement UZ", "UZ"),
+    ):
+        choices.append(
+            ResultChoice(
+                "Shell Results",
+                label,
+                "ShellDisplacement",
+                label,
+                {
+                    "component": component,
+                    "scale": 10.0,
+                    "display_mode": "deformed_only",
+                },
+            )
+        )
+
+    for label, component in (
         ("Membrane Nxx", "Nxx"),
         ("Membrane Nyy", "Nyy"),
         ("Membrane Nxy", "Nxy"),
