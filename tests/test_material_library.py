@@ -24,7 +24,7 @@ def _record(record_id: str):
 def test_verified_material_library_contains_only_traceable_records():
     records = load_verified_material_library()
 
-    assert len(records) == 187
+    assert len(records) == 192
     assert all(record.is_verified for record in records)
     assert all(record.doi for record in records)
     assert all(
@@ -222,7 +222,7 @@ def test_moodley_2026_records_encode_model_applicability():
     )
 
 
-def test_verified_library_reaches_one_hundred_eighty_seven_with_expected_source_counts():
+def test_verified_library_reaches_one_hundred_ninety_two_with_expected_source_counts():
     records = load_verified_material_library()
     prefixes = {
         "carreno-2020-": 2,
@@ -251,10 +251,11 @@ def test_verified_library_reaches_one_hundred_eighty_seven_with_expected_source_
         "megalooikonomou-2012-": 1,
         "vaiana-2018-": 1,
         "yao-2021-": 3,
+        "opensees-mefi-rwa20-": 5,
     }
 
-    assert len(records) == 187
-    assert len({record.id for record in records}) == 187
+    assert len(records) == 192
+    assert len({record.id for record in records}) == 192
     for prefix, expected in prefixes.items():
         assert sum(
             record.id.startswith(prefix)
@@ -1218,3 +1219,71 @@ def test_legacy_manual_hysteretic_remains_raw_for_backward_compatibility():
     )
 
     assert "'Hysteretic', 41, 1, 0.001, 1.2, 0.01" in command
+
+def test_opensees_mefi_rw_a20_steel02_presets_are_exact():
+    steel_x = _record("opensees-mefi-rwa20-steel-x-steel02")
+    steel_y_web = _record("opensees-mefi-rwa20-steel-y-web-steel02")
+    steel_y_boundary = _record(
+        "opensees-mefi-rwa20-steel-y-boundary-steel02"
+    )
+
+    assert steel_x.parameters_si == {
+        "Fy": 469.93e6,
+        "E0": 200.0e9,
+        "b": 0.02,
+        "R0": 20.0,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0.0,
+        "a2": 1.0,
+        "a3": 0.0,
+        "a4": 1.0,
+    }
+    assert steel_y_web.parameters_si["Fy"] == 409.71e6
+    assert steel_y_web.parameters_si["b"] == 0.02
+    assert steel_y_boundary.parameters_si["Fy"] == 429.78e6
+    assert steel_y_boundary.parameters_si["b"] == 0.01
+    assert all(
+        record.doi == "10.1016/j.engstruct.2021.113819"
+        for record in (steel_x, steel_y_web, steel_y_boundary)
+    )
+    assert all(
+        "MEFI" in str(record.parameter_evidence.get("title", ""))
+        for record in (steel_x, steel_y_web, steel_y_boundary)
+    )
+
+
+def test_opensees_mefi_rw_a20_concrete02_presets_are_exact():
+    unconfined = _record("opensees-mefi-rwa20-unconfined-concrete02")
+    confined = _record("opensees-mefi-rwa20-confined-concrete02")
+
+    assert unconfined.parameters_si == {
+        "fpc": -47.09e6,
+        "epsc0": -0.00232,
+        "fpcu": 0.0,
+        "epsU": -0.037,
+        "lambda": 0.1,
+        "ft": 2.13e6,
+        "Ets": 1738.33e6,
+    }
+    assert confined.parameters_si == {
+        "fpc": -53.78e6,
+        "epsc0": -0.00397,
+        "fpcu": -9.42e6,
+        "epsU": -0.047,
+        "lambda": 0.1,
+        "ft": 2.13e6,
+        "Ets": 1827.12e6,
+    }
+    assert unconfined.doi == "10.1016/j.engstruct.2021.113819"
+    assert confined.doi == "10.1016/j.engstruct.2021.113819"
+
+    command = material_to_openseespy(
+        material_from_library_record(confined, tag=88),
+        {"length": "mm", "force": "N", "time": "s"},
+    )
+    assert (
+        "ops.uniaxialMaterial('Concrete02', 88, -53.78, -0.00397, "
+        "-9.42, -0.047, 0.1, 2.13, 1827.12)"
+    ) == command
+
