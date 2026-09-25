@@ -73,7 +73,7 @@ when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
 values are not silently promoted to verified presets.
 
-The library currently contains **187 verified parameter records**:
+The library currently contains **192 verified parameter records**:
 
 - 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
   DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
@@ -120,6 +120,12 @@ The library currently contains **187 verified parameter records**:
   DOI `10.2174/1874149501509010236`.
 - 2 Concrete02 records (unconfined and confined shear-wall concrete) from
   Hung and El-Tawil (2009), DOI `10.1002/eqe.921`.
+- 5 verified RW-A20-P10-S38 wall presets from the official OpenSees MEFI
+  validation example: three Steel02 reinforcement sets (X, Y-web and
+  Y-boundary) plus unconfined and confined Concrete02. The example is tied to
+  López, Rojas and Massone (2022), DOI
+  `10.1016/j.engstruct.2021.113819`; exact numerical evidence is retained
+  from the OpenSees material-definition block.
 - 1 Concrete04 beam-column concrete record from Yigitbas, Grande and
   Imbimbo (2026), DOI `10.65102/is202545`.
 - 3 calibrated Fatigue wrapper records for 6082-T6, 6063-T6 and 6060-T5
@@ -166,7 +172,7 @@ The library currently contains **187 verified parameter records**:
   reference/preview but disables project insertion, export and runtime
   material testing.
 
-These are **published/calibrated parameter records**, not 187 unrelated
+These are **traceable published/calibrated or official-validation parameter records**, not 192 unrelated
 chemical materials. FEWIZ exposes specimen/configuration, modelling
 representation, applicability and limitations so a paper-specific parameter
 set is not mistaken for a universal material-grade default.
