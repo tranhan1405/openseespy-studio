@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -394,17 +395,55 @@ class RCWallWizard(QWizard):
         self._build_reinforcement_page()
         self._build_review_page()
 
-        self.currentIdChanged.connect(
-            lambda _page: self._update_review()
-        )
+        self.currentIdChanged.connect(self._page_changed)
         self._apply_rw_a20_preset()
         self._update_review()
+
+    def _page_changed(self, _page: int) -> None:
+        self._update_review()
+        page_to_scroll = {
+            0: getattr(self, "geometry_scroll", None),
+            1: getattr(self, "concrete_scroll", None),
+            2: getattr(self, "reinforcement_scroll", None),
+            3: getattr(self, "preview_scroll", None),
+        }
+        scroll = page_to_scroll.get(int(_page))
+        if scroll is not None:
+            scroll.verticalScrollBar().setValue(0)
 
     def _stress_display(self, value_pa: float) -> float:
         return self.units.engineering_stress_from_pa(value_pa)
 
     def _stress_store(self, value: float) -> float:
         return self.units.engineering_stress_to_pa(value)
+
+    def _scrollable_page_body(
+        self,
+        page: QWizardPage,
+        name: str,
+    ) -> QWidget:
+        """Keep wizard navigation fixed while page content scrolls vertically."""
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea(page)
+        scroll.setObjectName(f"rc-wall-{name}-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+
+        body = QWidget()
+        body.setObjectName(f"rc-wall-{name}-scroll-body")
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
+
+        setattr(self, f"{name}_scroll", scroll)
+        return body
 
     def _build_geometry_page(self) -> None:
         page = QWizardPage()
@@ -414,7 +453,8 @@ class RCWallWizard(QWizard):
             "MEFI model. Choose Replace for a standalone wall or Append "
             "to place a wall at a project-space origin."
         )
-        layout = QVBoxLayout(page)
+        body = self._scrollable_page_body(page, "geometry")
+        layout = QVBoxLayout(body)
         form = QFormLayout()
 
         self.preset = QComboBox()
@@ -506,7 +546,8 @@ class RCWallWizard(QWizard):
             "Concrete02 creates the uniaxial laws; OrthotropicRAConcrete "
             "wraps them into plane-stress concrete layers."
         )
-        form = QFormLayout(page)
+        body = self._scrollable_page_body(page, "concrete")
+        form = QFormLayout(body)
         stress = self.units.engineering_stress_label
 
         self.fc_web = _double(47.09, 0.0)
@@ -576,7 +617,8 @@ class RCWallWizard(QWizard):
             "SmearedSteelDoubleLayer converts reinforcement ratios to "
             "the membrane representation used by RCLMS."
         )
-        form = QFormLayout(page)
+        body = self._scrollable_page_body(page, "reinforcement")
+        form = QFormLayout(body)
         stress = self.units.engineering_stress_label
 
         self.steel_E = _double(200000.0, 1.0e-9)
@@ -910,7 +952,8 @@ class RCWallWizard(QWizard):
             "Review the exact wall layout and the SARE objects that will be "
             "created before accepting the wizard."
         )
-        layout = QVBoxLayout(page)
+        body = self._scrollable_page_body(page, "preview")
+        layout = QVBoxLayout(body)
 
         preview_row = QHBoxLayout()
         preview_column = QVBoxLayout()
