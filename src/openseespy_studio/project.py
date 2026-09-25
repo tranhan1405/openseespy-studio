@@ -4329,8 +4329,14 @@ class LineGeometryData:
             self.integration_points,
             "Line integration points",
         )
-        if not 2 <= self.integration_points <= 20:
-            raise ValueError("Line integration points must be in 2..20.")
+        minimum_points = (
+            1 if self.element_type == "dispBeamColumnInt" else 2
+        )
+        if not minimum_points <= self.integration_points <= 20:
+            raise ValueError(
+                "Line integration points must be in "
+                f"{minimum_points}..20 for {self.element_type}."
+            )
         self.mass_per_length = float(self.mass_per_length)
         if (
             not math.isfinite(self.mass_per_length)
