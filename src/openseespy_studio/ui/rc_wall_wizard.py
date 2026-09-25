@@ -486,6 +486,15 @@ class RCWallWizard(QWizard):
         self.boundary_truss_type.currentIndexChanged.connect(
             lambda _index: self._mark_custom()
         )
+        self.boundary_bar_count.valueChanged.connect(
+            lambda _value: self._update_preview()
+        )
+        self.boundary_bar_diameter.valueChanged.connect(
+            lambda _value: self._update_preview()
+        )
+        self.rho_y_boundary.valueChanged.connect(
+            lambda _value: self._update_reinforcement_info()
+        )
         self._sync_reinforcement_mode()
 
         self.addPage(page)
