@@ -85,7 +85,7 @@ jobs:
         if: steps.existing.outputs.exists != 'true'
         shell: pwsh
         run: |
-          $zip = ".\dist\OpenSeesPy-Studio-$env:DISPLAY_VERSION-Windows-x64-portable.zip"
+          $zip = ".\dist\FEWIZ-$env:DISPLAY_VERSION-Windows-x64-portable.zip"
           Compress-Archive -Path ".\dist\OpenSeesPyStudio\*" -DestinationPath $zip -Force
 
       - name: Install Inno Setup
@@ -112,8 +112,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $installer = (Get-ChildItem ".\dist\installer\OpenSeesPy-Studio-$env:DISPLAY_VERSION-Setup.exe").FullName
-          $portable = (Get-ChildItem ".\dist\OpenSeesPy-Studio-$env:DISPLAY_VERSION-Windows-x64-portable.zip").FullName
+          $installer = (Get-ChildItem ".\dist\installer\FEWIZ-$env:DISPLAY_VERSION-Setup.exe").FullName
+          $portable = (Get-ChildItem ".\dist\FEWIZ-$env:DISPLAY_VERSION-Windows-x64-portable.zip").FullName
 
           if (-not (Test-Path $installer)) {
             throw "Installer asset is missing."

@@ -59,7 +59,7 @@ jobs:
       - name: Create portable ZIP
         shell: pwsh
         run: |
-          $zip = ".\dist\OpenSeesPy-Studio-$env:STUDIO_VERSION-Windows-x64-portable.zip"
+          $zip = ".\dist\FEWIZ-$env:STUDIO_VERSION-Windows-x64-portable.zip"
           Compress-Archive -Path ".\dist\OpenSeesPyStudio\*" -DestinationPath $zip -Force
 
       - name: Install Inno Setup
@@ -91,8 +91,8 @@ jobs:
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OpenSeesPy-Studio-${{ env.STUDIO_VERSION }}-Windows-x64
+          name: FEWIZ-${{ env.STUDIO_VERSION }}-Windows-x64
           path: |
-            dist/OpenSeesPy-Studio-*-Windows-x64-portable.zip
+            dist/FEWIZ-*-Windows-x64-portable.zip
             dist/installer/*.exe
           if-no-files-found: error
