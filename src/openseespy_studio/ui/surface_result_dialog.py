@@ -103,9 +103,9 @@ class SurfaceResultDialog(QDialog):
         self.location.addItem("Top (+z)", "top")
         self.location.addItem("Bottom (-z)", "bottom")
         self.location.setToolTip(
-            "For strain components, Top/Bottom follows OpenSees "
-            "plate-fiber kinematics ε(z)=ε0−zκ at z=±h/2 using the "
-            "Shell section thickness."
+            "For membrane/principal strain, Top/Bottom is derived from "
+            "the generalized Shell section deformation with the SARE "
+            "display convention ε(z)=ε0+zκ at z=±h/2."
         )
 
         form.addRow("Tag:", self.tag)
@@ -134,6 +134,9 @@ class SurfaceResultDialog(QDialog):
 
         self.result_type.currentIndexChanged.connect(
             self._refresh_components
+        )
+        self.component.currentIndexChanged.connect(
+            self._refresh_location_visibility
         )
         self._refresh_components()
         if result is not None:
@@ -191,15 +194,14 @@ class SurfaceResultDialog(QDialog):
             options = FORCE_COMPONENTS
         else:
             options = DEFORMATION_COMPONENTS
+        self.component.blockSignals(True)
         self.component.clear()
         self.component.addItems(list(options))
-        self.location.setVisible(result_type == "ShellDeformation")
-        location_label = self.form.labelForField(self.location)
-        if location_label is not None:
-            location_label.setVisible(result_type == "ShellDeformation")
         index = self.component.findText(current)
         if index >= 0:
             self.component.setCurrentIndex(index)
+        self.component.blockSignals(False)
+        self._refresh_location_visibility()
         if not self.name.text().strip() or self.name.text().startswith(
             "Surface Shell "
         ):
@@ -211,6 +213,22 @@ class SurfaceResultDialog(QDialog):
                     if result_type == "ShellForce"
                     else "Surface Shell Deformation"
                 )
+            )
+
+    def _refresh_location_visibility(self, *_args) -> None:
+        result_type = str(self.result_type.currentData())
+        component = self.component.currentText()
+        visible = (
+            result_type == "ShellDeformation"
+            and component in {"Exx", "Eyy", "Gxy", "E1", "E2"}
+        )
+        self.location.setVisible(visible)
+        location_label = self.form.labelForField(self.location)
+        if location_label is not None:
+            location_label.setVisible(visible)
+        if not visible:
+            self.location.setCurrentIndex(
+                max(0, self.location.findData("mid"))
             )
 
     def data(self) -> SolutionResultData:
