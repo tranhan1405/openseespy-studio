@@ -5957,7 +5957,11 @@ def to_openseespy(
             else min(model.nodes, default=1)
         )
         result_element_tags = sorted(
-            set(model.elements)
+            {
+                int(tag)
+                for tag, element in model.elements.items()
+                if element.element_type not in EMBEDDED_ELEMENT_TYPES
+            }
             | {
                 tag
                 for tag, connection in (connections or {}).items()
