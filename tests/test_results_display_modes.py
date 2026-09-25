@@ -153,8 +153,12 @@ def test_shell_principal_strain_renderer_and_main_window_wiring():
     )
 
     assert "shell_principal_strains" in viewport_source
+    assert "shell_surface_strains" in viewport_source
+    assert "shell_total_thickness" in viewport_source
     assert '"E1"' in viewport_source
     assert '"E2"' in viewport_source
+    assert '"top"' in viewport_source
+    assert '"bottom"' in viewport_source
     assert 'result_type == "ShellDeformation"' in render_source
     assert "show_shell_deformation_contour" in handler_source
 
