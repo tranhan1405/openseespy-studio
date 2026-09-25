@@ -837,21 +837,34 @@ class _Importer:
         kind = str(args[0])
         tag = int(args[1])
         if kind == "Elastic":
-            if len(args) < 8:
+            if len(args) < 5:
                 raise ValueError("Elastic section has too few arguments")
+            parameters = {
+                "E": self.stress_to_pa(args[2]),
+                "A": float(args[3]),
+                "Iz": float(args[4]),
+            }
+            if len(args) >= 8:
+                parameters.update({
+                    "Iy": float(args[5]),
+                    "G": self.stress_to_pa(args[6]),
+                    "J": float(args[7]),
+                })
+            else:
+                # OpenSees' 2D Elastic section signature is E, A, Iz.
+                # Keep the unused 3D-only terms neutral so a FEWIZ
+                # export/import round trip preserves the 2D definition.
+                parameters.update({
+                    "Iy": 0.0,
+                    "G": 0.0,
+                    "J": 0.0,
+                })
             self.project.add_section(
                 SectionData(
                     tag,
                     f"Imported Elastic {tag}",
                     "Elastic",
-                    parameters={
-                        "E": self.stress_to_pa(args[2]),
-                        "A": float(args[3]),
-                        "Iz": float(args[4]),
-                        "Iy": float(args[5]),
-                        "G": self.stress_to_pa(args[6]),
-                        "J": float(args[7]),
-                    },
+                    parameters=parameters,
                 )
             )
             self.current_fiber_section = None
