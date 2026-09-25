@@ -476,6 +476,70 @@ def _boundary_smeared_ratio(spec: RCWallSpec) -> float:
     return float(spec.rho_y_boundary) - _boundary_discrete_ratio(spec)
 
 
+def rc_wall_reinforcement_summary(
+    spec: RCWallSpec,
+) -> dict[str, object]:
+    """Return the effective reinforcement layout used by the wall builder."""
+    mode = _reinforcement_mode(spec)
+    positions, vertical_area, vertical_diameter = _web_vertical_layout(spec)
+    boundary_discrete = _boundary_discrete_ratio(spec)
+    web_horizontal_discrete = _web_horizontal_discrete_ratio(spec)
+    boundary_horizontal_discrete = _boundary_horizontal_discrete_ratio(spec)
+    web_vertical_discrete = _web_vertical_discrete_ratio(spec)
+    return {
+        "mode": mode,
+        "fully_discrete": mode == "fully_discrete",
+        "boundary_bar_area": _boundary_bar_area(spec),
+        "boundary_equivalent_diameter": _boundary_effective_diameter(spec),
+        "boundary_bar_spacing": _boundary_bar_spacing(spec),
+        "boundary_discrete_rho_y": boundary_discrete,
+        "boundary_smeared_rho_y": max(
+            0.0,
+            float(spec.rho_y_boundary) - boundary_discrete,
+        ),
+        "horizontal_line_count": _horizontal_line_count(spec),
+        "horizontal_layer_count": len(
+            _web_horizontal_layer_layout(spec)
+        ),
+        "web_horizontal_bar_area": _web_horizontal_bar_area(spec),
+        "web_horizontal_equivalent_diameter": _equivalent_diameter(
+            _web_horizontal_bar_area(spec)
+        ),
+        "boundary_horizontal_bar_area": _boundary_horizontal_bar_area(spec),
+        "boundary_horizontal_equivalent_diameter": _equivalent_diameter(
+            _boundary_horizontal_bar_area(spec)
+        ),
+        "web_horizontal_discrete_rho_x": web_horizontal_discrete,
+        "boundary_horizontal_discrete_rho_x": (
+            boundary_horizontal_discrete
+        ),
+        "web_smeared_rho_x": max(
+            0.0,
+            float(spec.rho_x_web) - web_horizontal_discrete,
+        ),
+        "boundary_smeared_rho_x": max(
+            0.0,
+            float(spec.rho_x_boundary)
+            - boundary_horizontal_discrete,
+        ),
+        "web_vertical_positions": positions,
+        "web_vertical_bar_area": vertical_area,
+        "web_vertical_equivalent_diameter": vertical_diameter,
+        "web_vertical_actual_spacing": _web_vertical_actual_spacing(spec),
+        "web_vertical_discrete_rho_y": web_vertical_discrete,
+        "web_smeared_rho_y": max(
+            0.0,
+            float(spec.rho_y_web) - web_vertical_discrete,
+        ),
+        "embedded_penalty": _embedded_penalty(spec)
+        if (
+            mode == "fully_discrete"
+            or str(spec.web_vertical_mode).strip().lower() == "embedded"
+        )
+        else 0.0,
+    }
+
+
 def _validate(spec: RCWallSpec) -> None:
     numeric_values = {
         item.name: float(getattr(spec, item.name))
