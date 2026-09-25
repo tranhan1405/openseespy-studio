@@ -12,6 +12,7 @@ from .model import (
     CONTACT_TWO_NODE_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
+    FRICTION_BEARING_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SUPPORTED_ELEMENT_TYPES,
     TRUSS_MATERIAL_ELEMENT_TYPES,
@@ -974,6 +975,81 @@ def _element_geometry_checks(
                         "element",
                         tag,
                         "Use a 3D model with 3 translational DOF per node.",
+                    )
+                )
+            continue
+
+        if element.element_type in FRICTION_BEARING_ELEMENT_TYPES:
+            signature = (int(model.ndm), int(model.ndf))
+            if signature not in {(2, 3), (3, 6)}:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing formulation",
+                        f"{element.element_type} element {tag} requires "
+                        f"2D/3DOF or 3D/6DOF; got "
+                        f"ndm={model.ndm}, ndf={model.ndf}.",
+                        "element",
+                        tag,
+                        "Use a 2D/3DOF or 3D/6DOF structural model.",
+                    )
+                )
+            referenced = {
+                int(value)
+                for key in (
+                    "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                )
+                for value in [element.special_parameters.get(key)]
+                if value is not None
+            }
+            missing = sorted(
+                mat_tag
+                for mat_tag in referenced
+                if mat_tag not in project.materials
+            )
+            if missing:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing material",
+                        f"{element.element_type} element {tag} references "
+                        "missing uniaxial material tag(s): "
+                        + ", ".join(map(str, missing))
+                        + ".",
+                        "element",
+                        tag,
+                        "Assign existing uniaxial materials to all bearing "
+                        "directions.",
+                    )
+                )
+            friction_tag = int(
+                element.special_parameters["frn_model_tag"]
+            )
+            if friction_tag not in project.friction_models:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Friction model",
+                        f"{element.element_type} element {tag} references "
+                        f"missing friction model tag {friction_tag}.",
+                        "element",
+                        tag,
+                        "Create and assign an existing Friction Model.",
+                    )
+                )
+            if signature == (3, 6) and (
+                element.special_parameters.get("t_mat_tag") is None
+                or element.special_parameters.get("my_mat_tag") is None
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing material",
+                        f"3D {element.element_type} element {tag} requires "
+                        "axial, torsion, My, and Mz materials.",
+                        "element",
+                        tag,
+                        "Assign all four 3D bearing material directions.",
                     )
                 )
             continue
