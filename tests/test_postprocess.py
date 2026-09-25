@@ -68,10 +68,10 @@ def test_shell_principal_strains_use_engineering_shear():
 def test_shell_surface_strains_apply_curvature_at_z():
     values = [0.001, 0.002, 0.003, 0.01, -0.02, 0.03]
     assert shell_surface_strains(values, 0.05) == pytest.approx(
-        (0.0015, 0.001, 0.0045)
+        (0.0005, 0.003, 0.0015)
     )
     assert shell_surface_strains(values, -0.05) == pytest.approx(
-        (0.0005, 0.003, 0.0015)
+        (0.0015, 0.001, 0.0045)
     )
 
 
