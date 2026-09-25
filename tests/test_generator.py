@@ -97,6 +97,35 @@ def test_generator_does_not_invent_hidden_transformation():
 
 
 
+def test_generator_emits_corot_truss_command():
+    model = StructuralModel(ndm=2, ndf=3)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 0.0, 3.0)
+    model.add_element(
+        1,
+        1,
+        2,
+        element_type="corotTruss",
+        group="reinforcement",
+        truss_area=0.0008,
+        truss_material_tag=5,
+    )
+    materials = {
+        5: MaterialData(
+            5,
+            "Rebar",
+            "Steel02",
+        )
+    }
+
+    code = to_openseespy(
+        model,
+        materials=materials,
+    )
+
+    assert "ops.element('corotTruss', 1, 1, 2, 0.0008, 5)" in code
+
+
 def test_research_material_library_generates_supported_commands():
     material_types = (
         "Concrete01",
