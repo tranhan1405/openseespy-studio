@@ -58,6 +58,15 @@ class RCWallSpec:
     rho_x_boundary: float = 0.0082
     rho_y_boundary: float = 0.0323
 
+    # Hybrid V1 keeps web steel smeared and may move part of the boundary
+    # longitudinal steel into discrete perfect-bond truss lines. Because the
+    # current MEFI wall has nodes only on its two vertical edges, each edge
+    # line represents the total discrete bar area of one boundary zone.
+    reinforcement_mode: str = "smeared"
+    boundary_bar_count: int = 4
+    boundary_bar_diameter: float = 0.016
+    boundary_truss_type: str = "corotTruss"
+
     boundary_unconfined_thickness: float = 0.0508
     boundary_confined_thickness: float = 0.1016
 
@@ -76,6 +85,10 @@ class RCWallBuildResult:
     boundary_section_tag: int = 0
     top_node_tags: tuple[int, int] = (0, 0)
     selection_set_names: tuple[str, ...] = ()
+    reinforcement_element_tags: list[int] = field(default_factory=list)
+    reinforcement_selection_name: str = ""
+    boundary_discrete_rho_y: float = 0.0
+    boundary_smeared_rho_y: float = 0.0
 
 
 def _next_tags(store: dict[int, object], count: int) -> list[int]:
@@ -86,6 +99,25 @@ def _next_tags(store: dict[int, object], count: int) -> list[int]:
             tags.append(candidate)
         candidate += 1
     return tags
+
+
+def _boundary_discrete_area(spec: RCWallSpec) -> float:
+    if str(spec.reinforcement_mode).strip().lower() != "hybrid":
+        return 0.0
+    diameter = float(spec.boundary_bar_diameter)
+    count = int(spec.boundary_bar_count)
+    return count * math.pi * diameter * diameter / 4.0
+
+
+def _boundary_discrete_ratio(spec: RCWallSpec) -> float:
+    gross = float(spec.boundary_width) * float(spec.thickness)
+    if gross <= 0.0:
+        return 0.0
+    return _boundary_discrete_area(spec) / gross
+
+
+def _boundary_smeared_ratio(spec: RCWallSpec) -> float:
+    return float(spec.rho_y_boundary) - _boundary_discrete_ratio(spec)
 
 
 def _validate(spec: RCWallSpec) -> None:
@@ -187,6 +219,34 @@ def _validate(spec: RCWallSpec) -> None:
     ):
         if not 0.0 <= float(value) <= 1.0:
             raise ValueError(f"{name} must be a reinforcement ratio in [0, 1].")
+
+    reinforcement_mode = str(spec.reinforcement_mode).strip().lower()
+    if reinforcement_mode not in {"smeared", "hybrid"}:
+        raise ValueError(
+            "reinforcement_mode must be 'smeared' or 'hybrid'."
+        )
+    if str(spec.boundary_truss_type) not in {"truss", "corotTruss"}:
+        raise ValueError(
+            "boundary_truss_type must be 'truss' or 'corotTruss'."
+        )
+    if reinforcement_mode == "hybrid":
+        if int(spec.boundary_bar_count) < 1:
+            raise ValueError(
+                "Hybrid reinforcement requires at least one longitudinal "
+                "bar per boundary zone."
+            )
+        if float(spec.boundary_bar_diameter) <= 0.0:
+            raise ValueError(
+                "Hybrid boundary bar diameter must be positive."
+            )
+        discrete_ratio = _boundary_discrete_ratio(spec)
+        remaining_ratio = _boundary_smeared_ratio(spec)
+        tolerance = max(1.0e-12, 1.0e-9 * float(spec.rho_y_boundary))
+        if remaining_ratio < -tolerance:
+            raise ValueError(
+                "Discrete boundary longitudinal steel exceeds the specified "
+                "boundary rho-y. Reduce bar count/diameter or increase rho-y."
+            )
 
 
 def _validate_append_location(
@@ -386,6 +446,11 @@ def build_rc_wall(
             },
         )
     )
+    boundary_smeared_rho_y = max(
+        0.0,
+        _boundary_smeared_ratio(spec),
+    )
+    boundary_discrete_rho_y = _boundary_discrete_ratio(spec)
     project.add_nd_material(
         NDMaterialData(
             steel_boundary,
@@ -395,7 +460,7 @@ def build_rc_wall(
                 "mat1": float(sx),
                 "mat2": float(syb),
                 "ratio1": float(spec.rho_x_boundary),
-                "ratio2": float(spec.rho_y_boundary),
+                "ratio2": float(boundary_smeared_rho_y),
                 "orientation": 0.0,
             },
         )
@@ -492,6 +557,32 @@ def build_rc_wall(
         )
         element_tags.append(tag)
 
+    reinforcement_element_tags: list[int] = []
+    reinforcement_selection_name = ""
+    if str(spec.reinforcement_mode).strip().lower() == "hybrid":
+        discrete_area = _boundary_discrete_area(spec)
+        next_rebar_tag = project.next_element_tag()
+        for side in (0, 1):
+            for row in range(rows):
+                while (
+                    next_rebar_tag in model.elements
+                    or next_rebar_tag in project.connections
+                ):
+                    next_rebar_tag += 1
+                i = node_tags[2 * row + side]
+                j = node_tags[2 * (row + 1) + side]
+                model.add_element(
+                    next_rebar_tag,
+                    i,
+                    j,
+                    element_type=str(spec.boundary_truss_type),
+                    group="rc-wall-rebar",
+                    truss_area=float(discrete_area),
+                    truss_material_tag=int(syb),
+                )
+                reinforcement_element_tags.append(next_rebar_tag)
+                next_rebar_tag += 1
+
     selection_set_names = (
         _unique_selection_name(project, f"{spec.name} · Base"),
         _unique_selection_name(project, f"{spec.name} · Top"),
@@ -515,6 +606,17 @@ def build_rc_wall(
             element_tags=set(element_tags),
         )
     )
+    if reinforcement_element_tags:
+        reinforcement_selection_name = _unique_selection_name(
+            project,
+            f"{spec.name} · Discrete Boundary Steel",
+        )
+        project.add_selection_set(
+            SelectionSetData(
+                reinforcement_selection_name,
+                element_tags=set(reinforcement_element_tags),
+            )
+        )
 
     return RCWallBuildResult(
         node_tags=node_tags,
@@ -526,4 +628,8 @@ def build_rc_wall(
         boundary_section_tag=boundary_section,
         top_node_tags=(node_tags[-2], node_tags[-1]),
         selection_set_names=selection_set_names,
+        reinforcement_element_tags=reinforcement_element_tags,
+        reinforcement_selection_name=reinforcement_selection_name,
+        boundary_discrete_rho_y=float(boundary_discrete_rho_y),
+        boundary_smeared_rho_y=float(boundary_smeared_rho_y),
     )
