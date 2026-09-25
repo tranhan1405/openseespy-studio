@@ -1815,6 +1815,8 @@ def test_unified_wall_builder_creates_stacked_mvlem_from_wizard_geometry():
         formulation="MVLEM",
         macro_center_ratio=0.4,
         macro_shear_material_tag=1,
+        boundary_unconfined_thickness=0.05,
+        boundary_confined_thickness=0.15,
         replace_geometry=True,
         name="MVLEM Wizard Wall",
     )
@@ -1886,6 +1888,8 @@ def test_unified_wall_builder_creates_stacked_sfi_mvlem_with_fsam_mapping():
         macro_center_ratio=0.4,
         macro_web_fsam_tag=1,
         macro_boundary_fsam_tag=2,
+        boundary_unconfined_thickness=0.05,
+        boundary_confined_thickness=0.15,
         replace_geometry=True,
         name="SFI Wizard Wall",
     )
