@@ -87,6 +87,21 @@ def _panel_candidates(
     return [final_row] if final_row else []
 
 
+
+def crack_severity(ratio: float | None) -> str:
+    """Classify a cracked panel by epsilon_1 / epsilon_cr."""
+    try:
+        value = float(ratio) if ratio is not None else 0.0
+    except (TypeError, ValueError):
+        return "none"
+    if not math.isfinite(value) or value < 1.0:
+        return "none"
+    if value < 2.0:
+        return "mild"
+    if value < 5.0:
+        return "moderate"
+    return "severe"
+
 def mefi_crack_panel_states(
     result: dict[str, Any] | None,
     *,
