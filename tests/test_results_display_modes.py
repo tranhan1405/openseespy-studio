@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QFileDialog
 
+from openseespy_studio.crack_results import crack_severity
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.results_panel import ResultsPanel
 from openseespy_studio.ui.viewport import ModelViewport
@@ -136,6 +137,45 @@ def test_solution_result_restores_display_mode(qapp):
         qapp.processEvents()
 
 
+
+
+def test_shell_displacement_has_dedicated_shell_fringe_controls(qapp):
+    panel = ResultsPanel()
+    captured = []
+    panel.shell_displacement_requested.connect(
+        lambda component, scale, mode, scope: captured.append(
+            (str(component), float(scale), str(mode), list(scope))
+        )
+    )
+    try:
+        panel.show_solution_result(
+            "ShellDisplacement",
+            {
+                "component": "UY",
+                "scale": 12.5,
+                "display_mode": "both",
+                "_element_scope": [20, 21],
+            },
+        )
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == "Shell Results"
+        assert (
+            panel.shell_detail_tabs.tabText(
+                panel.shell_detail_tabs.currentIndex()
+            )
+            == "Displacement"
+        )
+        assert panel.shell_disp_component.currentText() == "UY"
+        assert panel.shell_disp_scale.value() == pytest.approx(12.5)
+        assert panel.shell_disp_display.currentData() == "both"
+
+        panel.shell_disp_component.setCurrentText("UX")
+        qapp.processEvents()
+        assert captured
+        assert captured[-1] == ("UX", pytest.approx(12.5), "both", [20, 21])
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
 
 
 def test_crack_pattern_result_restores_controls_and_reports_panels(qapp):
@@ -1070,12 +1110,24 @@ def test_crack_pattern_renderer_is_high_contrast_and_diagnostic():
 
     assert "mefi_crack_panel_states" in source
     assert "mefi_crack_summary" in source
-    assert 'color="#c62828"' in source
+    assert "#f9a825" in source
+    assert "#ef6c00" in source
+    assert "#c62828" in source
     assert ".tube(" in source
     assert "n_sides=8" in source
     assert "line_width=3" in source
     assert "lighting=False" in source
     assert "return stats" in source
+
+
+def test_crack_severity_thresholds():
+    assert crack_severity(None) == "none"
+    assert crack_severity(0.999) == "none"
+    assert crack_severity(1.0) == "mild"
+    assert crack_severity(1.999) == "mild"
+    assert crack_severity(2.0) == "moderate"
+    assert crack_severity(4.999) == "moderate"
+    assert crack_severity(5.0) == "severe"
 
 
 def test_crack_summary_reports_max_cracking_ratio(qapp):
