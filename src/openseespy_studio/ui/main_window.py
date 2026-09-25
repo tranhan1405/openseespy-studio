@@ -1175,6 +1175,14 @@ class PropertiesPanel(QWidget):
         )
 
         self.result_component = QComboBox()
+        self.result_shell_location = QComboBox()
+        self.result_shell_location.addItem("Mid-surface", "mid")
+        self.result_shell_location.addItem("Top (+z)", "top")
+        self.result_shell_location.addItem("Bottom (-z)", "bottom")
+        self.result_shell_location.setToolTip(
+            "For Shell strain components, Top/Bottom derives ε(z)=ε0+zκ "
+            "at z=±h/2 using the assigned Shell section thickness."
+        )
         self.result_display = QComboBox()
         self.result_display.addItem("Deformed only", "deformed_only")
         self.result_display.addItem(
@@ -1248,6 +1256,7 @@ class PropertiesPanel(QWidget):
             ("Element Scope", self.result_element_scope),
             ("Scope", self.result_use_selection),
             ("Component", self.result_component),
+            ("Location", self.result_shell_location),
             ("Display", self.result_display),
             ("Representation", self.result_representation),
             ("Curvature", self.result_smooth_curvature),
@@ -1310,6 +1319,7 @@ class PropertiesPanel(QWidget):
 
         self._result_optional_widgets = (
             self.result_component,
+            self.result_shell_location,
             self.result_display,
             self.result_representation,
             self.result_smooth_curvature,
@@ -1585,6 +1595,17 @@ class PropertiesPanel(QWidget):
                 index if index >= 0 else 0
             )
 
+        if kind == "ShellDeformation":
+            self._set_form_row_visible(
+                self.result_shell_location,
+                True,
+            )
+            location = str(options.get("location", "mid"))
+            index = self.result_shell_location.findData(location)
+            self.result_shell_location.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+
         if kind in {
             "DeformedShape",
             "MemberForce",
@@ -1753,6 +1774,10 @@ class PropertiesPanel(QWidget):
         if kind == "ShellDisplacement":
             settings["display_mode"] = str(
                 self.result_display.currentData()
+            )
+        if kind == "ShellDeformation":
+            settings["location"] = str(
+                self.result_shell_location.currentData()
             )
         if kind == "ModeShape":
             settings["mode"] = self.result_mode.value()
