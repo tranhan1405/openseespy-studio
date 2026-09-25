@@ -10177,10 +10177,14 @@ class ProjectDatabase:
                 f"{analysis.analysis_type} analysis {analysis.tag}."
             )
         if result.surface_scope:
-            if result.result_type not in {"ShellForce", "ShellDeformation"}:
+            if result.result_type not in {
+                "ShellForce",
+                "ShellDeformation",
+                "ShellDisplacement",
+            }:
                 raise ValueError(
                     "Managed Surface result scope is only supported for "
-                    "ShellForce and ShellDeformation."
+                    "ShellForce, ShellDeformation and ShellDisplacement."
                 )
             missing_surfaces = [
                 tag for tag in result.surface_scope
@@ -10326,6 +10330,7 @@ class ProjectDatabase:
             "MemberForce",
             "ModeShape",
             "Motion",
+            "ShellDisplacement",
         } and "scale" in result.settings:
             try:
                 scale = float(result.settings["scale"])
