@@ -1159,6 +1159,15 @@ class RCWallWizard(QWizard):
                 warning_parts.append(
                     "Embedded vertical bars exceed available web rho-y."
                 )
+            concrete_tangent = (
+                2.0
+                * abs(float(self.fc_web.value()))
+                / max(abs(float(self.eps_web.value())), 1.0e-12)
+            )
+            penalty_display = (
+                concrete_tangent
+                * float(self.embedded_penalty_factor.value())
+            )
             vertical_text = (
                 f"Vertical embedded: "
                 f"{int(vertical['bar_count_per_layer'])} bars/layer × "
@@ -1170,7 +1179,9 @@ class RCWallWizard(QWizard):
                 f"{self.units.length}; ρy,discrete = "
                 f"{100.0 * float(vertical['discrete_rho']):.4g}% · "
                 f"ρy,smeared remaining = "
-                f"{100.0 * max(float(vertical['remaining_rho']), 0.0):.4g}%"
+                f"{100.0 * max(float(vertical['remaining_rho']), 0.0):.4g}%; "
+                f"K≈{penalty_display:g} "
+                f"{self.units.engineering_stress_label}"
             )
 
         warning = "".join(
@@ -1534,8 +1545,10 @@ class RCWallWizard(QWizard):
                 self.boundary_layer_mode.currentData()
             ),
             boundary_cover=float(self.boundary_cover.value()),
-            web_horizontal_mode=str(
-                self.web_horizontal_mode.currentData()
+            web_horizontal_mode=(
+                str(self.web_horizontal_mode.currentData())
+                if self.reinforcement_mode.currentData() == "hybrid"
+                else "smeared"
             ),
             web_horizontal_bar_diameter=float(
                 self.web_horizontal_bar_diameter.value()
@@ -1543,8 +1556,10 @@ class RCWallWizard(QWizard):
             web_horizontal_layer_mode=str(
                 self.web_horizontal_layer_mode.currentData()
             ),
-            web_vertical_mode=str(
-                self.web_vertical_mode.currentData()
+            web_vertical_mode=(
+                str(self.web_vertical_mode.currentData())
+                if self.reinforcement_mode.currentData() == "hybrid"
+                else "smeared"
             ),
             web_vertical_bar_diameter=float(
                 self.web_vertical_bar_diameter.value()
@@ -2041,7 +2056,13 @@ class RCWallWizard(QWizard):
                 f"Discrete reinforcement formulation: {truss_text}<br>"
                 + (
                     "Coupling: ASDEmbeddedNodeElement · "
-                    f"penalty factor {self.embedded_penalty_factor.value():g}"
+                    f"penalty factor {self.embedded_penalty_factor.value():g} · "
+                    f"K≈{(
+                        2.0
+                        * abs(float(self.fc_web.value()))
+                        / max(abs(float(self.eps_web.value())), 1.0e-12)
+                        * float(self.embedded_penalty_factor.value())
+                    ):g} {self.units.engineering_stress_label}"
                     if counts["embedded_coupling"]
                     else "Coupling: —"
                 )
