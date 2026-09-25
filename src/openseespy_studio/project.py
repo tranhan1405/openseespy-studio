@@ -10,6 +10,7 @@ from typing import Any
 from .model import (
     BEAM_CONTACT_ELEMENT_TYPES,
     BEARING_ELEMENT_TYPES,
+    CONTACT_TWO_NODE_ELEMENT_TYPES,
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
@@ -7699,7 +7700,9 @@ class ProjectDatabase:
         )
         length2 = sum(value * value for value in delta)
         if length2 <= 1.0e-24:
-            if element.element_type in BEARING_ELEMENT_TYPES:
+            if element.element_type in (
+                BEARING_ELEMENT_TYPES | CONTACT_TWO_NODE_ELEMENT_TYPES
+            ):
                 return
             raise ValueError(
                 f"Element {element.tag} has coincident end nodes and zero length."
