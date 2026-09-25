@@ -38,6 +38,9 @@ WALL_MACRO_ELEMENT_TYPES = (
     WALL_MACRO_2D_ELEMENT_TYPES | WALL_MACRO_3D_ELEMENT_TYPES
 )
 TRUSS_ELEMENT_TYPES = {"truss", "corotTruss"}
+CABLE_ELEMENT_TYPES = {"CatenaryCable"}
+BEARING_ELEMENT_TYPES = {"elastomericBearingPlasticity"}
+SPECIAL_TWO_NODE_ELEMENT_TYPES = CABLE_ELEMENT_TYPES | BEARING_ELEMENT_TYPES
 EMBEDDED_ELEMENT_TYPES = {"ASDEmbeddedNodeElement"}
 QUAD_ELEMENT_TYPES = (
     SHELL_ELEMENT_TYPES
@@ -51,6 +54,7 @@ SUPPORTED_ELEMENT_TYPES = (
     | SOLID_ELEMENT_TYPES
     | WALL_MACRO_2D_ELEMENT_TYPES
     | TRUSS_ELEMENT_TYPES
+    | SPECIAL_TWO_NODE_ELEMENT_TYPES
     | EMBEDDED_ELEMENT_TYPES
 )
 
@@ -82,6 +86,198 @@ def _strict_bool(value: object, label: str) -> bool:
         if normalized in {"false", "0", "no", "off"}:
             return False
     raise ValueError(f"{label} must be a boolean.")
+
+
+def _normalize_special_element_parameters(
+    element_type: str,
+    parameters: object,
+) -> dict[str, object]:
+    if element_type not in SPECIAL_TWO_NODE_ELEMENT_TYPES:
+        return {}
+    if not isinstance(parameters, dict):
+        raise ValueError(
+            f"{element_type} special parameters must be an object."
+        )
+    raw = dict(parameters)
+
+    if element_type == "CatenaryCable":
+        required = (
+            "weight", "E", "A", "L0", "alpha", "temperature_change",
+            "rho", "errorTol", "Nsubsteps", "massType",
+        )
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "CatenaryCable requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                "Unsupported CatenaryCable parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result: dict[str, object] = {
+            key: float(raw[key])
+            for key in (
+                "weight", "E", "A", "L0", "alpha",
+                "temperature_change", "rho", "errorTol",
+            )
+        }
+        result["Nsubsteps"] = _strict_int(
+            raw["Nsubsteps"],
+            "CatenaryCable Nsubsteps",
+        )
+        result["massType"] = _strict_int(
+            raw["massType"],
+            "CatenaryCable massType",
+        )
+        if any(
+            not math.isfinite(float(result[key]))
+            for key in (
+                "weight", "E", "A", "L0", "alpha",
+                "temperature_change", "rho", "errorTol",
+            )
+        ):
+            raise ValueError("CatenaryCable parameters must be finite.")
+        for key in ("E", "A", "L0", "errorTol"):
+            if float(result[key]) <= 0.0:
+                raise ValueError(
+                    f"CatenaryCable {key} must be positive."
+                )
+        if float(result["rho"]) < 0.0:
+            raise ValueError("CatenaryCable rho cannot be negative.")
+        if int(result["Nsubsteps"]) < 1:
+            raise ValueError(
+                "CatenaryCable Nsubsteps must be at least 1."
+            )
+        if int(result["massType"]) not in {0, 1, 2, 3}:
+            raise ValueError(
+                "CatenaryCable massType must be 0, 1, 2, or 3."
+            )
+        return result
+
+    required = (
+        "kInit", "qd", "alpha1", "alpha2", "mu",
+        "p_mat_tag", "mz_mat_tag",
+    )
+    optional = {
+        "t_mat_tag",
+        "my_mat_tag",
+        "orientation",
+        "shearDist",
+        "doRayleigh",
+        "mass",
+    }
+    missing = [key for key in required if key not in raw]
+    if missing:
+        raise ValueError(
+            "elastomericBearingPlasticity requires parameter(s): "
+            + ", ".join(missing)
+            + "."
+        )
+    extra = sorted(set(raw) - set(required) - optional)
+    if extra:
+        raise ValueError(
+            "Unsupported elastomericBearingPlasticity parameter(s): "
+            + ", ".join(extra)
+            + "."
+        )
+
+    result = {
+        key: float(raw[key])
+        for key in ("kInit", "qd", "alpha1", "alpha2", "mu")
+    }
+    result["p_mat_tag"] = _strict_int(
+        raw["p_mat_tag"],
+        "Bearing axial material tag",
+    )
+    result["mz_mat_tag"] = _strict_int(
+        raw["mz_mat_tag"],
+        "Bearing Mz material tag",
+    )
+    for key, label in (
+        ("t_mat_tag", "Bearing torsion material tag"),
+        ("my_mat_tag", "Bearing My material tag"),
+    ):
+        value = raw.get(key)
+        result[key] = (
+            None if value is None else _strict_int(value, label)
+        )
+    result["shearDist"] = float(raw.get("shearDist", 0.5))
+    result["doRayleigh"] = _strict_bool(
+        raw.get("doRayleigh", False),
+        "Bearing Rayleigh flag",
+    )
+    result["mass"] = float(raw.get("mass", 0.0))
+
+    orientation = raw.get("orientation")
+    if orientation is None:
+        result["orientation"] = None
+    else:
+        try:
+            values = tuple(float(value) for value in orientation)
+        except TypeError as exc:
+            raise ValueError(
+                "Bearing orientation must contain six values."
+            ) from exc
+        if len(values) != 6 or any(
+            not math.isfinite(value) for value in values
+        ):
+            raise ValueError(
+                "Bearing orientation must contain six finite values."
+            )
+        x = values[:3]
+        y = values[3:]
+        x_norm2 = sum(value * value for value in x)
+        y_norm2 = sum(value * value for value in y)
+        cross = (
+            x[1] * y[2] - x[2] * y[1],
+            x[2] * y[0] - x[0] * y[2],
+            x[0] * y[1] - x[1] * y[0],
+        )
+        if (
+            x_norm2 <= 1.0e-24
+            or y_norm2 <= 1.0e-24
+            or sum(value * value for value in cross)
+            <= 1.0e-16 * x_norm2 * y_norm2
+        ):
+            raise ValueError(
+                "Bearing orientation x/y vectors must be non-zero "
+                "and non-parallel."
+            )
+        result["orientation"] = values
+
+    if any(
+        not math.isfinite(float(result[key]))
+        for key in (
+            "kInit", "qd", "alpha1", "alpha2", "mu",
+            "shearDist", "mass",
+        )
+    ):
+        raise ValueError(
+            "elastomericBearingPlasticity parameters must be finite."
+        )
+    if float(result["kInit"]) <= 0.0:
+        raise ValueError("Bearing kInit must be positive.")
+    if float(result["qd"]) < 0.0:
+        raise ValueError("Bearing qd cannot be negative.")
+    if float(result["alpha1"]) < 0.0 or float(result["alpha2"]) < 0.0:
+        raise ValueError("Bearing alpha1/alpha2 cannot be negative.")
+    if float(result["mu"]) <= 0.0:
+        raise ValueError("Bearing mu must be positive.")
+    if not 0.0 <= float(result["shearDist"]) <= 1.0:
+        raise ValueError("Bearing shearDist must satisfy 0 <= value <= 1.")
+    if float(result["mass"]) < 0.0:
+        raise ValueError("Bearing mass cannot be negative.")
+    for key in ("p_mat_tag", "mz_mat_tag", "t_mat_tag", "my_mat_tag"):
+        value = result.get(key)
+        if value is not None and int(value) <= 0:
+            raise ValueError("Bearing material tags must be positive.")
+    return result
+
 
 FIXITY_PRESETS: dict[str, Tuple[int, ...]] = {
     "Fixed": (1, 1, 1, 1, 1, 1),
@@ -263,6 +459,7 @@ class Element:
     wall_thick_mod: float = 0.63
     wall_poisson: float = 0.25
     beam_center_ratio: float = 0.4
+    special_parameters: dict[str, object] = field(default_factory=dict)
 
     @property
     def is_shell(self) -> bool:
@@ -774,12 +971,18 @@ class Element:
         else:
             self.beam_center_ratio = 0.4
 
+        self.special_parameters = _normalize_special_element_parameters(
+            self.element_type,
+            self.special_parameters,
+        )
+
         uses_section_reference = self.element_type not in (
             TRUSS_ELEMENT_TYPES
             | EMBEDDED_ELEMENT_TYPES
             | CONTINUUM_QUAD_ELEMENT_TYPES
             | SOLID_ELEMENT_TYPES
             | WALL_MACRO_ELEMENT_TYPES
+            | SPECIAL_TWO_NODE_ELEMENT_TYPES
             | {"MEFI"}
         )
         uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
@@ -1000,6 +1203,7 @@ class StructuralModel:
         wall_thick_mod: float = 0.63,
         wall_poisson: float = 0.25,
         beam_center_ratio: float = 0.4,
+        special_parameters: dict[str, object] | None = None,
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -1067,6 +1271,48 @@ class StructuralModel:
                 f"{element_type} requires ndm=3/ndf=3; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
+        if (
+            element_type == "CatenaryCable"
+            and (
+                int(self.ndm) != 3
+                or int(self.ndf) not in {3, 6}
+            )
+        ):
+            raise ValueError(
+                "CatenaryCable requires ndm=3 with ndf=3 or 6; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if (
+            element_type == "elastomericBearingPlasticity"
+            and (int(self.ndm), int(self.ndf)) not in {(2, 3), (3, 6)}
+        ):
+            raise ValueError(
+                "elastomericBearingPlasticity requires ndm=2/ndf=3 "
+                "or ndm=3/ndf=6; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        normalized_special = _normalize_special_element_parameters(
+            element_type,
+            special_parameters or {},
+        )
+        if element_type == "elastomericBearingPlasticity":
+            if int(self.ndm) == 3:
+                if (
+                    normalized_special.get("t_mat_tag") is None
+                    or normalized_special.get("my_mat_tag") is None
+                ):
+                    raise ValueError(
+                        "3D elastomericBearingPlasticity requires "
+                        "t_mat_tag and my_mat_tag."
+                    )
+            elif (
+                normalized_special.get("t_mat_tag") is not None
+                or normalized_special.get("my_mat_tag") is not None
+            ):
+                raise ValueError(
+                    "2D elastomericBearingPlasticity does not use "
+                    "t_mat_tag or my_mat_tag."
+                )
         if (
             element_type == "dispBeamColumnInt"
             and (self.ndm, self.ndf) != (2, 3)
@@ -1262,6 +1508,7 @@ class StructuralModel:
             wall_thick_mod=wall_thick_mod,
             wall_poisson=wall_poisson,
             beam_center_ratio=beam_center_ratio,
+            special_parameters=normalized_special,
         )
         self.elements[tag] = ele
         return ele
@@ -1395,7 +1642,11 @@ class StructuralModel:
         for tag in element_tags:
             normalized_tag = _strict_int(tag, "Element tag")
             element = self.elements.get(normalized_tag)
-            if element is None or element.element_type in TRUSS_ELEMENT_TYPES:
+            if (
+                element is None
+                or element.element_type in TRUSS_ELEMENT_TYPES
+                or element.element_type in SPECIAL_TWO_NODE_ELEMENT_TYPES
+            ):
                 continue
             element.section_tag = value
             assigned.add(element.tag)
@@ -1801,6 +2052,7 @@ class StructuralModel:
                     wall_thick_mod=source.wall_thick_mod,
                     wall_poisson=source.wall_poisson,
                     beam_center_ratio=source.beam_center_ratio,
+                    special_parameters=dict(source.special_parameters),
                 )
                 created_elements.add(new_tag)
 
@@ -1886,6 +2138,7 @@ class StructuralModel:
                     "wall_thick_mod": element.wall_thick_mod,
                     "wall_poisson": element.wall_poisson,
                     "beam_center_ratio": element.beam_center_ratio,
+                    "special_parameters": dict(element.special_parameters),
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -2036,6 +2289,9 @@ class StructuralModel:
                 ),
                 beam_center_ratio=float(
                     item.get("beam_center_ratio", 0.4)
+                ),
+                special_parameters=dict(
+                    item.get("special_parameters", {})
                 ),
             )
 
