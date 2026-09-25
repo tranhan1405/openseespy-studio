@@ -16173,12 +16173,24 @@ class MainWindow(QMainWindow):
         )
 
     def _assign_section_to_selection(self) -> None:
-        element_tags = self._selected_element_tags(
-            "Assign Section",
-            create_if_missing=True,
-            frame_only=True,
-        )
-        if element_tags is None:
+        selected_tags = self._selected_element_tags("Assign Section")
+        if selected_tags is None:
+            return
+        element_tags = {
+            int(tag)
+            for tag in selected_tags
+            if (
+                int(tag) in self.model.elements
+                and self.model.elements[int(tag)].element_type
+                in (FRAME_ELEMENT_TYPES | TRUSS_SECTION_ELEMENT_TYPES)
+            )
+        }
+        if not element_tags:
+            QMessageBox.information(
+                self,
+                "Assign Section",
+                "Select at least one frame or section-based Truss element.",
+            )
             return
         if not self._ensure_prerequisite(
             title="Assign Section",
@@ -16192,7 +16204,40 @@ class MainWindow(QMainWindow):
         ):
             return
 
-        tags = sorted(self.project.sections)
+        def compatible(section) -> bool:
+            section_type = str(section.section_type)
+            for element_tag in element_tags:
+                element = self.model.elements[element_tag]
+                if (
+                    element.element_type in TRUSS_SECTION_ELEMENT_TYPES
+                    and section_type not in {"Elastic", "Fiber", "FiberInt"}
+                ):
+                    return False
+                if (
+                    element.element_type
+                    in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
+                    and section_type != "Elastic"
+                ):
+                    return False
+                if (
+                    element.element_type == "dispBeamColumnInt"
+                    and section_type != "FiberInt"
+                ):
+                    return False
+            return True
+
+        tags = [
+            int(tag)
+            for tag, section in sorted(self.project.sections.items())
+            if compatible(section)
+        ]
+        if not tags:
+            QMessageBox.information(
+                self,
+                "Assign Section",
+                "No Section is compatible with all selected elements.",
+            )
+            return
         labels = [
             (
                 f"{tag} - {self.project.sections[tag].name} "
@@ -16417,8 +16462,25 @@ class MainWindow(QMainWindow):
         )
 
     def _clear_section_assignment(self) -> None:
-        element_tags = self._selected_element_tags("Clear Section")
-        if element_tags is None:
+        selected_tags = self._selected_element_tags("Clear Section")
+        if selected_tags is None:
+            return
+        element_tags = {
+            int(tag)
+            for tag in selected_tags
+            if (
+                int(tag) in self.model.elements
+                and self.model.elements[int(tag)].element_type
+                in (FRAME_ELEMENT_TYPES | SHELL_ELEMENT_TYPES)
+            )
+        }
+        if not element_tags:
+            QMessageBox.information(
+                self,
+                "Clear Section",
+                "Section-based Truss elements require a Section; "
+                "use Edit Truss Definition to change it.",
+            )
             return
         before = self.project.to_dict()
         try:
@@ -31421,6 +31483,12 @@ class MainWindow(QMainWindow):
                 and element.section_tag is not None
                 for element in selected_elements
             )
+            has_clearable_section_assignment = any(
+                element.element_type
+                in (FRAME_ELEMENT_TYPES | SHELL_ELEMENT_TYPES)
+                and element.section_tag is not None
+                for element in selected_elements
+            )
             has_transformation_assignment = any(
                 element.element_type in FRAME_ELEMENT_TYPES
                 and element.transf_tag is not None
@@ -31574,7 +31642,7 @@ class MainWindow(QMainWindow):
                 clear_material.triggered.connect(
                     self._clear_truss_material_assignment
                 )
-            if has_section_assignment:
+            if has_clearable_section_assignment:
                 clear_section = assign.addAction("Clear Section")
                 clear_section.triggered.connect(
                     self._clear_section_assignment
