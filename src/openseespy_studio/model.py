@@ -112,7 +112,9 @@ def _normalize_special_element_parameters(
     element_type: str,
     parameters: object,
 ) -> dict[str, object]:
-    if element_type not in SPECIAL_TWO_NODE_ELEMENT_TYPES:
+    if element_type not in (
+        SPECIAL_TWO_NODE_ELEMENT_TYPES | BEAM_CONTACT_ELEMENT_TYPES
+    ):
         return {}
     if not isinstance(parameters, dict):
         raise ValueError(
