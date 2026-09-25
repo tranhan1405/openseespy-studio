@@ -524,6 +524,8 @@ def project_to_script(project: ProjectDatabase) -> str:
         prescribed_displacements=project.prescribed_displacements,
         recorders=project.recorders,
         units=project.units,
+        nd_materials=project.nd_materials,
+        friction_models=project.friction_models,
     )
 
 
