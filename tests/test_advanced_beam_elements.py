@@ -3,14 +3,18 @@ from openseespy_studio.generator import (
     to_openseespy,
     transformation_to_openseespy,
 )
+from openseespy_studio.line_mesher import mesh_line_geometry
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import (
     FiberData,
+    LineGeometryData,
     MaterialData,
+    PointGeometryData,
     ProjectDatabase,
     SectionData,
     TransformationData,
 )
+from openseespy_studio.validation import validate_project
 
 
 
@@ -274,3 +278,113 @@ def test_disp_beam_column_int_is_2d_only():
         assert "ndm=2/ndf=3" in str(exc)
     else:
         raise AssertionError("dispBeamColumnInt accepted a 3D model")
+
+def test_model_check_reports_disp_beam_column_int_transform_mismatch():
+    project = _fiber_int_project()
+    project.model.add_element(
+        10,
+        1,
+        2,
+        element_type="dispBeamColumnInt",
+        section_tag=2,
+        transf_tag=1,
+        integration_points=3,
+        beam_center_ratio=0.4,
+    )
+    project.transformations[1] = TransformationData(1, "Linear", "Linear")
+
+    issues = validate_project(project)
+
+    assert any(
+        issue.category == "Transformation"
+        and "LinearInt" in issue.message
+        and issue.entity_tag == 10
+        for issue in issues
+    )
+
+
+def test_model_check_requires_elastic_section_for_timoshenko_beam():
+    project = _fiber_int_project()
+    project.transformations[1] = TransformationData(1, "Linear", "Linear")
+    project.model.add_element(
+        11,
+        1,
+        2,
+        element_type="ElasticTimoshenkoBeam",
+        section_tag=2,
+        transf_tag=1,
+    )
+
+    issues = validate_project(project)
+
+    assert any(
+        issue.category == "Element formulation"
+        and "Elastic Section" in issue.suggestion
+        and issue.entity_tag == 11
+        for issue in issues
+    )
+
+
+def test_disp_beam_column_int_line_mesh_preserves_crot_and_one_point():
+    project = _fiber_int_project()
+    project.add_point(PointGeometryData(1, "P1", (0.0, 0.0, 0.0)))
+    project.add_point(PointGeometryData(2, "P2", (0.0, 3.0, 0.0)))
+    project.add_line(
+        LineGeometryData(
+            1,
+            "Interaction wall line",
+            1,
+            2,
+            divisions=2,
+            element_type="dispBeamColumnInt",
+            section_tag=2,
+            transformation_tag=1,
+            integration_points=1,
+            center_rotation=0.33,
+        )
+    )
+
+    result = mesh_line_geometry(project, 1)
+
+    assert len(result.element_tags) == 2
+    assert all(
+        project.model.elements[tag].element_type == "dispBeamColumnInt"
+        for tag in result.element_tags
+    )
+    assert all(
+        project.model.elements[tag].integration_points == 1
+        for tag in result.element_tags
+    )
+    assert all(
+        project.model.elements[tag].beam_center_ratio == 0.33
+        for tag in result.element_tags
+    )
+
+
+def test_disp_beam_column_int_line_recipe_rejects_wrong_section():
+    project = _fiber_int_project()
+    project.add_section(_elastic_section(3))
+    project.add_point(PointGeometryData(1, "P1", (0.0, 0.0, 0.0)))
+    project.add_point(PointGeometryData(2, "P2", (0.0, 3.0, 0.0)))
+
+    try:
+        project.add_line(
+            LineGeometryData(
+                1,
+                "Bad interaction line",
+                1,
+                2,
+                element_type="dispBeamColumnInt",
+                section_tag=3,
+                transformation_tag=1,
+                integration_points=3,
+                center_rotation=0.4,
+            )
+        )
+    except ValueError as exc:
+        assert "FiberInt" in str(exc)
+    else:
+        raise AssertionError(
+            "dispBeamColumnInt Line recipe accepted a non-FiberInt section"
+        )
+
