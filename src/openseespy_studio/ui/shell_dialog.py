@@ -68,6 +68,8 @@ class NDMaterialDialog(QDialog):
         ("Orthotropic rotating-angle concrete", "OrthotropicRAConcrete"),
         ("Smeared steel double layer", "SmearedSteelDoubleLayer"),
         ("FSAM RC panel", "FSAM"),
+        ("Contact material 2D", "ContactMaterial2D"),
+        ("Contact material 3D", "ContactMaterial3D"),
     )
 
     PARAMETER_LABELS = {
@@ -140,6 +142,10 @@ class NDMaterialDialog(QDialog):
         "rouX": "Reinforcement ratio rouX",
         "rouY": "Reinforcement ratio rouY",
         "alfadow": "Dowel coefficient alfadow",
+        "mu": "Interface friction coefficient μ",
+        "G": "Interface stiffness parameter G",
+        "c": "Cohesive intercept c",
+        "t": "Interface tensile strength t",
     }
 
     def __init__(
@@ -328,7 +334,15 @@ class NDMaterialDialog(QDialog):
                     "e", "cs1", "cs2", "cs3", "c",
                 }:
                     low = 0.0
-            elif material_type == "ASDConcrete3D":
+            elif material_type in {"ContactMaterial2D", "ContactMaterial3D"}:
+            text = (
+                f"{material_type} defines regularized Coulomb interface "
+                "behavior for OpenSees contact elements. G, c and t are "
+                "stored as stress-like quantities; BeamContact2D requires "
+                "ContactMaterial2D and BeamContact3D requires "
+                "ContactMaterial3D."
+            )
+        elif material_type == "ASDConcrete3D":
                 if key == "nu":
                     low, high, decimals = -0.999999, 0.499999, 6
                 elif key == "implex":
@@ -348,6 +362,11 @@ class NDMaterialDialog(QDialog):
                     # material contract requires a strictly negative strain.
                     high = -1.0e-8
                 elif key in {"DamageCte1", "DamageCte2"}:
+                    low = 0.0
+            elif material_type in {"ContactMaterial2D", "ContactMaterial3D"}:
+                if key == "mu":
+                    low = 0.0
+                elif key in {"G", "c", "t"}:
                     low = 0.0
             elif material_type == "SmearedSteelDoubleLayer":
                 if key in {"mat1", "mat2"}:
