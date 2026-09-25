@@ -2916,3 +2916,77 @@ def test_contact_elements_construct_in_real_opensees(tmp_path: Path):
             name + "\nSTDOUT:\n" + completed.stdout
             + "\nSTDERR:\n" + completed.stderr
         )
+
+
+
+def test_section_based_trusses_construct_in_real_opensees(tmp_path: Path):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.model = StructuralModel(ndm=2, ndf=2)
+    project.model.add_node(1, 0.0, 0.0)
+    project.model.add_node(2, 3.0, 0.0)
+    project.model.add_node(3, 6.0, 0.0)
+    project.add_section(
+        SectionData(
+            tag=5,
+            name="Axial elastic",
+            section_type="Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.01,
+                "Iz": 1.0e-4,
+                "Iy": 1.0e-4,
+                "G": 7.7e10,
+                "J": 1.0e-5,
+            },
+        )
+    )
+    project.model.add_element(
+        41,
+        1,
+        2,
+        element_type="trussSection",
+        section_tag=5,
+        group="truss",
+    )
+    project.model.add_element(
+        42,
+        2,
+        3,
+        element_type="corotTrussSection",
+        section_tag=5,
+        group="truss",
+    )
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        nodal_loads=project.nodal_loads,
+        analyses=project.analyses,
+        active_analysis_tag=project.active_analysis_tag,
+        element_loads=project.element_loads,
+        prescribed_displacements=project.prescribed_displacements,
+        recorders=project.recorders,
+        units=project.units,
+        solution_results=project.solution_results,
+        nd_materials=project.nd_materials,
+        friction_models=project.friction_models,
+    )
+    target = tmp_path / "section-trusses.py"
+    target.write_text(script, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
