@@ -1193,14 +1193,14 @@ class ResultsPanel(QWidget):
 
         if kind == "CrackPattern":
             accumulate = bool(options.get("accumulate", False))
-            line_scale = options.get("line_scale", 0.82)
+            line_scale = options.get("line_scale", 0.65)
             self.crack_accumulate.blockSignals(True)
             self.crack_line_scale.blockSignals(True)
             try:
                 self.crack_accumulate.setChecked(accumulate)
                 self.crack_line_scale.setValue(float(line_scale))
             except (TypeError, ValueError):
-                self.crack_line_scale.setValue(0.82)
+                self.crack_line_scale.setValue(0.65)
             finally:
                 self.crack_accumulate.blockSignals(False)
                 self.crack_line_scale.blockSignals(False)
@@ -2268,7 +2268,7 @@ class ResultsPanel(QWidget):
         self.crack_line_scale.setRange(0.05, 1.0)
         self.crack_line_scale.setSingleStep(0.05)
         self.crack_line_scale.setDecimals(2)
-        self.crack_line_scale.setValue(0.82)
+        self.crack_line_scale.setValue(0.65)
         self.crack_line_scale.setSuffix(" × panel")
         self.crack_line_scale.valueChanged.connect(
             self._crack_controls_changed
@@ -5860,7 +5860,7 @@ class ResultsPanel(QWidget):
         self._active_solution_kind = ""
         self._active_crack_element_scope.clear()
         self.crack_accumulate.setChecked(False)
-        self.crack_line_scale.setValue(0.82)
+        self.crack_line_scale.setValue(0.65)
         self.crack_table.setRowCount(0)
         self.crack_summary.setText(
             "No MEFI crack result data are loaded."
