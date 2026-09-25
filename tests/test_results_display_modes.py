@@ -10,6 +10,7 @@ import pytest
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from openseespy_studio.crack_results import crack_severity
+from openseespy_studio.postprocess import shell_principal_strains
 from openseespy_studio.ui.main_window import MainWindow
 from openseespy_studio.ui.results_panel import ResultsPanel
 from openseespy_studio.ui.viewport import ModelViewport
@@ -265,7 +266,7 @@ def test_crack_pattern_result_restores_controls_and_reports_panels(qapp):
         assert panel.crack_accumulate.isChecked()
         assert panel.crack_line_scale.value() == pytest.approx(0.65)
         assert panel.crack_table.rowCount() == 1
-        assert panel.crack_table.item(0, 5).text() == "Cracked"
+        assert panel.crack_table.item(0, 5).text() == "Moderate"
         assert "1 cracked" in panel.crack_summary.text()
         assert "max ε1/εcr = 2.000" in panel.crack_summary.text()
         assert not panel.motion_page.isHidden()
@@ -1430,6 +1431,52 @@ def test_member_force_table_follows_animation_frame(qapp):
         qapp.processEvents()
 
 
+def test_shell_principal_strain_formula_uses_engineering_shear():
+    principal = shell_principal_strains([0.001, -0.001, 0.002])
+    assert principal is not None
+    e1, e2 = principal
+    expected = math.sqrt(2.0) * 0.001
+    assert e1 == pytest.approx(expected)
+    assert e2 == pytest.approx(-expected)
+
+
+def test_shell_strain_tab_includes_principal_values(qapp):
+    panel = ResultsPanel()
+    try:
+        panel.set_result(_two_frame_motion_result())
+        panel.show_solution_result(
+            "ShellDeformation",
+            {"component": "E1", "_element_scope": [20]},
+        )
+        qapp.processEvents()
+
+        assert (
+            panel.shell_detail_tabs.tabText(
+                panel.shell_detail_tabs.currentIndex()
+            )
+            == "Strain"
+        )
+        headers = [
+            panel.shell_tables["Strain"].horizontalHeaderItem(i).text()
+            for i in range(panel.shell_tables["Strain"].columnCount())
+        ]
+        assert headers == ["Element", "Exx", "Eyy", "Gxy", "ε1", "ε2"]
+
+        average = [0.011, 0.012, 0.013]
+        principal = shell_principal_strains(average)
+        assert principal is not None
+        assert float(
+            panel.shell_tables["Strain"].item(0, 4).text()
+        ) == pytest.approx(principal[0], rel=1.0e-5)
+        assert float(
+            panel.shell_tables["Strain"].item(0, 5).text()
+        ) == pytest.approx(principal[1], rel=1.0e-5)
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
 def test_shell_force_and_deformation_tables_follow_animation_frame(qapp):
     panel = ResultsPanel()
     try:
@@ -1454,13 +1501,13 @@ def test_shell_force_and_deformation_tables_follow_animation_frame(qapp):
         panel._set_motion_index(0)
         qapp.processEvents()
         assert (
-            panel.shell_tables["Membrane Strain"].item(0, 1).text()
+            panel.shell_tables["Strain"].item(0, 1).text()
             == "0.001"
         )
         panel._set_motion_index(1)
         qapp.processEvents()
         assert (
-            panel.shell_tables["Membrane Strain"].item(0, 1).text()
+            panel.shell_tables["Strain"].item(0, 1).text()
             == "0.011"
         )
         assert "live deformation summary" in panel.shell_info.text()
@@ -1491,13 +1538,13 @@ def test_crack_table_follows_animation_frame_and_accumulate(qapp):
 
         panel._set_motion_index(1)
         qapp.processEvents()
-        assert panel.crack_table.item(0, 5).text() == "Cracked"
+        assert panel.crack_table.item(0, 5).text() == "Moderate"
         assert "active frame 2/2" in panel.crack_summary.text()
 
         panel.crack_accumulate.setChecked(True)
         panel._set_motion_index(1)
         qapp.processEvents()
-        assert panel.crack_table.item(0, 5).text() == "Cracked"
+        assert panel.crack_table.item(0, 5).text() == "Moderate"
         assert "accumulated frame 2/2" in panel.crack_summary.text()
         assert "max≤frame" in panel.crack_table.horizontalHeaderItem(3).text()
         assert not panel.crack_animate_button.isHidden()
@@ -1531,7 +1578,7 @@ def test_crack_result_viewer_uses_compact_subtabs_and_data_health(qapp):
         assert "panel strain=1/1" in panel.crack_health.text()
         assert panel.crack_evolution_table.rowCount() == 2
         assert panel.crack_evolution_table.item(0, 4).text() == "Below εcr"
-        assert panel.crack_evolution_table.item(1, 4).text() == "Cracked"
+        assert panel.crack_evolution_table.item(1, 4).text() == "Moderate"
 
         panel._crack_evolution_row_clicked(0, 0)
         qapp.processEvents()
@@ -1541,7 +1588,7 @@ def test_crack_result_viewer_uses_compact_subtabs_and_data_health(qapp):
         panel._crack_evolution_row_clicked(1, 0)
         qapp.processEvents()
         assert panel._motion_frame_index == 1
-        assert panel.crack_table.item(0, 5).text() == "Cracked"
+        assert panel.crack_table.item(0, 5).text() == "Moderate"
     finally:
         panel.close()
         panel.deleteLater()
