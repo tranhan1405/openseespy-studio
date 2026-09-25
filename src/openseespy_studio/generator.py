@@ -9,7 +9,12 @@ from .beam_loads import (
     resolve_self_weight_local,
 )
 from .units import UnitSystem
-from .model import SHELL_ELEMENT_TYPES, TRUSS_ELEMENT_TYPES, StructuralModel
+from .model import (
+    EMBEDDED_ELEMENT_TYPES,
+    SHELL_ELEMENT_TYPES,
+    TRUSS_ELEMENT_TYPES,
+    StructuralModel,
+)
 from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 from .response_spectrum import build_period_grid
@@ -5280,6 +5285,25 @@ def to_openseespy(
     ])
     for tag in sorted(model.elements):
         e = model.elements[tag]
+
+        if e.element_type in EMBEDDED_ELEMENT_TYPES:
+            if e.k is None or e.l is None:
+                lines.append(
+                    f"# ERROR: Embedded element {tag} is missing retained "
+                    "triangle nodes; element not generated."
+                )
+                continue
+            args = (
+                "ops.element('ASDEmbeddedNodeElement', "
+                f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}"
+            )
+            if e.embedded_constrain_rotation:
+                args += ", '-rot'"
+            if e.embedded_penalty is not None:
+                args += f", '-K', {e.embedded_penalty:g}"
+            args += ")"
+            lines.append(args)
+            continue
 
         if e.element_type == "MEFI":
             if e.k is None or e.l is None:
