@@ -16579,7 +16579,19 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            values = dialog.values()
+            (
+                tag,
+                i,
+                j,
+                area,
+                material_tag,
+                group,
+                rho,
+                consistent_mass,
+                do_rayleigh,
+                element_type,
+                section_tag,
+            ) = dialog.values()
         except ValueError as exc:
             QMessageBox.warning(
                 self,
@@ -16590,26 +16602,25 @@ class MainWindow(QMainWindow):
 
         before = self.project.to_dict()
         try:
-            tag = int(values["tag"])
             if tag in self.project.connections:
                 raise ValueError(
                     f"Element tag {tag} is already used by a connection."
                 )
             self.model.add_element(
                 tag,
-                int(values["node_i"]),
-                int(values["node_j"]),
-                element_type=str(values["element_type"]),
-                section_tag=values["section_tag"],
-                group=str(values["group"]),
-                mass_per_length=float(values["rho"]),
-                consistent_mass=bool(values["consistent_mass"]),
-                truss_area=float(values["area"]),
-                truss_material_tag=values["material_tag"],
-                truss_do_rayleigh=bool(values["do_rayleigh"]),
+                i,
+                j,
+                element_type=element_type,
+                section_tag=section_tag,
+                group=group,
+                mass_per_length=rho,
+                consistent_mass=consistent_mass,
+                truss_area=area,
+                truss_material_tag=material_tag,
+                truss_do_rayleigh=do_rayleigh,
             )
             self.project.validate_element_state(tag)
-        except (TypeError, ValueError) as exc:
+        except ValueError as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
             QMessageBox.warning(
@@ -16621,20 +16632,17 @@ class MainWindow(QMainWindow):
             return
 
         dependency = (
-            f"section {values['section_tag']}"
-            if values["section_tag"] is not None
-            else (
-                f"A={float(values['area']):g} · "
-                f"material {values['material_tag']}"
-            )
+            f"section {section_tag}"
+            if section_tag is not None
+            else f"A={area:g} · material {material_tag}"
         )
         self._refresh_all(
-            f"Created {values['element_type']} {tag}: "
-            f"node {values['node_i']} → {values['node_j']} · {dependency}"
+            f"Created {element_type} {tag}: "
+            f"node {i} → {j} · {dependency}"
         )
         self.selection.select("element", tag, "replace")
         self._record_project_change(
-            f"Create {values['element_type']} {tag}",
+            f"Create {element_type} {tag}",
             before,
         )
 
@@ -16659,7 +16667,19 @@ class MainWindow(QMainWindow):
         if not dialog.exec():
             return
         try:
-            values = dialog.values()
+            (
+                _dialog_tag,
+                i,
+                j,
+                area,
+                material_tag,
+                group,
+                rho,
+                consistent_mass,
+                do_rayleigh,
+                element_type,
+                section_tag,
+            ) = dialog.values()
         except ValueError as exc:
             QMessageBox.warning(self, "Edit Truss Element", str(exc))
             return
@@ -16669,19 +16689,19 @@ class MainWindow(QMainWindow):
             self.model.elements.pop(int(tag), None)
             self.model.add_element(
                 int(tag),
-                int(values["node_i"]),
-                int(values["node_j"]),
-                element_type=str(values["element_type"]),
-                section_tag=values["section_tag"],
-                group=str(values["group"]),
-                mass_per_length=float(values["rho"]),
-                consistent_mass=bool(values["consistent_mass"]),
-                truss_area=float(values["area"]),
-                truss_material_tag=values["material_tag"],
-                truss_do_rayleigh=bool(values["do_rayleigh"]),
+                i,
+                j,
+                element_type=element_type,
+                section_tag=section_tag,
+                group=group,
+                mass_per_length=rho,
+                consistent_mass=consistent_mass,
+                truss_area=area,
+                truss_material_tag=material_tag,
+                truss_do_rayleigh=do_rayleigh,
             )
             self.project.validate_element_state(int(tag))
-        except (TypeError, ValueError) as exc:
+        except ValueError as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
             QMessageBox.warning(self, "Edit Truss Element", str(exc))
@@ -16689,7 +16709,7 @@ class MainWindow(QMainWindow):
             return
 
         self._refresh_all(
-            f"Updated Truss {tag} → {values['element_type']}"
+            f"Updated Truss {tag} → {element_type}"
         )
         self.selection.select("element", int(tag), "replace")
         self._record_project_change(f"Edit Truss {tag}", before)
