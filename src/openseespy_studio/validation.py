@@ -1641,7 +1641,7 @@ def _support_and_connectivity_checks(
                     connect(element.i, retained)
         elif (
             element.element_type in SHELL_ELEMENT_TYPES
-            or element.element_type == "MEFI"
+            or element.element_type in {"MEFI", "MVLEM_3D"}
         ):
             for left, right in zip(
                 node_tags,
