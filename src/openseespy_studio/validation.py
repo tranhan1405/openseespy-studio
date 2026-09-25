@@ -824,12 +824,12 @@ def _element_geometry_checks(
                     ValidationIssue(
                         "ERROR",
                         "Element formulation",
-                        f"{element.element_type} element {tag} requires an "
-                        f"Elastic section; got {section.section_type} "
-                        f"section {section.tag}.",
+                        f"{element.element_type} element {tag} cannot use "
+                        f"{section.section_type} section {section.tag}; "
+                        "an Elastic section is required.",
                         "element",
                         tag,
-                        "Assign an Elastic section to this element.",
+                        "Assign an Elastic Section to this element.",
                     )
                 )
             elif element.element_type == "dispBeamColumnInt":
