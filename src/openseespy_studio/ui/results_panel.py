@@ -2410,9 +2410,9 @@ class ResultsPanel(QWidget):
         overview_layout.addWidget(self.crack_health)
 
         self.crack_info = QLabel(
-            "MEFI/RCLMS crack lines use RCPanel panel_strain and the "
-            "OrthotropicRAConcrete cracking strain εcr. Red lines indicate "
-            "panels with ε1/εcr ≥ 1."
+            "MEFI/RCLMS crack lines use RCPanel panel_strain and εcr. "
+            "Severity is shown as amber (mild), orange (moderate), and "
+            "red (severe)."
         )
         self.crack_info.setWordWrap(True)
         overview_layout.addWidget(self.crack_info)
@@ -2647,7 +2647,16 @@ class ResultsPanel(QWidget):
                     str(int(row["valid_panels"])),
                     str(int(row["cracked"])),
                     f"{float(row['max_ratio']):.3f}",
-                    "Cracked" if int(row["cracked"]) > 0 else "Below εcr",
+                    (
+                        {
+                            "mild": "Mild",
+                            "moderate": "Moderate",
+                            "severe": "Severe",
+                        }.get(
+                            crack_severity(float(row["max_ratio"])),
+                            "Below εcr",
+                        )
+                    ),
                 )
                 for column, value in enumerate(values):
                     item = self.crack_evolution_table.item(
