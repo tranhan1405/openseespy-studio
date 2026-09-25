@@ -2583,45 +2583,87 @@ class RCWallWizard(QWizard):
         *,
         include_steel_x: bool,
     ) -> str:
+        records = self._verified_material_records
+        steel_x = records["opensees-mefi-rwa20-steel-x-steel02"]
+        steel_y_web = records[
+            "opensees-mefi-rwa20-steel-y-web-steel02"
+        ]
+        steel_y_boundary = records[
+            "opensees-mefi-rwa20-steel-y-boundary-steel02"
+        ]
+        concrete_web = records[
+            "opensees-mefi-rwa20-unconfined-concrete02"
+        ]
+        concrete_boundary = records[
+            "opensees-mefi-rwa20-confined-concrete02"
+        ]
         stress = self._stress_store
         checks: list[tuple[str, bool]] = []
         if include_steel_x:
             checks.append((
                 "Steel X",
-                math.isclose(stress(self.steel_E.value()), 200.0e9, rel_tol=1e-9)
-                and math.isclose(stress(self.fy_x.value()), 469.93e6, rel_tol=1e-9),
+                math.isclose(
+                    stress(self.steel_E.value()),
+                    steel_x.parameters_si["E0"],
+                    rel_tol=1e-9,
+                )
+                and math.isclose(
+                    stress(self.fy_x.value()),
+                    steel_x.parameters_si["Fy"],
+                    rel_tol=1e-9,
+                ),
             ))
         checks.extend([
             (
                 "Steel Y web",
-                math.isclose(stress(self.steel_E.value()), 200.0e9, rel_tol=1e-9)
+                math.isclose(
+                    stress(self.steel_E.value()),
+                    steel_y_web.parameters_si["E0"],
+                    rel_tol=1e-9,
+                )
                 and math.isclose(
-                    stress(self.fy_y_web.value()), 409.71e6, rel_tol=1e-9
+                    stress(self.fy_y_web.value()),
+                    steel_y_web.parameters_si["Fy"],
+                    rel_tol=1e-9,
                 ),
             ),
             (
                 "Steel Y boundary",
-                math.isclose(stress(self.steel_E.value()), 200.0e9, rel_tol=1e-9)
+                math.isclose(
+                    stress(self.steel_E.value()),
+                    steel_y_boundary.parameters_si["E0"],
+                    rel_tol=1e-9,
+                )
                 and math.isclose(
-                    stress(self.fy_y_boundary.value()), 429.78e6, rel_tol=1e-9
+                    stress(self.fy_y_boundary.value()),
+                    steel_y_boundary.parameters_si["Fy"],
+                    rel_tol=1e-9,
                 ),
             ),
             (
                 "Concrete web",
                 math.isclose(
-                    stress(self.fc_web.value()), 47.09e6, rel_tol=1e-9
+                    stress(self.fc_web.value()),
+                    abs(concrete_web.parameters_si["fpc"]),
+                    rel_tol=1e-9,
                 )
                 and math.isclose(
-                    float(self.eps_web.value()), -0.00232, rel_tol=1e-9
+                    float(self.eps_web.value()),
+                    concrete_web.parameters_si["epsc0"],
+                    rel_tol=1e-9,
                 ),
             ),
             (
                 "Concrete boundary",
                 math.isclose(
-                    stress(self.fc_boundary.value()), 53.78e6, rel_tol=1e-9
+                    stress(self.fc_boundary.value()),
+                    abs(concrete_boundary.parameters_si["fpc"]),
+                    rel_tol=1e-9,
                 )
                 and math.isclose(
-                    float(self.eps_boundary.value()), -0.00397, rel_tol=1e-9
+                    float(self.eps_boundary.value()),
+                    concrete_boundary.parameters_si["epsc0"],
+                    rel_tol=1e-9,
                 ),
             ),
         ])
