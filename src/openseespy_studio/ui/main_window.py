@@ -25161,6 +25161,7 @@ class MainWindow(QMainWindow):
             self.viewport.show_shell_deformation_contour(
                 payload,
                 str(options.get("component", "Exx")),
+                location=str(options.get("location", "mid")),
                 element_tags=elements or None,
                 cache_key=result_cache_key,
             )
@@ -33563,6 +33564,7 @@ class MainWindow(QMainWindow):
     def _show_shell_deformation_result(
         self,
         component: str,
+        location: str,
         element_scope: object,
     ) -> None:
         if not self._last_result:
@@ -33582,6 +33584,7 @@ class MainWindow(QMainWindow):
         self.viewport.show_shell_deformation_contour(
             self._last_result,
             str(component),
+            location=str(location),
             element_tags=elements or None,
             cache_key=self._last_result_cache_key,
         )
@@ -33589,8 +33592,13 @@ class MainWindow(QMainWindow):
             "E1": "ε1 (max principal)",
             "E2": "ε2 (min principal)",
         }.get(str(component), str(component))
+        location_label = {
+            "mid": "mid-surface",
+            "top": "top (+z)",
+            "bottom": "bottom (-z)",
+        }.get(str(location), str(location))
         self.status_message.setText(
-            f"Shell strain fringe · {label}"
+            f"Shell strain fringe · {label} · {location_label}"
         )
 
     def _show_shell_displacement_result(
