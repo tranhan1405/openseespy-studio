@@ -47,6 +47,8 @@ class RCWallPreview(QWidget):
         self.boundary_value = 0.2
         self.rows = 1
         self.fibers = 3
+        self.reinforcement_mode = "smeared"
+        self.boundary_bars = 0
         self.setMinimumHeight(190)
 
     def set_wall(
@@ -57,12 +59,16 @@ class RCWallPreview(QWidget):
         boundary: float,
         rows: int,
         fibers: int,
+        reinforcement_mode: str = "smeared",
+        boundary_bars: int = 0,
     ) -> None:
         self.width_value = max(float(width), 1.0e-12)
         self.height_value = max(float(height), 1.0e-12)
         self.boundary_value = max(float(boundary), 0.0)
         self.rows = max(int(rows), 1)
         self.fibers = max(int(fibers), 3)
+        self.reinforcement_mode = str(reinforcement_mode)
+        self.boundary_bars = max(int(boundary_bars), 0)
         self.update()
 
     def paintEvent(self, _event) -> None:
@@ -132,6 +138,43 @@ class RCWallPreview(QWidget):
             painter.drawLine(
                 int(x), int(top), int(x), int(top + wall_h)
             )
+
+        if self.reinforcement_mode == "hybrid" and self.boundary_bars:
+            # Discrete boundary reinforcement is intentionally shown as
+            # explicit red bars. Cap the preview count so very dense layouts
+            # remain legible while the numerical input keeps the true count.
+            preview_bars = min(self.boundary_bars, 12)
+            painter.setPen(QPen(QColor("#d64545"), 2.2))
+            inset = max(boundary_px * 0.12, 2.0)
+            usable = max(boundary_px - 2.0 * inset, 1.0)
+            for bar in range(preview_bars):
+                fraction = (
+                    0.5
+                    if preview_bars == 1
+                    else bar / (preview_bars - 1)
+                )
+                x_left = left + inset + usable * fraction
+                x_right = left + wall_w - boundary_px + inset + usable * fraction
+                painter.drawLine(
+                    int(x_left), int(top),
+                    int(x_left), int(top + wall_h),
+                )
+                painter.drawLine(
+                    int(x_right), int(top),
+                    int(x_right), int(top + wall_h),
+                )
+
+            # Blue guide lines communicate that the web steel remains a
+            # smeared RCLMS field rather than individually meshed bars.
+            painter.setPen(QPen(QColor("#2f80c9"), 1.0))
+            web_left = left + boundary_px
+            web_right = left + wall_w - boundary_px
+            for index in range(1, 6):
+                y = top + wall_h * index / 6.0
+                painter.drawLine(
+                    int(web_left), int(y),
+                    int(web_right), int(y),
+                )
 
         painter.setPen(QPen(QColor("#26394c"), 2.2))
         painter.drawLine(
@@ -321,6 +364,13 @@ class RCWallWizard(QWizard):
         )
         form.addRow(note)
 
+        self.reinforcement_info = QLabel()
+        self.reinforcement_info.setWordWrap(True)
+        self.reinforcement_info.setStyleSheet(
+            "padding: 8px; background: #f7f9fb; color: #26394c;"
+        )
+        form.addRow("Calculated information:", self.reinforcement_info)
+
         for widget in (
             self.fc_web,
             self.eps_web,
@@ -451,7 +501,43 @@ class RCWallWizard(QWizard):
         self.boundary_bar_count.setEnabled(enabled)
         self.boundary_bar_diameter.setEnabled(enabled)
         self.boundary_truss_type.setEnabled(enabled)
+        self._update_reinforcement_info()
+        self._update_preview()
         self._update_review()
+
+    def _update_reinforcement_info(self) -> None:
+        if not hasattr(self, "reinforcement_info"):
+            return
+        if self.reinforcement_mode.currentData() != "hybrid":
+            self.reinforcement_info.setText(
+                "All reinforcement is represented by RCLMS smeared ratios."
+            )
+            return
+
+        count = int(self.boundary_bar_count.value())
+        diameter = float(self.boundary_bar_diameter.value())
+        boundary = float(self.boundary_width.value())
+        thickness = float(self.thickness.value())
+        area = count * math.pi * diameter * diameter / 4.0
+        gross = boundary * thickness
+        discrete_ratio = area / gross if gross > 0.0 else 0.0
+        total_ratio = float(self.rho_y_boundary.value()) / 100.0
+        remaining = total_ratio - discrete_ratio
+
+        warning = ""
+        if remaining < -1.0e-12:
+            warning = (
+                "<br><b style='color:#b42318'>Discrete steel exceeds total "
+                "boundary rho-y.</b>"
+            )
+        self.reinforcement_info.setText(
+            f"<b>Each boundary zone</b><br>"
+            f"As,discrete = {area:g} {self.units.length}² "
+            f"({count} × Ø{diameter:g})<br>"
+            f"ρy,discrete = {100.0 * discrete_ratio:.4g}%<br>"
+            f"ρy,smeared remaining = {100.0 * max(remaining, 0.0):.4g}%"
+            + warning
+        )
 
     def _build_review_page(self) -> None:
         page = QWizardPage()
@@ -516,7 +602,18 @@ class RCWallWizard(QWizard):
             boundary=float(self.boundary_width.value()),
             rows=int(self.vertical_elements.value()),
             fibers=int(self.macro_fibers.value()),
+            reinforcement_mode=(
+                str(self.reinforcement_mode.currentData())
+                if hasattr(self, "reinforcement_mode")
+                else "smeared"
+            ),
+            boundary_bars=(
+                int(self.boundary_bar_count.value())
+                if hasattr(self, "boundary_bar_count")
+                else 0
+            ),
         )
+        self._update_reinforcement_info()
 
     def _from_mm(self, value_mm: float) -> float:
         return float(value_mm) * 0.001 / self.units.length_to_m
