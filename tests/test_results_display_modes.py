@@ -1475,9 +1475,14 @@ def test_shell_principal_strain_formula_uses_engineering_shear():
 def test_shell_strain_tab_includes_principal_values(qapp):
     panel = ResultsPanel()
     captured = []
-    panel.shell_deformation_requested.connect(
-        lambda component, location, scope: captured.append(
-            (str(component), str(location), list(scope))
+    panel.shell_deformation_frame_requested.connect(
+        lambda frame, component, location, scope: captured.append(
+            (
+                int(frame),
+                str(component),
+                str(location),
+                list(scope),
+            )
         )
     )
     try:
@@ -1512,12 +1517,50 @@ def test_shell_strain_tab_includes_principal_values(qapp):
             panel.shell_tables["Strain"].item(0, 5).text()
         ) == pytest.approx(principal[1], rel=1.0e-5)
 
+        panel._set_motion_index(1)
         panel.shell_strain_location.setCurrentIndex(
             panel.shell_strain_location.findData("top")
         )
         panel.shell_strain_show_button.click()
         qapp.processEvents()
-        assert captured[-1] == ("E1", "top", [20])
+        assert captured
+        assert captured[-1] == (1, "E1", "top", [20])
+    finally:
+        panel.close()
+        panel.deleteLater()
+        qapp.processEvents()
+
+
+def test_shell_strain_animation_emits_solver_frame_fringe(qapp):
+    panel = ResultsPanel()
+    captured = []
+    panel.shell_deformation_frame_requested.connect(
+        lambda frame, component, location, scope: captured.append(
+            (
+                int(frame),
+                str(component),
+                str(location),
+                list(scope),
+            )
+        )
+    )
+    try:
+        panel.set_result(_two_frame_motion_result())
+        panel.show_solution_result(
+            "ShellDeformation",
+            {
+                "component": "E2",
+                "location": "bottom",
+                "_element_scope": [20],
+            },
+        )
+        panel._set_motion_index(0)
+        qapp.processEvents()
+        assert captured[-1] == (0, "E2", "bottom", [20])
+
+        panel._set_motion_index(1)
+        qapp.processEvents()
+        assert captured[-1] == (1, "E2", "bottom", [20])
     finally:
         panel.close()
         panel.deleteLater()
