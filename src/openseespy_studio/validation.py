@@ -807,7 +807,7 @@ def _element_geometry_checks(
                 )
             continue
 
-        if element.element_type in BEARING_ELEMENT_TYPES:
+        if element.element_type == "elastomericBearingPlasticity":
             signature = (int(model.ndm), int(model.ndf))
             if signature not in {(2, 3), (3, 6)}:
                 issues.append(
@@ -862,6 +862,84 @@ def _element_geometry_checks(
                         "element",
                         tag,
                         "Assign all four 3D bearing material directions.",
+                    )
+                )
+            continue
+
+        if element.element_type == "LeadRubberX":
+            if (int(model.ndm), int(model.ndf)) != (3, 6):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing formulation",
+                        f"LeadRubberX element {tag} requires ndm=3/ndf=6.",
+                        "element",
+                        tag,
+                        "Use this isolation bearing in a 3D/6DOF model.",
+                    )
+                )
+            continue
+
+        if element.element_type == "TripleFrictionPendulum":
+            if (int(model.ndm), int(model.ndf)) != (3, 6):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing formulation",
+                        f"TripleFrictionPendulum element {tag} requires "
+                        "ndm=3/ndf=6 with global Z vertical.",
+                        "element",
+                        tag,
+                        "Use a 3D/6DOF model with global Z as vertical.",
+                    )
+                )
+            referenced_materials = {
+                int(element.special_parameters[key])
+                for key in (
+                    "vertMatTag", "rotZMatTag",
+                    "rotXMatTag", "rotYMatTag",
+                )
+            }
+            missing_materials = sorted(
+                mat_tag
+                for mat_tag in referenced_materials
+                if mat_tag not in project.materials
+            )
+            if missing_materials:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing material",
+                        f"TripleFrictionPendulum element {tag} references "
+                        "missing uniaxial material tag(s): "
+                        + ", ".join(map(str, missing_materials))
+                        + ".",
+                        "element",
+                        tag,
+                        "Assign existing vertical and rotational materials.",
+                    )
+                )
+            referenced_friction = {
+                int(element.special_parameters[key])
+                for key in ("frnTag1", "frnTag2", "frnTag3")
+            }
+            missing_friction = sorted(
+                frn_tag
+                for frn_tag in referenced_friction
+                if frn_tag not in project.friction_models
+            )
+            if missing_friction:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Friction model",
+                        f"TripleFrictionPendulum element {tag} references "
+                        "missing friction model tag(s): "
+                        + ", ".join(map(str, missing_friction))
+                        + ".",
+                        "element",
+                        tag,
+                        "Create and assign all three friction models.",
                     )
                 )
             continue
