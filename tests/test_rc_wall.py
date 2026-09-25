@@ -1992,7 +1992,16 @@ def test_unified_wall_builder_creates_mvlem_3d_panel_stack():
     assert project.model.nodes[result.node_tags[0]].fixity == (1, 1, 1, 1, 1, 1)
     assert project.model.nodes[result.node_tags[1]].fixity == (1, 1, 1, 1, 1, 1)
 
-    script = to_openseespy(project)
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
     assert "ops.element('MVLEM_3D'" in script
     assert "'-ThickMod', 0.63" in script
     assert "'-Poisson', 0.25" in script
