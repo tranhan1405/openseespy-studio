@@ -22,6 +22,7 @@ from openseespy_studio.rc_wall import (
     RCWallSpec,
     build_rc_wall,
     build_rc_wall_macro_2d,
+    build_rc_wall_macro_3d,
     rc_wall_reinforcement_summary,
 )
 import openseespy_studio.ui.main_window as main_window_module
@@ -1938,6 +1939,121 @@ def test_unified_wall_wizard_exposes_all_four_formulations():
         assert wizard.macro_web_fsam.isEnabled()
         assert wizard.macro_boundary_fsam.isEnabled()
         assert not wizard.macro_shear_material.isEnabled()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+
+def test_unified_wall_builder_creates_mvlem_3d_panel_stack():
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(
+            1,
+            "Wall shear spring",
+            "Elastic",
+            parameters={"E": 1.0e9},
+        )
+    )
+    spec = RCWallSpec(
+        width=1.20,
+        height=3.00,
+        thickness=0.20,
+        boundary_width=0.20,
+        vertical_elements=2,
+        macro_fibers=6,
+        formulation="MVLEM_3D",
+        macro_center_ratio=0.4,
+        macro_density=2400.0,
+        macro_shear_material_tag=1,
+        macro_thick_mod=0.63,
+        macro_poisson=0.25,
+        boundary_unconfined_thickness=0.05,
+        boundary_confined_thickness=0.15,
+        replace_geometry=True,
+        name="MVLEM3D Wizard Wall",
+    )
+
+    result = build_rc_wall_macro_3d(project, spec)
+
+    assert (project.model.ndm, project.model.ndf) == (3, 6)
+    assert len(result.node_tags) == 6
+    assert len(result.element_tags) == 2
+    assert len(result.material_tags) == 4
+    first = project.model.elements[result.element_tags[0]]
+    assert first.element_type == "MVLEM_3D"
+    assert first.k is not None
+    assert first.l is not None
+    assert first.wall_thick_mod == pytest.approx(0.63)
+    assert first.wall_poisson == pytest.approx(0.25)
+    assert first.wall_density == pytest.approx(2400.0)
+    assert first.wall_shear_tag == 1
+    assert first.wall_widths == pytest.approx(
+        (0.20, 0.20, 0.20, 0.20, 0.20, 0.20)
+    )
+    assert project.model.nodes[result.node_tags[0]].fixity == (1, 1, 1, 1, 1, 1)
+    assert project.model.nodes[result.node_tags[1]].fixity == (1, 1, 1, 1, 1, 1)
+
+    script = to_openseespy(project)
+    assert "ops.element('MVLEM_3D'" in script
+    assert "'-ThickMod', 0.63" in script
+    assert "'-Poisson', 0.25" in script
+    assert not [
+        issue
+        for issue in validate_project(project)
+        if issue.severity == "ERROR"
+    ]
+
+
+def test_rw_a20_wall_materials_keep_verified_source_until_modified():
+    project = ProjectDatabase()
+    spec = RCWallSpec()
+    result = build_rc_wall(project, spec)
+
+    statuses = {
+        project.materials[tag].source.get("status")
+        for tag in result.material_tags
+    }
+    record_ids = {
+        project.materials[tag].source.get("record_id")
+        for tag in result.material_tags
+    }
+    assert statuses == {"verified"}
+    assert "opensees-mefi-rwa20-steel-x-steel02" in record_ids
+    assert "opensees-mefi-rwa20-confined-concrete02" in record_ids
+
+    modified_project = ProjectDatabase()
+    modified = RCWallSpec(steel_fx=500.0e6)
+    modified_result = build_rc_wall(modified_project, modified)
+    steel_x = modified_project.materials[modified_result.material_tags[0]]
+    assert steel_x.source["status"] == "modified_from_verified"
+    assert "Fy" in steel_x.source["modified_parameters"]
+    assert steel_x.source["record_id"] == (
+        "opensees-mefi-rwa20-steel-x-steel02"
+    )
+
+
+def test_unified_wall_wizard_enables_mvlem_3d_controls():
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(
+            1,
+            "Wall shear spring",
+            "Elastic",
+            parameters={"E": 1.0e9},
+        )
+    )
+    wizard = RCWallWizard(project)
+    try:
+        wizard.formulation.setCurrentIndex(
+            wizard.formulation.findData("MVLEM_3D")
+        )
+        assert wizard.macro_center_ratio.isEnabled()
+        assert wizard.macro_density.isEnabled()
+        assert wizard.macro_thick_mod.isEnabled()
+        assert wizard.macro_poisson.isEnabled()
+        assert wizard.macro_shear_material.isEnabled()
+        assert not wizard.macro_web_fsam.isEnabled()
+        assert not wizard.reinforcement_mode.isEnabled()
+        assert wizard._preview_object_counts()["fixed_nodes"] == 2
     finally:
         wizard.close()
         wizard.deleteLater()
