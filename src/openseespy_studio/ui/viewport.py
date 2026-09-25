@@ -29,6 +29,7 @@ except ImportError:
 
 from ..beam_loads import element_local_axes, resolve_self_weight_local
 from ..crack_results import (
+    crack_severity,
     mefi_crack_panel_states,
     mefi_crack_summary,
     principal_tensile_strain,
@@ -6620,6 +6621,9 @@ class ModelViewport(QWidget):
             "result-contour-nodes",
             "result-shell-contour",
             "result-crack-pattern",
+            "result-crack-pattern-mild",
+            "result-crack-pattern-moderate",
+            "result-crack-pattern-severe",
             "result-hinge-members",
             "result-hinge-points",
             "motion-overlay",
@@ -7088,10 +7092,12 @@ class ModelViewport(QWidget):
         for state in states:
             by_element.setdefault(int(state.element_tag), []).append(state)
 
-        points: list[np.ndarray] = []
-        lines: list[int] = []
+        severity_geometry: dict[str, dict[str, list[object]]] = {
+            "mild": {"points": [], "lines": [], "scales": []},
+            "moderate": {"points": [], "lines": [], "scales": []},
+            "severe": {"points": [], "lines": [], "scales": []},
+        }
         intensity: list[float] = []
-        stroke_scales: list[float] = []
 
         for tag, panel_states in sorted(by_element.items()):
             element = self._model.elements.get(tag)
@@ -7190,9 +7196,16 @@ class ModelViewport(QWidget):
                 direction = direction / direction_norm
 
                 # Build thin 3D crack strokes rather than wide ribbons.
-                # The line cells are converted to real polygonal tubes below,
-                # which stays visible on Qt/VTK while looking much closer to
-                # engineering post-processing crack glyphs.
+                # Severity controls both colour and a small thickness change.
+                severity = crack_severity(float(state.ratio))
+                if severity == "none":
+                    cumulative += raw_width
+                    continue
+                bucket = severity_geometry[severity]
+                bucket_points = bucket["points"]
+                bucket_lines = bucket["lines"]
+                bucket_scales = bucket["scales"]
+
                 stroke_scale = max(width_geom, height_geom)
                 surface_offset = normal * stroke_scale * 8.0e-3
 
@@ -7206,53 +7219,71 @@ class ModelViewport(QWidget):
                     start_point = face_center - half_length * direction
                     end_point = face_center + half_length * direction
 
-                    base = len(points)
-                    points.extend((start_point, end_point))
-                    lines.extend((2, base, base + 1))
+                    base = len(bucket_points)
+                    bucket_points.extend((start_point, end_point))
+                    bucket_lines.extend((2, base, base + 1))
 
-                stroke_scales.append(stroke_scale)
+                bucket_scales.append(stroke_scale)
                 intensity.append(float(state.ratio))
                 cumulative += raw_width
 
         stats["rendered_segments"] = len(intensity)
         self.clear_result_overlay(render=False)
         self.set_undeformed_model_visible(True, render=False)
-        if not points:
+        if not intensity:
             self.plotter.render()
             return stats
 
-        line_mesh = pv.PolyData(np.asarray(points, dtype=float))
-        line_mesh.lines = np.asarray(lines, dtype=np.int64)
+        severity_style = {
+            "mild": ("#f9a825", 2.0e-3),
+            "moderate": ("#ef6c00", 2.8e-3),
+            "severe": ("#c62828", 3.8e-3),
+        }
+        rendered_any = False
+        for severity, (color, radius_factor) in severity_style.items():
+            bucket = severity_geometry[severity]
+            bucket_points = bucket["points"]
+            bucket_lines = bucket["lines"]
+            bucket_scales = bucket["scales"]
+            if not bucket_points:
+                continue
 
-        # Pre-generate tube polygons instead of relying on the OpenGL
-        # "render_lines_as_tubes" path.  The latter was unreliable on some
-        # Windows/Qt/VTK combinations; polygonal tubes are both robust and
-        # visually much cleaner than the previous wide rectangular strips.
-        typical_scale = float(np.median(stroke_scales)) if stroke_scales else 1.0
-        crack_radius = max(typical_scale * 2.8e-3, 1.0e-6)
-        try:
-            mesh = line_mesh.tube(
-                radius=crack_radius,
-                n_sides=8,
-                capping=True,
+            line_mesh = pv.PolyData(np.asarray(bucket_points, dtype=float))
+            line_mesh.lines = np.asarray(bucket_lines, dtype=np.int64)
+            typical_scale = (
+                float(np.median(bucket_scales))
+                if bucket_scales
+                else 1.0
             )
-        except Exception:
-            mesh = line_mesh
+            crack_radius = max(
+                typical_scale * radius_factor,
+                1.0e-6,
+            )
+            try:
+                mesh = line_mesh.tube(
+                    radius=crack_radius,
+                    n_sides=8,
+                    capping=True,
+                )
+            except Exception:
+                mesh = line_mesh
 
-        self.plotter.add_mesh(
-            mesh,
-            name="result-crack-pattern",
-            color="#c62828",
-            opacity=0.96,
-            line_width=3,
-            render_lines_as_tubes=True,
-            lighting=False,
-            show_edges=False,
-            culling=False,
-            pickable=False,
-            render=False,
-        )
-        self._result_overlay_active = True
+            self.plotter.add_mesh(
+                mesh,
+                name=f"result-crack-pattern-{severity}",
+                color=color,
+                opacity=0.96,
+                line_width=3,
+                render_lines_as_tubes=True,
+                lighting=False,
+                show_edges=False,
+                culling=False,
+                pickable=False,
+                render=False,
+            )
+            rendered_any = True
+
+        self._result_overlay_active = rendered_any
         self._active_result_view_key = None
         self.plotter.render()
         return stats
