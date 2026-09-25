@@ -79,6 +79,8 @@ from ..importer import import_openseespy_source
 from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import (
+    BEARING_ELEMENT_TYPES,
+    CABLE_ELEMENT_TYPES,
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
@@ -184,6 +186,10 @@ from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
 from .continuum_dialog import ContinuumQuadDialog
 from .solid_dialog import SolidBrickDialog
+from .special_element_dialog import (
+    CatenaryCableDialog,
+    ElastomericBearingPlasticityDialog,
+)
 from .wall_macro_dialog import RCWallMacroElementDialog
 from .geometry_dialogs import (
     ElementDialog,
@@ -2451,6 +2457,20 @@ class MainWindow(QMainWindow):
             "Create a Truss element by entering nodes, area, and material",
         )
         self._make_action(
+            "catenary_cable",
+            "Catenary Cable...",
+            "element",
+            self._create_catenary_cable,
+            "Create a 3D OpenSees CatenaryCable element",
+        )
+        self._make_action(
+            "elastomeric_bearing",
+            "Elastomeric Bearing...",
+            "connection",
+            self._create_elastomeric_bearing,
+            "Create an elastomericBearingPlasticity isolation element",
+        )
+        self._make_action(
             "continuum_quad",
             "2D Quad...",
             "continuum-quad",
@@ -3635,6 +3655,8 @@ class MainWindow(QMainWindow):
             "FE Model",
             large=("node",),
             small=(
+                "catenary_cable",
+                "elastomeric_bearing",
                 "shell_input",
                 "continuum_quad",
                 "solid_brick",
@@ -10985,6 +11007,172 @@ class MainWindow(QMainWindow):
                 )
                 return
 
+            if element.element_type in CABLE_ELEMENT_TYPES:
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                weight = (
+                    float(p["weight"])
+                    * unit_system.length_to_m
+                    / unit_system.force_to_n
+                )
+                area = float(p["A"]) / unit_system.length_to_m**2
+                l0 = unit_system.length_from_m(float(p["L0"]))
+                rho = (
+                    float(p["rho"])
+                    * unit_system.length_to_m
+                    / unit_system.mass_unit_kg
+                )
+                self.properties_panel.set_properties(
+                    "Catenary Cable",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        ("Nodes", f"{element.i}, {element.j}"),
+                        (
+                            "Group",
+                            element.group,
+                            {
+                                "id": "group",
+                                "editable": True,
+                                "kind": "text",
+                            },
+                        ),
+                        (
+                            f"Weight / length [{unit_system.line_load_label}]",
+                            f"{weight:g}",
+                        ),
+                        (
+                            f"Elastic modulus [{unit_system.engineering_stress_label}]",
+                            f"{unit_system.engineering_stress_from_pa(float(p['E'])):g}",
+                        ),
+                        (
+                            f"Area [{unit_system.length}²]",
+                            f"{area:g}",
+                        ),
+                        (
+                            f"Unstressed length L0 [{unit_system.length}]",
+                            f"{l0:g}",
+                        ),
+                        ("Thermal expansion α", f"{float(p['alpha']):g}"),
+                        (
+                            "Temperature change ΔT",
+                            f"{float(p['temperature_change']):g}",
+                        ),
+                        (
+                            f"Mass / length ρ [{unit_system.mass_per_length_label}]",
+                            f"{rho:g}",
+                        ),
+                        ("Substeps", int(p["Nsubsteps"])),
+                        ("Mass type", int(p["massType"])),
+                        ("Section", "Not used by CatenaryCable"),
+                        ("Transformation", "Not used by CatenaryCable"),
+                        (
+                            "Edit",
+                            "Double-click element or use Definition → "
+                            "Edit Special Element Definition...",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in BEARING_ELEMENT_TYPES:
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                k_init = (
+                    float(p["kInit"])
+                    * unit_system.length_to_m
+                    / unit_system.force_to_n
+                )
+                qd = unit_system.force_from_n(float(p["qd"]))
+                mass = float(p["mass"]) / unit_system.mass_unit_kg
+                material_keys = [
+                    ("Axial (-P)", "p_mat_tag"),
+                ]
+                if int(self.model.ndm) == 3:
+                    material_keys.extend([
+                        ("Torsion (-T)", "t_mat_tag"),
+                        ("My (-My)", "my_mat_tag"),
+                    ])
+                material_keys.append(("Mz (-Mz)", "mz_mat_tag"))
+                rows = [
+                    ("Tag", tag),
+                    ("Type", element.element_type),
+                    ("Nodes", f"{element.i}, {element.j}"),
+                    (
+                        "Group",
+                        element.group,
+                        {
+                            "id": "group",
+                            "editable": True,
+                            "kind": "text",
+                        },
+                    ),
+                    (
+                        f"Initial shear stiffness [{unit_system.line_load_label}]",
+                        f"{k_init:g}",
+                    ),
+                    (
+                        f"Characteristic strength qd [{unit_system.force}]",
+                        f"{qd:g}",
+                    ),
+                    ("α1", f"{float(p['alpha1']):g}"),
+                    ("α2", f"{float(p['alpha2']):g}"),
+                    ("μ", f"{float(p['mu']):g}"),
+                ]
+                for label, key in material_keys:
+                    material_tag = p.get(key)
+                    material = (
+                        self.project.materials.get(int(material_tag))
+                        if material_tag is not None
+                        else None
+                    )
+                    rows.append((
+                        label,
+                        (
+                            f"{material_tag} - {material.name}"
+                            if material is not None
+                            else (
+                                f"{material_tag} (missing)"
+                                if material_tag is not None
+                                else "Unassigned"
+                            )
+                        ),
+                    ))
+                orientation = p.get("orientation")
+                rows.extend([
+                    ("Shear distance", f"{float(p['shearDist']):g}"),
+                    (
+                        "Rayleigh damping",
+                        "On" if bool(p["doRayleigh"]) else "Off",
+                    ),
+                    (
+                        f"Element mass [{unit_system.mass_label}]",
+                        f"{mass:g}",
+                    ),
+                    (
+                        "Orientation",
+                        (
+                            ", ".join(f"{float(v):g}" for v in orientation)
+                            if orientation is not None
+                            else "Automatic"
+                        ),
+                    ),
+                    ("Section", "Not used by bearing"),
+                    ("Transformation", "Local axes defined by bearing options"),
+                    (
+                        "Edit",
+                        "Double-click element or use Definition → "
+                        "Edit Special Element Definition...",
+                    ),
+                ])
+                self.properties_panel.set_properties(
+                    "Elastomeric Bearing Plasticity",
+                    rows,
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
             if element.element_type == "truss":
                 material_text = "Unassigned"
                 if element.truss_material_tag is not None:
@@ -16153,6 +16341,222 @@ class MainWindow(QMainWindow):
         )
         self.selection.select("element", tag, "replace")
         self._record_project_change(f"Create Truss {tag}", before)
+
+    def _special_default_nodes(self) -> tuple[int, int] | None:
+        if not self._ensure_node_count(2, title="Create Special Element"):
+            return None
+        selected_nodes = sorted(self.selection.nodes)
+        node_i = (
+            selected_nodes[0]
+            if len(selected_nodes) >= 1
+            else min(self.model.nodes)
+        )
+        node_j = (
+            selected_nodes[1]
+            if len(selected_nodes) >= 2
+            else next(
+                value
+                for value in sorted(self.model.nodes)
+                if value != node_i
+            )
+        )
+        return int(node_i), int(node_j)
+
+    def _create_catenary_cable(self) -> None:
+        if int(self.model.ndm) != 3 or int(self.model.ndf) not in {3, 6}:
+            QMessageBox.warning(
+                self,
+                "Create Catenary Cable",
+                "CatenaryCable requires a 3D model with ndf=3 or ndf=6.",
+            )
+            return
+        nodes = self._special_default_nodes()
+        if nodes is None:
+            return
+        node_i, node_j = nodes
+        dialog = CatenaryCableDialog(
+            self.project.next_element_tag(),
+            node_i,
+            node_j,
+            units=self.project.units,
+            parent=self,
+        )
+        a = self.model.nodes[node_i].xyz
+        b = self.model.nodes[node_j].xyz
+        chord = math.sqrt(
+            sum((float(b[k]) - float(a[k])) ** 2 for k in range(3))
+        )
+        if chord > 0.0:
+            dialog.unstressed_length.setValue(
+                UnitSystem.from_mapping(
+                    self.project.units
+                ).length_from_m(chord)
+            )
+        if not dialog.exec():
+            return
+        try:
+            tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Catenary Cable", str(exc))
+            return
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type="CatenaryCable",
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Create Catenary Cable", str(exc))
+            return
+        self._refresh_all(f"Created CatenaryCable {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(
+            f"Create CatenaryCable {tag}",
+            before,
+        )
+
+    def _create_elastomeric_bearing(self) -> None:
+        signature = (int(self.model.ndm), int(self.model.ndf))
+        if signature not in {(2, 3), (3, 6)}:
+            QMessageBox.warning(
+                self,
+                "Create Elastomeric Bearing",
+                "elastomericBearingPlasticity requires 2D/3DOF "
+                "or 3D/6DOF.",
+            )
+            return
+        if not self._ensure_prerequisite(
+            title="Create Elastomeric Bearing",
+            message=(
+                "This bearing requires uniaxial materials for its "
+                "non-shear directions. Create a Material now?"
+            ),
+            action_label="Create Material Now...",
+            available=lambda: bool(self.project.materials),
+            creator=self._create_material,
+        ):
+            return
+        nodes = self._special_default_nodes()
+        if nodes is None:
+            return
+        node_i, node_j = nodes
+        dialog = ElastomericBearingPlasticityDialog(
+            self.project.next_element_tag(),
+            node_i,
+            node_j,
+            materials=self.project.materials,
+            ndm=self.model.ndm,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Elastomeric Bearing", str(exc))
+            return
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type="elastomericBearingPlasticity",
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Create Elastomeric Bearing", str(exc))
+            return
+        self._refresh_all(
+            f"Created elastomericBearingPlasticity {tag}"
+        )
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(
+            f"Create elastomeric bearing {tag}",
+            before,
+        )
+
+    def _edit_special_element(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None:
+            return
+        if element.element_type in CABLE_ELEMENT_TYPES:
+            dialog = CatenaryCableDialog(
+                element.tag,
+                element.i,
+                element.j,
+                units=self.project.units,
+                element=element,
+                parent=self,
+            )
+            title = "Edit Catenary Cable"
+        elif element.element_type in BEARING_ELEMENT_TYPES:
+            dialog = ElastomericBearingPlasticityDialog(
+                element.tag,
+                element.i,
+                element.j,
+                materials=self.project.materials,
+                ndm=self.model.ndm,
+                units=self.project.units,
+                element=element,
+                parent=self,
+            )
+            title = "Edit Elastomeric Bearing"
+        else:
+            return
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            _tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, title, str(exc))
+            return
+        before = self.project.to_dict()
+        try:
+            self.model.elements.pop(int(tag))
+            self.model.add_element(
+                int(tag),
+                i,
+                j,
+                element_type=element.element_type,
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(int(tag))
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, title, str(exc))
+            self._refresh_all()
+            return
+        self._refresh_all(f"Updated {element.element_type} {tag}")
+        self.selection.select("element", int(tag), "replace")
+        self._show_entity_properties("element", int(tag))
+        self._record_project_change(
+            f"Edit {element.element_type} {tag}",
+            before,
+        )
 
     def _create_frame_between_nodes(
         self,
@@ -29527,6 +29931,10 @@ class MainWindow(QMainWindow):
             create.triggered.connect(self._create_element)
             create_truss = menu.addAction("New Truss...")
             create_truss.triggered.connect(self._create_truss)
+            create_cable = menu.addAction("New Catenary Cable...")
+            create_cable.triggered.connect(self._create_catenary_cable)
+            create_bearing = menu.addAction("New Elastomeric Bearing...")
+            create_bearing.triggered.connect(self._create_elastomeric_bearing)
             create_shell = menu.addAction("New Shell Element...")
             create_shell.triggered.connect(self._create_shell)
             create_solid = menu.addAction("New 3D Solid Brick...")
@@ -29571,6 +29979,8 @@ class MainWindow(QMainWindow):
             is_solid_group = element_type in SOLID_ELEMENT_TYPES
             is_wall_macro_group = element_type in WALL_MACRO_ELEMENT_TYPES
             is_frame_group = element_type in FRAME_ELEMENT_TYPES
+            is_cable_group = element_type in CABLE_ELEMENT_TYPES
+            is_bearing_group = element_type in BEARING_ELEMENT_TYPES
 
             if is_truss_group:
                 create = menu.addAction("New Truss...")
@@ -29587,6 +29997,12 @@ class MainWindow(QMainWindow):
             elif is_wall_macro_group:
                 create = menu.addAction("New RC Wall Macro Element...")
                 create.triggered.connect(self._create_wall_macro_element)
+            elif is_cable_group:
+                create = menu.addAction("New Catenary Cable...")
+                create.triggered.connect(self._create_catenary_cable)
+            elif is_bearing_group:
+                create = menu.addAction("New Elastomeric Bearing...")
+                create.triggered.connect(self._create_elastomeric_bearing)
             else:
                 create = menu.addAction("New Frame...")
                 create.triggered.connect(self._create_element)
@@ -29642,6 +30058,19 @@ class MainWindow(QMainWindow):
                         lambda checked=False,
                         values=tuple(sorted(tags)): (
                             self._edit_solid_brick(values[0])
+                            if len(values) == 1
+                            else None
+                        )
+                    )
+                elif is_cable_group or is_bearing_group:
+                    edit_special = definition_menu.addAction(
+                        "Edit Special Element Definition..."
+                    )
+                    edit_special.setEnabled(len(tags) == 1)
+                    edit_special.triggered.connect(
+                        lambda checked=False,
+                        values=tuple(sorted(tags)): (
+                            self._edit_special_element(values[0])
                             if len(values) == 1
                             else None
                         )
@@ -32420,7 +32849,17 @@ class MainWindow(QMainWindow):
         elif kind == "node":
             self._show_entity_properties("node", int(value))
         elif kind == "element":
-            self._show_entity_properties("element", int(value))
+            element = self.model.elements.get(int(value))
+            if (
+                element is not None
+                and (
+                    element.element_type in CABLE_ELEMENT_TYPES
+                    or element.element_type in BEARING_ELEMENT_TYPES
+                )
+            ):
+                self._edit_special_element(int(value))
+            else:
+                self._show_entity_properties("element", int(value))
         elif kind == "nodal_mass":
             self.selection.set_selection(nodes={int(value)})
             self._assign_mass()
