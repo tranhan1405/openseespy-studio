@@ -1778,7 +1778,8 @@ class RCWallWizard(QWizard):
         if discrete:
             selection_sets += 1
         if embedded_coupling:
-            selection_sets += 1
+            # Dedicated Vertical Web Bars + Embedded Coupling named sets.
+            selection_sets += 2
         return {
             "nodes": 2 * (rows + 1) + embedded_nodes,
             "host_nodes": 2 * (rows + 1),
@@ -2049,7 +2050,7 @@ class RCWallWizard(QWizard):
             if counts["discrete_rebar"]:
                 selection_text += " · Reinforcement"
             if counts["embedded_coupling"]:
-                selection_text += " · Embedded Coupling"
+                selection_text += " · Vertical Web Bars · Embedded Coupling"
             self.preview_selection_summary.setText(
                 "<b>Selections & Boundary Conditions</b><br>"
                 f"Named selections: {selection_text}<br>"
@@ -2114,7 +2115,7 @@ class RCWallWizard(QWizard):
                 "Named selections: Base · Top · MEFI"
                 + (" · Reinforcement" if counts["discrete_rebar"] else "")
                 + (
-                    " · Embedded Coupling"
+                    " · Vertical Web Bars · Embedded Coupling"
                     if counts["embedded_coupling"]
                     else ""
                 )
