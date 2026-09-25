@@ -1471,15 +1471,22 @@ class _Importer:
             self.count("Elements")
             return
 
-        if kind.lower() == "truss":
+        if kind.lower() in {"truss", "corottruss"}:
             if len(args) < 6:
-                raise ValueError("truss needs area and material tag")
+                raise ValueError(
+                    f"{kind} needs area and material tag"
+                )
             rest = args[6:]
+            element_type = (
+                "corotTruss"
+                if kind.lower() == "corottruss"
+                else "truss"
+            )
             self.project.model.add_element(
                 tag,
                 ni,
                 nj,
-                element_type="truss",
+                element_type=element_type,
                 group="truss",
                 mass_per_length=float(
                     self.flag_value(rest, "-rho", 0.0) or 0.0
