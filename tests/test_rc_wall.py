@@ -727,10 +727,12 @@ def test_rc_wall_wizard_pages_are_vertically_scrollable():
             )
             assert scroll.widget() is not None
 
-        dialog.reinforcement_scroll.verticalScrollBar().setValue(10)
-        dialog.setCurrentId(2)
+        bar = dialog.reinforcement_scroll.verticalScrollBar()
+        bar.setRange(0, 100)
+        bar.setValue(10)
+        dialog._page_changed(2)
         _APP.processEvents()
-        assert dialog.reinforcement_scroll.verticalScrollBar().value() == 0
+        assert bar.value() == 0
     finally:
         dialog.close()
         dialog.deleteLater()
