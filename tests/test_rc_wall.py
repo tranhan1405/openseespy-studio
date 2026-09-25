@@ -340,6 +340,165 @@ def test_rc_wall_hybrid_mesh_aligned_horizontal_bars_reduce_rho_x():
         assert element.truss_material_tag == result.material_tags[0]
 
 
+def test_rc_wall_fully_discrete_represents_all_target_ratios_with_bars():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    spec = RCWallSpec(
+        width=1220.0,
+        height=2209.8,
+        thickness=152.4,
+        boundary_width=228.6,
+        vertical_elements=7,
+        macro_fibers=8,
+        boundary_unconfined_thickness=50.8,
+        boundary_confined_thickness=101.6,
+        reinforcement_mode="fully_discrete",
+        boundary_bar_count=4,
+        boundary_cover=30.0,
+        boundary_layer_mode="front_back",
+        web_horizontal_layer_mode="front_back",
+        web_vertical_spacing=250.0,
+        web_vertical_edge_offset=50.0,
+        web_vertical_layer_mode="front_back",
+    )
+
+    summary = rc_wall_reinforcement_summary(spec)
+    result = build_rc_wall(project, spec)
+
+    assert result.fully_discrete
+    assert result.boundary_discrete_rho_y == pytest.approx(
+        spec.rho_y_boundary
+    )
+    assert result.web_vertical_discrete_rho_y == pytest.approx(
+        spec.rho_y_web
+    )
+    assert result.web_horizontal_discrete_rho_x == pytest.approx(
+        spec.rho_x_web
+    )
+    assert result.boundary_horizontal_discrete_rho_x == pytest.approx(
+        spec.rho_x_boundary
+    )
+    assert result.boundary_smeared_rho_y == pytest.approx(0.0)
+    assert result.web_smeared_rho_y == pytest.approx(0.0)
+    assert result.web_smeared_rho_x == pytest.approx(0.0)
+    assert result.boundary_smeared_rho_x == pytest.approx(0.0)
+
+    web_steel = project.nd_materials[result.nd_material_tags[2]]
+    boundary_steel = project.nd_materials[result.nd_material_tags[3]]
+    assert web_steel.parameters["ratio1"] == pytest.approx(0.0)
+    assert web_steel.parameters["ratio2"] == pytest.approx(0.0)
+    assert boundary_steel.parameters["ratio1"] == pytest.approx(0.0)
+    assert boundary_steel.parameters["ratio2"] == pytest.approx(0.0)
+
+    expected_boundary_area = (
+        spec.rho_y_boundary
+        * spec.boundary_width
+        * spec.thickness
+        / spec.boundary_bar_count
+    )
+    assert result.boundary_bar_area == pytest.approx(
+        expected_boundary_area
+    )
+
+    assert len(result.web_horizontal_element_tags) == 12
+    assert len(result.boundary_horizontal_element_tags) == 24
+    assert len(result.horizontal_embedded_node_tags) == 12
+    assert len(result.horizontal_embedded_coupling_element_tags) == 12
+
+    assert result.web_horizontal_bar_area == pytest.approx(
+        float(summary["web_horizontal_bar_area"])
+    )
+    assert result.boundary_horizontal_bar_area == pytest.approx(
+        float(summary["boundary_horizontal_bar_area"])
+    )
+    for tag in result.web_horizontal_element_tags:
+        element = project.model.elements[tag]
+        assert element.group.startswith(
+            "rc-wall-rebar-web-horizontal-"
+        )
+        assert element.truss_area == pytest.approx(
+            result.web_horizontal_bar_area
+        )
+    for tag in result.boundary_horizontal_element_tags:
+        element = project.model.elements[tag]
+        assert element.group.startswith(
+            "rc-wall-rebar-boundary-horizontal-"
+        )
+        assert element.truss_area == pytest.approx(
+            result.boundary_horizontal_bar_area
+        )
+
+    positions = tuple(summary["web_vertical_positions"])
+    vertical_layers = 2
+    assert len(result.web_vertical_element_tags) == (
+        len(positions) * vertical_layers * spec.vertical_elements
+    )
+    assert len(result.web_vertical_node_tags) == (
+        len(positions)
+        * vertical_layers
+        * (spec.vertical_elements + 1)
+    )
+    assert len(result.embedded_coupling_element_tags) == (
+        len(result.web_vertical_node_tags)
+        + len(result.horizontal_embedded_node_tags)
+    )
+
+    assert result.reinforcement_selection_name in project.selection_sets
+    assert result.horizontal_selection_name in project.selection_sets
+    assert result.web_vertical_selection_name in project.selection_sets
+    assert result.embedded_coupling_selection_name in project.selection_sets
+
+    issues = validate_project(project)
+    assert not [
+        issue
+        for issue in issues
+        if issue.severity == "ERROR"
+    ]
+
+
+def test_rc_wall_fully_discrete_uses_distinct_web_boundary_horizontal_area():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    spec = RCWallSpec(
+        width=1220.0,
+        height=2209.8,
+        thickness=152.4,
+        boundary_width=228.6,
+        vertical_elements=7,
+        macro_fibers=8,
+        boundary_unconfined_thickness=50.8,
+        boundary_confined_thickness=101.6,
+        reinforcement_mode="fully_discrete",
+        rho_x_web=0.0027,
+        rho_x_boundary=0.0082,
+        boundary_bar_count=4,
+        boundary_cover=30.0,
+        web_horizontal_layer_mode="front_back",
+        web_vertical_spacing=250.0,
+        web_vertical_edge_offset=50.0,
+        web_vertical_layer_mode="front_back",
+    )
+
+    result = build_rc_wall(project, spec)
+
+    assert result.boundary_horizontal_bar_area > (
+        result.web_horizontal_bar_area
+    )
+    expected_ratio = spec.rho_x_boundary / spec.rho_x_web
+    assert (
+        result.boundary_horizontal_bar_area
+        / result.web_horizontal_bar_area
+    ) == pytest.approx(expected_ratio)
+
+
 def test_rc_wall_embedded_vertical_web_rebar_builds_independent_nodes():
     project = ProjectDatabase()
     project.units = {
@@ -1196,6 +1355,82 @@ def test_rc_wall_wizard_embedded_rho_error_locks_create():
         finish = dialog.button(QWizard.WizardButton.FinishButton)
         assert finish is not None
         assert not finish.isEnabled()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_rc_wall_wizard_fully_discrete_mode_is_complete_and_ready():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    dialog = RCWallWizard(project)
+    try:
+        full_index = dialog.reinforcement_mode.findData(
+            "fully_discrete"
+        )
+        assert full_index >= 0
+        dialog.reinforcement_mode.setCurrentIndex(full_index)
+        dialog.web_vertical_spacing.setValue(250.0)
+        dialog.web_vertical_edge_offset.setValue(50.0)
+        dialog._update_review()
+        _APP.processEvents()
+
+        spec = dialog.data()
+        assert spec.reinforcement_mode == "fully_discrete"
+        assert spec.web_horizontal_mode == "mesh_aligned"
+        assert spec.web_vertical_mode == "embedded"
+
+        assert not dialog.boundary_bar_diameter.isEnabled()
+        assert not dialog.web_horizontal_bar_diameter.isEnabled()
+        assert not dialog.web_vertical_bar_diameter.isEnabled()
+        assert not dialog.web_horizontal_mode.isEnabled()
+        assert not dialog.web_vertical_mode.isEnabled()
+        assert dialog.boundary_bar_count.isEnabled()
+        assert dialog.web_horizontal_layer_mode.isEnabled()
+        assert dialog.web_vertical_spacing.isEnabled()
+        assert dialog.web_vertical_edge_offset.isEnabled()
+
+        summary = rc_wall_reinforcement_summary(spec)
+        counts = dialog._preview_object_counts()
+        assert counts["boundary_rebar"] == 56
+        assert counts["web_horizontal_rebar"] == 12
+        assert counts["boundary_horizontal_rebar"] == 24
+        assert counts["horizontal_embedded_nodes"] == 12
+        assert counts["horizontal_coupling"] == 12
+        assert counts["selection_sets"] == 7
+        assert counts["vertical_rebar"] == (
+            len(summary["web_vertical_positions"]) * 2 * 7
+        )
+
+        assert dialog.preview.reinforcement_mode == "fully_discrete"
+        assert dialog.preview.web_horizontal_mode == "mesh_aligned"
+        assert dialog.preview.web_vertical_mode == "embedded"
+        assert "Fully Discrete reinforcement" in (
+            dialog.reinforcement_info.text()
+        )
+        assert "RCLMS smeared steel ratios = 0" in (
+            dialog.reinforcement_info.text()
+        )
+        assert "Horizontal bar elements" in (
+            dialog.preview_object_summary.text()
+        )
+        assert "Horizontal Bars" in (
+            dialog.preview_selection_summary.text()
+        )
+        assert "Vertical Web Bars" in (
+            dialog.preview_selection_summary.text()
+        )
+        assert "Ready to create wall" in (
+            dialog.preview_validation_status.text()
+        )
+        finish = dialog.button(QWizard.WizardButton.FinishButton)
+        assert finish is not None
+        assert finish.isEnabled()
     finally:
         dialog.close()
         dialog.deleteLater()
