@@ -1460,8 +1460,29 @@ def build_rc_wall(
         project.add_selection_set(
             SelectionSetData(
                 reinforcement_selection_name,
-                node_tags=set(web_vertical_node_tags),
+                node_tags=set(
+                    web_vertical_node_tags
+                    + horizontal_embedded_node_tags
+                ),
                 element_tags=set(reinforcement_element_tags),
+            )
+        )
+
+    horizontal_selection_name = ""
+    horizontal_tags = (
+        web_horizontal_element_tags
+        + boundary_horizontal_element_tags
+    )
+    if horizontal_tags:
+        horizontal_selection_name = _unique_selection_name(
+            project,
+            f"{spec.name} · Horizontal Bars",
+        )
+        project.add_selection_set(
+            SelectionSetData(
+                horizontal_selection_name,
+                node_tags=set(horizontal_embedded_node_tags),
+                element_tags=set(horizontal_tags),
             )
         )
 
@@ -1506,16 +1527,31 @@ def build_rc_wall(
         reinforcement_element_tags=reinforcement_element_tags,
         reinforcement_selection_name=reinforcement_selection_name,
         boundary_bar_area=float(_boundary_bar_area(spec))
-        if str(spec.reinforcement_mode).strip().lower() == "hybrid"
+        if _discrete_system_enabled(spec)
         else 0.0,
         boundary_bar_spacing=float(_boundary_bar_spacing(spec))
-        if str(spec.reinforcement_mode).strip().lower() == "hybrid"
+        if _discrete_system_enabled(spec)
         else 0.0,
         boundary_discrete_rho_y=float(boundary_discrete_rho_y),
         boundary_smeared_rho_y=float(boundary_smeared_rho_y),
         web_horizontal_element_tags=web_horizontal_element_tags,
+        boundary_horizontal_element_tags=boundary_horizontal_element_tags,
+        horizontal_embedded_node_tags=horizontal_embedded_node_tags,
+        horizontal_embedded_coupling_element_tags=(
+            horizontal_embedded_coupling_element_tags
+        ),
+        horizontal_selection_name=horizontal_selection_name,
         web_horizontal_discrete_rho_x=float(
             web_horizontal_discrete_rho_x
+        ),
+        boundary_horizontal_discrete_rho_x=float(
+            boundary_horizontal_discrete_rho_x
+        ),
+        web_horizontal_bar_area=float(
+            _web_horizontal_bar_area(spec)
+        ),
+        boundary_horizontal_bar_area=float(
+            _boundary_horizontal_bar_area(spec)
         ),
         web_vertical_node_tags=web_vertical_node_tags,
         web_vertical_element_tags=web_vertical_element_tags,
@@ -1531,8 +1567,12 @@ def build_rc_wall(
         ),
         web_smeared_rho_y=float(web_smeared_rho_y),
         embedded_penalty=float(_embedded_penalty(spec))
-        if str(spec.web_vertical_mode).strip().lower() == "embedded"
+        if (
+            _fully_discrete(spec)
+            or str(spec.web_vertical_mode).strip().lower() == "embedded"
+        )
         else 0.0,
         web_smeared_rho_x=float(web_smeared_rho_x),
         boundary_smeared_rho_x=float(boundary_smeared_rho_x),
+        fully_discrete=_fully_discrete(spec),
     )
