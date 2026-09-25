@@ -11106,6 +11106,105 @@ class MainWindow(QMainWindow):
                 )
                 return
 
+            if element.element_type in CONTACT_ELEMENT_TYPES:
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                rows = [
+                    ("Tag", tag),
+                    ("Type", element.element_type),
+                    (
+                        "Nodes",
+                        ", ".join(
+                            str(value) for value in element.node_tags()
+                        ),
+                    ),
+                    ("Group", element.group),
+                ]
+                if element.element_type in CONTACT_TWO_NODE_ELEMENT_TYPES:
+                    kn = (
+                        float(p["Kn"])
+                        * unit_system.length_to_m
+                        / unit_system.force_to_n
+                    )
+                    kt = (
+                        float(p["Kt"])
+                        * unit_system.length_to_m
+                        / unit_system.force_to_n
+                    )
+                    rows.extend([
+                        (
+                            f"Normal penalty [{unit_system.force}/{unit_system.length}]",
+                            f"{kn:g}",
+                        ),
+                        (
+                            f"Tangential penalty [{unit_system.force}/{unit_system.length}]",
+                            f"{kt:g}",
+                        ),
+                        ("Friction μ", f"{float(p['mu']):g}"),
+                    ])
+                    if element.element_type == "zeroLengthContact2D":
+                        rows.append((
+                            "Contact normal",
+                            ", ".join(
+                                f"{float(value):g}"
+                                for value in p["normal"]
+                            ),
+                        ))
+                    else:
+                        rows.extend([
+                            (
+                                f"Cohesion [{unit_system.force}]",
+                                f"{unit_system.force_from_n(float(p['cohesion'])):g}",
+                            ),
+                            ("Normal direction", int(p["dir"])),
+                        ])
+                else:
+                    nd_tag = int(p["nd_material_tag"])
+                    nd_material = self.project.nd_materials.get(nd_tag)
+                    rows.extend([
+                        (
+                            "Contact nD material",
+                            (
+                                f"{nd_tag} - {nd_material.name}"
+                                if nd_material is not None
+                                else f"{nd_tag} (missing)"
+                            ),
+                        ),
+                        (
+                            f"Gap tolerance [{unit_system.length}]",
+                            f"{unit_system.length_from_m(float(p['gTol'])):g}",
+                        ),
+                        (
+                            f"Force tolerance [{unit_system.force}]",
+                            f"{unit_system.force_from_n(float(p['fTol'])):g}",
+                        ),
+                        ("Initially active", "Yes" if int(p["cFlag"]) else "No"),
+                    ])
+                    if element.element_type == "BeamContact2D":
+                        rows.append((
+                            f"Beam width [{unit_system.length}]",
+                            f"{unit_system.length_from_m(float(p['width'])):g}",
+                        ))
+                    else:
+                        rows.extend([
+                            (
+                                f"Beam radius [{unit_system.length}]",
+                                f"{unit_system.length_from_m(float(p['radius'])):g}",
+                            ),
+                            ("Transformation", int(p["transf_tag"])),
+                        ])
+                rows.append((
+                    "Edit",
+                    "Double-click element or use Definition → "
+                    "Edit Contact / Interface...",
+                ))
+                self.properties_panel.set_properties(
+                    "Contact / Interface Element",
+                    rows,
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
             if element.element_type == "LeadRubberX":
                 p = element.special_parameters
                 unit_system = UnitSystem.from_mapping(self.project.units)
@@ -11142,8 +11241,7 @@ class MainWindow(QMainWindow):
                         ),
                         (
                             "Edit",
-                            "Advanced bearing editor will be added in the "
-                            "remaining Batch 6 UI phase.",
+                            "Double-click element or use Definition → Edit Isolation Bearing...",
                         ),
                     ],
                     context={"kind": "element", "tag": int(tag)},
@@ -11197,8 +11295,7 @@ class MainWindow(QMainWindow):
                         ),
                         (
                             "Edit",
-                            "Advanced bearing editor will be added in the "
-                            "remaining Batch 6 UI phase.",
+                            "Double-click element or use Definition → Edit Isolation Bearing...",
                         ),
                     ],
                     context={"kind": "element", "tag": int(tag)},
@@ -19055,7 +19152,11 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.Yes:
             return
         before = self.project.to_dict()
-        self.project.remove_nd_material(tag)
+        try:
+            self.project.remove_nd_material(tag)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Delete nD Material", str(exc))
+            return
         self._refresh_project_metadata(f"Deleted nDMaterial {tag}")
         self._record_project_change(
             f"Delete nD material {tag}",
