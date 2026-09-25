@@ -1421,7 +1421,7 @@ class RCWallWizard(QWizard):
         page = QWizardPage()
         page.setTitle("4 · Preview & Create Wall")
         page.setSubTitle(
-            "Review the exact wall layout and the SARE objects that will be "
+            "Review the exact wall layout and the FEWIZ objects that will be "
             "created before accepting the wizard."
         )
         body = self._scrollable_page_body(page, "preview")
@@ -2004,7 +2004,7 @@ class RCWallWizard(QWizard):
                 )
                 if reinforcement_mode == "fully_discrete":
                     validate_rc_wall_spec(self.data())
-                elif reinforcement_mode == "hybrid":
+                elif formulation == "MEFI" and reinforcement_mode == "hybrid":
                     diameter = float(self.boundary_bar_diameter.value())
                     count = int(self.boundary_bar_count.value())
                     cover = float(self.boundary_cover.value())
@@ -2108,6 +2108,42 @@ class RCWallWizard(QWizard):
 
     def _preview_object_counts(self) -> dict[str, int]:
         rows = max(int(self.vertical_elements.value()), 1)
+        formulation = str(self.formulation.currentData())
+        if formulation != "MEFI":
+            is_3d = formulation == "MVLEM_3D"
+            host_nodes = (
+                2 * (rows + 1)
+                if is_3d
+                else rows + 1
+            )
+            return {
+                "nodes": host_nodes,
+                "host_nodes": host_nodes,
+                "embedded_nodes": 0,
+                "horizontal_embedded_nodes": 0,
+                "vertical_embedded_nodes": 0,
+                "mefi": 0,
+                "wall_elements": rows,
+                "boundary_rebar": 0,
+                "horizontal_rebar": 0,
+                "web_horizontal_rebar": 0,
+                "boundary_horizontal_rebar": 0,
+                "vertical_rebar": 0,
+                "embedded_coupling": 0,
+                "horizontal_coupling": 0,
+                "vertical_coupling": 0,
+                "discrete_rebar": 0,
+                "elements": rows,
+                "structural_elements": rows,
+                "uniaxial_materials": (
+                    4 if formulation in {"MVLEM", "MVLEM_3D"} else 0
+                ),
+                "nd_materials": 0,
+                "sections": 0,
+                "selection_sets": 3,
+                "fixed_nodes": 2 if is_3d else 1,
+            }
+
         mode = str(self.reinforcement_mode.currentData())
         discrete_enabled = mode in {"hybrid", "fully_discrete"}
         fully_discrete = mode == "fully_discrete"
@@ -2192,6 +2228,7 @@ class RCWallWizard(QWizard):
             "horizontal_embedded_nodes": horizontal_embedded_nodes,
             "vertical_embedded_nodes": vertical_embedded_nodes,
             "mefi": rows,
+            "wall_elements": rows,
             "boundary_rebar": boundary_rebar,
             "horizontal_rebar": horizontal_rebar,
             "web_horizontal_rebar": web_horizontal_rebar,
@@ -2232,17 +2269,59 @@ class RCWallWizard(QWizard):
                 "boundary",
                 "Boundary unconfined layer must be smaller than thickness.",
             ))
+        formulation = str(self.formulation.currentData())
+        required_domain = (
+            (3, 6) if formulation == "MVLEM_3D" else (2, 3)
+        )
         if (
             not self.replace_geometry.isChecked()
             and (
                 int(self.project.model.ndm),
                 int(self.project.model.ndf),
-            ) != (2, 3)
+            ) != required_domain
         ):
             items.append((
                 "domain",
-                "Append mode requires an ndm=2 / ndf=3 model.",
+                "Append mode for "
+                f"{formulation} requires ndm={required_domain[0]} / "
+                f"ndf={required_domain[1]}.",
             ))
+
+        if formulation != "MEFI":
+            if not 0.0 <= self.macro_center_ratio.value() <= 1.0:
+                items.append((
+                    "macro",
+                    "Macro center-of-rotation ratio must be in [0, 1].",
+                ))
+            if self.macro_density.value() < 0.0:
+                items.append(("macro", "Macro density cannot be negative."))
+            if formulation in {"MVLEM", "MVLEM_3D"}:
+                if self.macro_shear_material.currentData() is None:
+                    items.append((
+                        "material",
+                        f"{formulation} requires a shear material.",
+                    ))
+            if formulation == "SFI_MVLEM":
+                if (
+                    self.macro_web_fsam.currentData() is None
+                    or self.macro_boundary_fsam.currentData() is None
+                ):
+                    items.append((
+                        "material",
+                        "SFI_MVLEM requires web and boundary FSAM materials.",
+                    ))
+            if formulation == "MVLEM_3D":
+                if self.macro_thick_mod.value() <= 0.0:
+                    items.append((
+                        "macro",
+                        "MVLEM_3D ThickMod must be positive.",
+                    ))
+                if not -1.0 < self.macro_poisson.value() < 0.5:
+                    items.append((
+                        "macro",
+                        "MVLEM_3D Poisson ratio must satisfy -1 < nu < 0.5.",
+                    ))
+            return items
 
         reinforcement_mode = str(
             self.reinforcement_mode.currentData()
@@ -2371,16 +2450,25 @@ class RCWallWizard(QWizard):
             mapping = (
                 "[B] " + " ".join("[W]" for _ in range(web_count)) + " [B]"
             )
+            formulation = str(self.formulation.currentData())
             mode = (
                 "Replace current FE model"
                 if self.replace_geometry.isChecked()
-                else "Append to current 2D model"
+                else (
+                    "Append to current 3D model"
+                    if formulation == "MVLEM_3D"
+                    else "Append to current 2D model"
+                )
             )
             reinforcement_mode = str(
                 self.reinforcement_mode.currentData()
             )
-            reinforcement_text = "Smeared reinforcement only"
-            if reinforcement_mode == "fully_discrete":
+            reinforcement_text = (
+                "Macro-fiber reinforcement ratios ρy (Boundary/Web)"
+                if formulation != "MEFI"
+                else "Smeared reinforcement only"
+            )
+            if formulation == "MEFI" and reinforcement_mode == "fully_discrete":
                 spec = self.data()
                 summary = rc_wall_reinforcement_summary(spec)
                 reinforcement_text = (
@@ -2456,67 +2544,106 @@ class RCWallWizard(QWizard):
                 f"Boundary = {boundary:g} {self.units.length} each side<br>"
                 f"Origin = ({self.origin_x.value():g}, "
                 f"{self.origin_y.value():g}) {self.units.length}<br>"
-                f"MEFI = {rows} rows · {count} macro-fibers<br>"
+                f"{formulation} = {rows} vertical element(s) · "
+                f"{count} macro-fibers<br>"
                 f"Web fiber width = {web_width:g} {self.units.length}<br>"
                 f"Mode = {mode}"
             )
-            self.preview_object_summary.setText(
-                "<b>Objects to be created</b><br>"
-                f"Nodes: {counts['nodes']} "
-                f"({counts['host_nodes']} host + "
-                f"{counts['embedded_nodes']} embedded steel)<br>"
-                f"MEFI elements: {counts['mefi']}<br>"
-                f"Boundary bar elements: {counts['boundary_rebar']}<br>"
-                f"Horizontal bar elements: "
-                f"{counts['horizontal_rebar']} "
-                f"({counts['web_horizontal_rebar']} web + "
-                f"{counts['boundary_horizontal_rebar']} boundary)<br>"
-                f"Vertical web bar elements: "
-                f"{counts['vertical_rebar']}<br>"
-                f"Embedded coupling helpers: "
-                f"{counts['embedded_coupling']}<br>"
-                f"<b>Total elements: {counts['elements']}</b> "
-                f"({counts['structural_elements']} structural)<br>"
-                f"Uniaxial materials: {counts['uniaxial_materials']}<br>"
-                f"nD materials: {counts['nd_materials']}<br>"
-                f"RCLMS sections: {counts['sections']}<br>"
-                f"Selection sets: {counts['selection_sets']}<br>"
-                f"Fixed base nodes: {counts['fixed_nodes']}"
-            )
+            if formulation == "MEFI":
+                object_text = (
+                    "<b>Objects to be created</b><br>"
+                    f"Nodes: {counts['nodes']} "
+                    f"({counts['host_nodes']} host + "
+                    f"{counts['embedded_nodes']} embedded steel)<br>"
+                    f"MEFI elements: {counts['mefi']}<br>"
+                    f"Boundary bar elements: {counts['boundary_rebar']}<br>"
+                    f"Horizontal bar elements: {counts['horizontal_rebar']} "
+                    f"({counts['web_horizontal_rebar']} web + "
+                    f"{counts['boundary_horizontal_rebar']} boundary)<br>"
+                    f"Vertical web bar elements: {counts['vertical_rebar']}<br>"
+                    f"Embedded coupling helpers: "
+                    f"{counts['embedded_coupling']}<br>"
+                    f"<b>Total elements: {counts['elements']}</b> "
+                    f"({counts['structural_elements']} structural)<br>"
+                    f"Uniaxial materials: {counts['uniaxial_materials']}<br>"
+                    f"nD materials: {counts['nd_materials']}<br>"
+                    f"RCLMS sections: {counts['sections']}<br>"
+                    f"Selection sets: {counts['selection_sets']}<br>"
+                    f"Fixed base nodes: {counts['fixed_nodes']}"
+                )
+            else:
+                dependency_text = (
+                    "Existing FSAM references: 2"
+                    if formulation == "SFI_MVLEM"
+                    else f"New uniaxial fiber materials: "
+                    f"{counts['uniaxial_materials']} + existing shear material"
+                )
+                object_text = (
+                    "<b>Objects to be created</b><br>"
+                    f"Host nodes: {counts['host_nodes']}<br>"
+                    f"{formulation} elements: {counts['wall_elements']}<br>"
+                    f"{dependency_text}<br>"
+                    f"Selection sets: {counts['selection_sets']}<br>"
+                    f"Fixed base nodes: {counts['fixed_nodes']}"
+                )
+            self.preview_object_summary.setText(object_text)
 
-            truss_text = (
-                self.boundary_truss_type.currentText()
-                if reinforcement_mode in {"hybrid", "fully_discrete"}
-                else "—"
-            )
-            self.preview_material_summary.setText(
-                "<b>Materials & Sections</b><br>"
-                "Uniaxial: Steel02 ×3 · Concrete02 ×2<br>"
-                "nD: OrthotropicRAConcrete ×2 · "
-                "SmearedSteelDoubleLayer ×2"
-                + (
-                    " (ratios = 0)"
-                    if reinforcement_mode == "fully_discrete"
-                    else ""
+            if formulation == "MEFI":
+                truss_text = (
+                    self.boundary_truss_type.currentText()
+                    if reinforcement_mode in {"hybrid", "fully_discrete"}
+                    else "—"
                 )
-                + "<br>"
-                "Sections: RCLMS Web (1 layer) · "
-                "RCLMS Boundary (2 layers)<br>"
-                f"Discrete reinforcement formulation: {truss_text}<br>"
-                + (
-                    "Coupling: ASDEmbeddedNodeElement · "
-                    f"penalty factor {self.embedded_penalty_factor.value():g} · "
-                    f"K≈{(
-                        2.0
-                        * abs(float(self.fc_web.value()))
-                        / max(abs(float(self.eps_web.value())), 1.0e-12)
-                        * float(self.embedded_penalty_factor.value())
-                    ):g} {self.units.engineering_stress_label}"
-                    if counts["embedded_coupling"]
-                    else "Coupling: —"
+                material_text = (
+                    "<b>Materials & Sections</b><br>"
+                    "Uniaxial: Steel02 ×3 · Concrete02 ×2<br>"
+                    "nD: OrthotropicRAConcrete ×2 · "
+                    "SmearedSteelDoubleLayer ×2"
+                    + (
+                        " (ratios = 0)"
+                        if reinforcement_mode == "fully_discrete"
+                        else ""
+                    )
+                    + "<br>"
+                    "Sections: RCLMS Web (1 layer) · "
+                    "RCLMS Boundary (2 layers)<br>"
+                    f"Discrete reinforcement formulation: {truss_text}<br>"
+                    + (
+                        "Coupling: ASDEmbeddedNodeElement · "
+                        f"penalty factor "
+                        f"{self.embedded_penalty_factor.value():g}"
+                        if counts["embedded_coupling"]
+                        else "Coupling: —"
+                    )
                 )
-            )
-            selection_text = "Base · Top · MEFI"
+            elif formulation == "SFI_MVLEM":
+                material_text = (
+                    "<b>Materials & Dependencies</b><br>"
+                    f"Web FSAM: {self.macro_web_fsam.currentText()}<br>"
+                    f"Boundary FSAM: "
+                    f"{self.macro_boundary_fsam.currentText()}<br>"
+                    "Fiber mapping: Boundary | Web … Web | Boundary"
+                )
+            else:
+                material_text = (
+                    "<b>Materials & Dependencies</b><br>"
+                    "Generated: Steel02 web/boundary + "
+                    "Concrete02 web/boundary<br>"
+                    "Provenance: RW-A20 verified preset when unchanged; "
+                    "edited values marked modified-from-verified<br>"
+                    f"Shear: {self.macro_shear_material.currentText()}<br>"
+                    f"CoR c = {self.macro_center_ratio.value():g} · "
+                    f"density = {self.macro_density.value():g}"
+                    + (
+                        f"<br>ThickMod = {self.macro_thick_mod.value():g} · "
+                        f"ν = {self.macro_poisson.value():g}"
+                        if formulation == "MVLEM_3D"
+                        else ""
+                    )
+                )
+            self.preview_material_summary.setText(material_text)
+
+            selection_text = f"Base · Top · {formulation}"
             if counts["discrete_rebar"]:
                 selection_text += " · Reinforcement"
             if counts["horizontal_rebar"]:
@@ -2528,8 +2655,16 @@ class RCWallWizard(QWizard):
             self.preview_selection_summary.setText(
                 "<b>Selections & Boundary Conditions</b><br>"
                 f"Named selections: {selection_text}<br>"
-                "Base nodes: UX, UY, RZ fixed<br>"
-                "Top: two top wall nodes"
+                + (
+                    "Base nodes: all 6 DOF fixed<br>Top: two top panel nodes"
+                    if formulation == "MVLEM_3D"
+                    else (
+                        "Base node: UX, UY, RZ fixed<br>"
+                        "Top: one top centerline node"
+                        if formulation in {"MVLEM", "SFI_MVLEM"}
+                        else "Base nodes: UX, UY, RZ fixed<br>Top: two top wall nodes"
+                    )
+                )
             )
 
             validation_items = self._preview_validation_items()
@@ -2549,6 +2684,8 @@ class RCWallWizard(QWizard):
                     "web_vertical": "Embedded vertical reinforcement",
                     "fully_discrete": "Fully discrete reinforcement",
                     "domain": "Project domain",
+                    "macro": "Macro formulation",
+                    "material": "Material dependency",
                 }
                 self.preview_validation_status.setText(
                     "<b>Preview check · needs attention</b><br>"
@@ -2578,16 +2715,26 @@ class RCWallWizard(QWizard):
                     else "Resolve preview validation issues before creating."
                 )
 
+            base_text = (
+                "both bottom nodes fixed in all 6 DOF"
+                if formulation == "MVLEM_3D"
+                else (
+                    "bottom centerline node fixed in UX, UY and RZ"
+                    if formulation in {"MVLEM", "SFI_MVLEM"}
+                    else "both bottom nodes fixed in UX, UY and RZ"
+                )
+            )
             self.review.setText(
                 "<b>Model definition</b><br>"
                 f"Mode: {mode}<br>"
-                f"Vertical MEFI elements: {rows}<br>"
+                f"Formulation: {formulation}<br>"
+                f"Vertical elements: {rows}<br>"
                 f"Macro-fibers: {count} · web fiber width "
                 f"{web_width:g} {self.units.length}<br>"
                 f"Mapping: <code>{mapping}</code><br>"
                 f"Reinforcement: {reinforcement_text}<br>"
-                "Base: both bottom nodes fixed in UX, UY and RZ.<br>"
-                "Named selections: Base · Top · MEFI"
+                f"Base: {base_text}.<br>"
+                f"Named selections: Base · Top · {formulation}"
                 + (" · Reinforcement" if counts["discrete_rebar"] else "")
                 + (
                     " · Horizontal Bars"
