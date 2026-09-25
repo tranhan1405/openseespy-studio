@@ -1,3 +1,5 @@
+import pytest
+
 from openseespy_studio.generator import to_openseespy
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import StructuralModel
