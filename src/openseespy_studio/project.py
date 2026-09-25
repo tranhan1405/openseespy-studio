@@ -5962,6 +5962,37 @@ class ProjectDatabase:
                 raise ValueError(
                     "Frame Line requires an existing Geometric Transformation."
                 )
+            section = self.sections[int(line.section_tag)]
+            transformation = self.transformations[
+                int(line.transformation_tag)
+            ]
+            if (
+                line.element_type
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
+                and section.section_type != "Elastic"
+            ):
+                raise ValueError(
+                    f"{line.element_type} Frame Line requires an Elastic Section."
+                )
+            if line.element_type == "dispBeamColumnInt":
+                if (int(self.model.ndm), int(self.model.ndf)) != (2, 3):
+                    raise ValueError(
+                        "dispBeamColumnInt Frame Line requires ndm=2/ndf=3."
+                    )
+                if section.section_type != "FiberInt":
+                    raise ValueError(
+                        "dispBeamColumnInt Frame Line requires a FiberInt Section."
+                    )
+                if transformation.transformation_type != "LinearInt":
+                    raise ValueError(
+                        "dispBeamColumnInt Frame Line requires a LinearInt "
+                        "Geometric Transformation."
+                    )
+            elif transformation.transformation_type == "LinearInt":
+                raise ValueError(
+                    "LinearInt Geometric Transformation is reserved for "
+                    "dispBeamColumnInt Frame Lines."
+                )
         else:
             if (
                 line.material_tag is None
