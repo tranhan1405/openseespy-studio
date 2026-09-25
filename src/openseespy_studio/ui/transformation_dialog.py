@@ -54,6 +54,7 @@ class TransformationDialog(QDialog):
             "Linear",
             "PDelta",
             "Corotational",
+            "LinearInt",
         ])
         if transformation:
             self.transformation_type.setCurrentText(
@@ -100,6 +101,9 @@ class TransformationDialog(QDialog):
         self.orientation_mode.currentIndexChanged.connect(
             self._sync_orientation_mode
         )
+        self.transformation_type.currentTextChanged.connect(
+            self._sync_orientation_mode
+        )
         self._sync_orientation_mode()
 
         buttons = QDialogButtonBox(
@@ -110,9 +114,19 @@ class TransformationDialog(QDialog):
         root.addWidget(buttons)
 
     def _sync_orientation_mode(self) -> None:
-        manual = self.orientation_mode.currentData() == "manual"
+        linear_int = self.transformation_type.currentText() == "LinearInt"
+        self.orientation_mode.setEnabled(not linear_int)
+        manual = (
+            not linear_int
+            and self.orientation_mode.currentData() == "manual"
+        )
         for widget in (self.vx, self.vy, self.vz):
             widget.setEnabled(manual)
+        if linear_int:
+            self.orientation_mode.setToolTip(
+                "LinearInt is the dedicated 2D transformation for "
+                "dispBeamColumnInt; vecxz is not used."
+            )
 
     def transformation_data(self) -> TransformationData:
         return TransformationData(

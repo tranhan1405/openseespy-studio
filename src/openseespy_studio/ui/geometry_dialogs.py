@@ -80,6 +80,8 @@ class ElementDialog(_BaseDialog):
         transformations=None,
         new_section_callback=None,
         new_transformation_callback=None,
+        ndm: int = 3,
+        ndf: int = 6,
         parent=None,
     ):
         super().__init__("Create Frame Member", parent)
@@ -87,17 +89,22 @@ class ElementDialog(_BaseDialog):
         self._transformations = dict(transformations or {})
         self._new_section_callback = new_section_callback
         self._new_transformation_callback = new_transformation_callback
+        self._dims = (int(ndm), int(ndf))
 
         self.tag = _tag_spin(tag)
         self.node_i = _tag_spin(node_i)
         self.node_j = _tag_spin(node_j)
 
         self.element_type = QComboBox()
-        self.element_type.addItems([
+        element_types = [
             "elasticBeamColumn",
+            "ElasticTimoshenkoBeam",
             "forceBeamColumn",
             "dispBeamColumn",
-        ])
+        ]
+        if self._dims == (2, 3):
+            element_types.append("dispBeamColumnInt")
+        self.element_type.addItems(element_types)
 
         self.section = QComboBox()
         self.section_new = QPushButton("New Section...")
@@ -132,8 +139,17 @@ class ElementDialog(_BaseDialog):
         self.integration_type = QComboBox()
         self.integration_type.addItems(["Lobatto", "Legendre", "Radau"])
         self.integration_points = QSpinBox()
-        self.integration_points.setRange(2, 50)
+        self.integration_points.setRange(1, 50)
         self.integration_points.setValue(5)
+
+        self.center_rotation = QDoubleSpinBox()
+        self.center_rotation.setDecimals(6)
+        self.center_rotation.setRange(0.0, 1.0)
+        self.center_rotation.setSingleStep(0.05)
+        self.center_rotation.setValue(0.4)
+        self.center_rotation.setToolTip(
+            "dispBeamColumnInt center-of-rotation ratio cRot."
+        )
 
         self.form.addRow("Tag:", self.tag)
         self.form.addRow("Node I:", self.node_i)
@@ -144,6 +160,7 @@ class ElementDialog(_BaseDialog):
         self.form.addRow("Group:", self.group)
         self.form.addRow("Beam integration:", self.integration_type)
         self.form.addRow("Integration points:", self.integration_points)
+        self.form.addRow("Center of rotation cRot:", self.center_rotation)
 
         self._populate_transformations()
         self.element_type.currentTextChanged.connect(
@@ -183,13 +200,29 @@ class ElementDialog(_BaseDialog):
             self.transformation.setCurrentIndex(index)
 
     def _populate_transformations(self) -> None:
+        current = self.transformation.currentData()
+        element_type = self.element_type.currentText()
         self.transformation.clear()
         for tag in sorted(self._transformations):
             item = self._transformations[tag]
+            if (
+                element_type == "dispBeamColumnInt"
+                and item.transformation_type != "LinearInt"
+            ):
+                continue
+            if (
+                element_type != "dispBeamColumnInt"
+                and item.transformation_type == "LinearInt"
+            ):
+                continue
             self.transformation.addItem(
                 f"{tag} - {item.name} ({item.transformation_type})",
                 int(tag),
             )
+        if current is not None:
+            index = self.transformation.findData(int(current))
+            if index >= 0:
+                self.transformation.setCurrentIndex(index)
 
     def _populate_sections(self, element_type: str) -> None:
         current = self.section.currentData()
@@ -197,8 +230,14 @@ class ElementDialog(_BaseDialog):
         for tag in sorted(self._sections):
             item = self._sections[tag]
             if (
-                element_type == "elasticBeamColumn"
+                element_type
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                 and item.section_type != "Elastic"
+            ):
+                continue
+            if (
+                element_type == "dispBeamColumnInt"
+                and item.section_type != "FiberInt"
             ):
                 continue
             self.section.addItem(
@@ -212,9 +251,13 @@ class ElementDialog(_BaseDialog):
 
     def _sync_formulation_controls(self, element_type: str) -> None:
         nonlinear = element_type in {"forceBeamColumn", "dispBeamColumn"}
+        interaction = element_type == "dispBeamColumnInt"
         self.integration_type.setEnabled(nonlinear)
-        self.integration_points.setEnabled(nonlinear)
+        self.integration_points.setEnabled(nonlinear or interaction)
+        self.integration_points.setMinimum(1 if interaction else 2)
+        self.center_rotation.setEnabled(interaction)
         self._populate_sections(element_type)
+        self._populate_transformations()
 
     def values(self):
         section_tag = self.section.currentData()
@@ -237,6 +280,7 @@ class ElementDialog(_BaseDialog):
             self.group.currentText().strip() or "frame",
             self.integration_type.currentText(),
             self.integration_points.value(),
+            self.center_rotation.value(),
         )
 
 
@@ -378,18 +422,26 @@ class ElementFormulationDialog(_BaseDialog):
         force_tolerance: float = 1.0e-12,
         mass_per_length: float = 0.0,
         consistent_mass: bool = False,
+        beam_center_ratio: float = 0.4,
+        ndm: int = 3,
+        ndf: int = 6,
         units=None,
         parent=None,
     ):
         super().__init__("Element Formulation", parent)
         self.unit_system = UnitSystem.from_mapping(units)
+        self._dims = (int(ndm), int(ndf))
 
         self.element_type = QComboBox()
-        self.element_type.addItems([
+        element_types = [
             "elasticBeamColumn",
+            "ElasticTimoshenkoBeam",
             "forceBeamColumn",
             "dispBeamColumn",
-        ])
+        ]
+        if self._dims == (2, 3):
+            element_types.append("dispBeamColumnInt")
+        self.element_type.addItems(element_types)
         self.element_type.setCurrentText(element_type)
 
         self.integration_type = QComboBox()
@@ -397,7 +449,7 @@ class ElementFormulationDialog(_BaseDialog):
         self.integration_type.setCurrentText(integration_type)
 
         self.integration_points = QSpinBox()
-        self.integration_points.setRange(2, 50)
+        self.integration_points.setRange(1, 50)
         self.integration_points.setValue(int(integration_points))
 
         self.force_max_iter = QSpinBox()
@@ -415,9 +467,15 @@ class ElementFormulationDialog(_BaseDialog):
         self.mass_per_length.setValue(float(mass_per_length))
 
         self.consistent_mass = QCheckBox(
-            "Use consistent mass matrix (dispBeamColumn)"
+            "Use consistent mass matrix when supported"
         )
         self.consistent_mass.setChecked(bool(consistent_mass))
+
+        self.center_rotation = QDoubleSpinBox()
+        self.center_rotation.setDecimals(6)
+        self.center_rotation.setRange(0.0, 1.0)
+        self.center_rotation.setSingleStep(0.05)
+        self.center_rotation.setValue(float(beam_center_ratio))
 
         self.form.addRow("Type:", self.element_type)
         self.form.addRow("Beam integration:", self.integration_type)
@@ -429,6 +487,7 @@ class ElementFormulationDialog(_BaseDialog):
             self.mass_per_length,
         )
         self.form.addRow("", self.consistent_mass)
+        self.form.addRow("Center of rotation cRot:", self.center_rotation)
 
         note = QLabel(
             "Lobatto places integration points at the member ends and is "
@@ -442,14 +501,23 @@ class ElementFormulationDialog(_BaseDialog):
 
     def _sync(self, element_type: str) -> None:
         nonlinear = element_type in {"forceBeamColumn", "dispBeamColumn"}
+        interaction = element_type == "dispBeamColumnInt"
         force_based = element_type == "forceBeamColumn"
-        displacement_based = element_type == "dispBeamColumn"
+        mass_matrix_supported = element_type in {
+            "elasticBeamColumn",
+            "ElasticTimoshenkoBeam",
+            "dispBeamColumn",
+        }
 
         self.integration_type.setEnabled(nonlinear)
-        self.integration_points.setEnabled(nonlinear)
+        self.integration_points.setEnabled(nonlinear or interaction)
+        self.integration_points.setMinimum(1 if interaction else 2)
         self.force_max_iter.setEnabled(force_based)
         self.force_tolerance.setEnabled(force_based)
-        self.consistent_mass.setEnabled(displacement_based)
+        self.consistent_mass.setEnabled(mass_matrix_supported)
+        if not mass_matrix_supported:
+            self.consistent_mass.setChecked(False)
+        self.center_rotation.setEnabled(interaction)
 
     def values(self) -> dict[str, object]:
         return {
@@ -460,6 +528,7 @@ class ElementFormulationDialog(_BaseDialog):
             "force_tolerance": self.force_tolerance.value(),
             "mass_per_length": self.mass_per_length.value(),
             "consistent_mass": self.consistent_mass.isChecked(),
+            "beam_center_ratio": self.center_rotation.value(),
         }
 
 
