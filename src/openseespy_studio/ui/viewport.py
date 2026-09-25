@@ -2812,6 +2812,125 @@ class ModelViewport(QWidget):
         return mesh
 
     @staticmethod
+    def _batched_reinforcement_mesh(
+        model: StructuralModel,
+        tags,
+        span: float,
+    ) -> object | None:
+        """Build schematic separated RC-wall reinforcement line geometry."""
+        points: list[tuple[float, float, float]] = []
+        lines: list[int] = []
+        cell_tags: list[int] = []
+
+        mefi = next(
+            (
+                element
+                for element in model.elements.values()
+                if (
+                    element.element_type == "MEFI"
+                    and len(element.mefi_widths) >= 2
+                )
+            ),
+            None,
+        )
+        low, high = model.bounds()
+        wall_width = max(float(high[0] - low[0]), 1.0e-12)
+        boundary_width = (
+            float(mefi.mefi_widths[0])
+            if mefi is not None and mefi.mefi_widths
+            else wall_width * 0.18
+        )
+        layer_offset = max(float(span) * 0.004, boundary_width * 0.04)
+
+        for tag in tags:
+            element = model.elements.get(int(tag))
+            if element is None:
+                continue
+            node_i = model.nodes.get(element.i)
+            node_j = model.nodes.get(element.j)
+            if node_i is None or node_j is None:
+                continue
+
+            start = np.asarray(node_i.xyz, dtype=float).copy()
+            end = np.asarray(node_j.xyz, dtype=float).copy()
+            group = str(element.group)
+
+            if group.startswith("rc-wall-rebar-left-") or group.startswith(
+                "rc-wall-rebar-right-"
+            ):
+                side = (
+                    "left"
+                    if group.startswith("rc-wall-rebar-left-")
+                    else "right"
+                )
+                tail = group.split(f"rc-wall-rebar-{side}-", 1)[1]
+                parts = tail.split("-")
+                layer = parts[0] if parts else "center"
+                token = next(
+                    (part for part in parts if part.startswith("b")),
+                    "",
+                )
+                index = 1
+                count = 1
+                if "of" in token:
+                    try:
+                        index_text, count_text = token[1:].split("of", 1)
+                        index = max(int(index_text), 1)
+                        count = max(int(count_text), 1)
+                    except (TypeError, ValueError):
+                        index, count = 1, 1
+
+                fraction = (
+                    0.5
+                    if count <= 1
+                    else (index - 1) / max(count - 1, 1)
+                )
+                inset_fraction = 0.16 + 0.68 * fraction
+                x_offset = boundary_width * inset_fraction
+                if side == "right":
+                    x_offset = -x_offset
+                start[0] += x_offset
+                end[0] += x_offset
+
+                if layer == "front":
+                    start[2] += layer_offset
+                    end[2] += layer_offset
+                elif layer == "back":
+                    start[2] -= layer_offset
+                    end[2] -= layer_offset
+
+            elif group.startswith("rc-wall-rebar-web-horizontal-"):
+                tail = group.split(
+                    "rc-wall-rebar-web-horizontal-",
+                    1,
+                )[1]
+                layer = tail.split("-", 1)[0]
+                if layer == "front":
+                    start[2] += layer_offset
+                    end[2] += layer_offset
+                elif layer == "back":
+                    start[2] -= layer_offset
+                    end[2] -= layer_offset
+
+            index0 = len(points)
+            points.extend((tuple(start), tuple(end)))
+            lines.extend((2, index0, index0 + 1))
+            cell_tags.append(int(tag))
+
+        if not points:
+            return None
+        mesh = pv.PolyData(
+            np.asarray(points, dtype=float),
+            lines=np.asarray(lines, dtype=np.int64),
+            deep=True,
+        )
+        mesh.cell_data["element_tag"] = np.asarray(
+            cell_tags,
+            dtype=np.int64,
+        )
+        return mesh
+
+    @staticmethod
     def _batched_shell_mesh(
         model: StructuralModel,
         tags,
@@ -3043,16 +3162,23 @@ class ModelViewport(QWidget):
             shell_tags,
         )
 
+        reinforcement_mesh = self._batched_reinforcement_mesh(
+            self._model,
+            reinforcement_tags,
+            span,
+        )
+
         if representation == "centerline":
             combined = {}
             for name, tags in (
                 ("column", column_tags),
                 ("beam", beam_tags),
-                ("reinforcement", reinforcement_tags),
             ):
                 mesh = self._batched_centerline_mesh(self._model, tags)
                 if mesh is not None:
                     combined[name] = mesh
+            if reinforcement_mesh is not None:
+                combined["reinforcement"] = reinforcement_mesh
             if shell_mesh is not None:
                 combined["shell"] = shell_mesh
             return combined
@@ -3060,7 +3186,6 @@ class ModelViewport(QWidget):
         if representation == "tube":
             beam_size = max(span * 0.010, 0.08)
             column_size = max(span * 0.0115, 0.09)
-            reinforcement_size = max(span * 0.0025, 0.012)
             combined = {}
             column_mesh = self._batched_tube_mesh(
                 self._model,
@@ -3071,11 +3196,6 @@ class ModelViewport(QWidget):
                 self._model,
                 beam_tags,
                 beam_size,
-            )
-            reinforcement_mesh = self._batched_tube_mesh(
-                self._model,
-                reinforcement_tags,
-                reinforcement_size,
             )
             if column_mesh is not None:
                 combined["column"] = column_mesh
@@ -3096,7 +3216,6 @@ class ModelViewport(QWidget):
         }
         beam_size = max(span * 0.010, 0.08)
         column_size = max(span * 0.0115, 0.09)
-        reinforcement_size = max(span * 0.0025, 0.012)
         fallback: dict[str, list[int]] = {
             "column": [],
             "beam": [],
@@ -3132,11 +3251,6 @@ class ModelViewport(QWidget):
                     if len(parts) == 1
                     else pv.merge(parts, merge_points=False)
                 )
-        reinforcement_mesh = self._batched_tube_mesh(
-            self._model,
-            reinforcement_tags,
-            reinforcement_size,
-        )
         if reinforcement_mesh is not None:
             combined["reinforcement"] = reinforcement_mesh
         if shell_mesh is not None:
@@ -4805,21 +4919,22 @@ class ModelViewport(QWidget):
                 ),
                 edge_color="#243b52",
                 show_edges=(
-                    group_name in {"shell", "reinforcement"}
-                    or self._model_representation == "tube"
+                    group_name == "shell"
+                    or (
+                        group_name != "reinforcement"
+                        and self._model_representation == "tube"
+                    )
                 ),
                 line_width=(
                     5
-                    if (
-                        group_name == "reinforcement"
-                        and self._model_representation == "centerline"
-                    )
+                    if group_name == "reinforcement"
                     else 3
                     if self._model_representation == "centerline"
                     else 1
                 ),
                 render_lines_as_tubes=(
-                    self._model_representation == "centerline"
+                    group_name == "reinforcement"
+                    or self._model_representation == "centerline"
                 ),
                 smooth_shading=False,
                 pickable=True,
