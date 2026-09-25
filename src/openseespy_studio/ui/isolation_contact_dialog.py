@@ -48,9 +48,19 @@ def _combo_by_tag(items, selected=None, *, placeholder="Select..."):
     for tag, label in normalized_items:
         combo.addItem(str(label), int(tag))
     if selected is not None:
-        index = combo.findData(int(selected))
-        if index >= 0:
-            combo.setCurrentIndex(index)
+        selected = int(selected)
+        index = combo.findData(selected)
+        if index < 0:
+            # Keep a broken legacy/imported dependency visible so the user can
+            # identify and repair it instead of silently seeing "Select...".
+            combo.addItem(f"{selected} - missing reference", selected)
+            index = combo.count() - 1
+            combo.setItemData(
+                index,
+                "Referenced project object is missing. Select a valid replacement.",
+                3,
+            )
+        combo.setCurrentIndex(index)
     elif len(normalized_items) == 1:
         combo.setCurrentIndex(1)
     return combo
@@ -471,6 +481,8 @@ class FrictionBearingDialog(_ScrollableDialog):
         if index >= 0:
             self.kind.setCurrentIndex(index)
 
+        self._friction_count = len(friction_models or {})
+        self._material_count = len(materials or {})
         friction_items = [
             (frn_tag, f"{frn_tag} - {item.name} ({item.friction_type})")
             for frn_tag, item in sorted((friction_models or {}).items())
@@ -504,6 +516,22 @@ class FrictionBearingDialog(_ScrollableDialog):
             material_items,
             p.get("mz_mat_tag"),
             placeholder="Select Mz material...",
+        )
+        self.friction.setToolTip(
+            "Reusable project Friction Model referenced by frnMdlTag."
+        )
+        self.mat_p.setToolTip(
+            "OpenSees -P: uniaxial axial-force material."
+        )
+        self.mat_t.setToolTip(
+            "OpenSees -T: uniaxial torsional material; required in 3D/6DOF."
+        )
+        self.mat_my.setToolTip(
+            "OpenSees -My: uniaxial local-y rotational material; "
+            "required in 3D/6DOF."
+        )
+        self.mat_mz.setToolTip(
+            "OpenSees -Mz: uniaxial local-z rotational material."
         )
 
         self.reff = _float_spin(
@@ -622,6 +650,10 @@ class FrictionBearingDialog(_ScrollableDialog):
             )
             + " Friction behavior comes from the selected reusable "
             "Friction Model."
+            + (
+                f" Available dependencies: {self._friction_count} friction "
+                f"model(s), {self._material_count} uniaxial material(s)."
+            )
         )
 
     def _sync_orientation(self, checked: bool) -> None:
