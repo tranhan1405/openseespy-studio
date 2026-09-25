@@ -2549,6 +2549,66 @@ class ModelViewport(QWidget):
             },
         )
 
+    def _support_down_direction(self) -> np.ndarray:
+        """Return the in-plane direction used to draw support symbols.
+
+        OpenSees 1-D/2-D coordinates live in X/XY, while the viewport stores
+        every point as XYZ. A support that is always extruded along -Z is
+        therefore edge-on in the XY view. Keep lower-dimensional support
+        glyphs inside their structural plane and infer the same behaviour for
+        planar geometry hosted by the 3-D backend.
+        """
+        model = self._model
+        if model is not None and int(model.ndm) <= 2:
+            return np.asarray((0.0, -1.0, 0.0), dtype=float)
+
+        current_view = str(getattr(self, "_current_view", "iso")).lower()
+        if model is not None and model.nodes:
+            points = np.asarray(
+                [node.xyz for node in model.nodes.values()],
+                dtype=float,
+            )
+            spans = np.ptp(points, axis=0)
+            reference = max(float(np.max(spans)), 1.0)
+            tol = reference * 1.0e-8
+
+            # A 3-D-compatible model may still be geometrically planar (for
+            # example the 1-D specimen wizard). Honour the active orthographic
+            # plane so the support stays readable in that model plane.
+            if current_view == "xy" and float(spans[2]) <= tol:
+                return np.asarray((0.0, -1.0, 0.0), dtype=float)
+            if current_view == "xz" and float(spans[1]) <= tol:
+                return np.asarray((0.0, 0.0, -1.0), dtype=float)
+            if current_view == "yz" and float(spans[0]) <= tol:
+                return np.asarray((0.0, 0.0, -1.0), dtype=float)
+
+            # In isometric view, geometry distinguishes an XY structural plane
+            # from conventional XZ/YZ vertical planes. Full 3-D models retain
+            # the legacy -Z support orientation.
+            if float(spans[2]) <= tol and float(spans[1]) > tol:
+                return np.asarray((0.0, -1.0, 0.0), dtype=float)
+
+        return np.asarray((0.0, 0.0, -1.0), dtype=float)
+
+    @staticmethod
+    def _support_box(
+        center: np.ndarray,
+        down_direction: np.ndarray,
+        *,
+        width: float,
+        thickness: float,
+    ):
+        """Create an axis-aligned support block normal to the down direction."""
+        axis = int(np.argmax(np.abs(down_direction)))
+        lengths = [float(width), float(width), float(width)]
+        lengths[axis] = float(thickness)
+        return pv.Cube(
+            center=tuple(float(value) for value in center),
+            x_length=lengths[0],
+            y_length=lengths[1],
+            z_length=lengths[2],
+        )
+
     def _draw_support_symbol(
         self,
         support_type: str,
@@ -2560,16 +2620,24 @@ class ModelViewport(QWidget):
         family = str(spec["family"])
         color = str(spec["color"])
         free_axis = spec["free_axis"]
-        x, y, z = (float(value) for value in xyz)
+        node = np.asarray(tuple(float(value) for value in xyz), dtype=float)
+        down = self._support_down_direction()
+        up = -down
         edge_color = "#0b6330"
+
+        # Stable tangent used for plates, roller spacing, and guide offsets.
+        if abs(float(down[0])) < 0.8:
+            tangent = np.asarray((1.0, 0.0, 0.0), dtype=float)
+        else:
+            tangent = np.asarray((0.0, 1.0, 0.0), dtype=float)
 
         if family == "fixed":
             self.plotter.add_mesh(
-                pv.Cube(
-                    center=(x, y, z - size * 0.34),
-                    x_length=size * 1.18,
-                    y_length=size * 1.18,
-                    z_length=size * 0.50,
+                self._support_box(
+                    node + down * size * 0.34,
+                    down,
+                    width=size * 1.18,
+                    thickness=size * 0.50,
                 ),
                 color=color,
                 edge_color=edge_color,
@@ -2579,11 +2647,11 @@ class ModelViewport(QWidget):
                 render=False,
             )
             self.plotter.add_mesh(
-                pv.Cube(
-                    center=(x, y, z - size * 0.64),
-                    x_length=size * 1.55,
-                    y_length=size * 1.55,
-                    z_length=size * 0.10,
+                self._support_box(
+                    node + down * size * 0.64,
+                    down,
+                    width=size * 1.55,
+                    thickness=size * 0.10,
                 ),
                 color="#a8cdb4",
                 edge_color=edge_color,
@@ -2594,8 +2662,8 @@ class ModelViewport(QWidget):
             return
 
         support = pv.Cone(
-            center=(x, y, z - size * 0.54),
-            direction=(0.0, 0.0, -1.0),
+            center=tuple(node + down * size * 0.54),
+            direction=tuple(down),
             height=size * 1.02,
             radius=size * 0.68,
             resolution=4,
@@ -2612,11 +2680,11 @@ class ModelViewport(QWidget):
 
         if family == "pinned":
             self.plotter.add_mesh(
-                pv.Cube(
-                    center=(x, y, z - size * 1.08),
-                    x_length=size * 1.45,
-                    y_length=size * 1.45,
-                    z_length=size * 0.08,
+                self._support_box(
+                    node + down * size * 1.08,
+                    down,
+                    width=size * 1.45,
+                    thickness=size * 0.08,
                 ),
                 color="#b7ddc1",
                 edge_color=edge_color,
@@ -2628,9 +2696,9 @@ class ModelViewport(QWidget):
 
         if family == "roller" and isinstance(free_axis, str):
             axis_vectors = {
-                "x": np.asarray((1.0, 0.0, 0.0)),
-                "y": np.asarray((0.0, 1.0, 0.0)),
-                "z": np.asarray((0.0, 0.0, 1.0)),
+                "x": np.asarray((1.0, 0.0, 0.0), dtype=float),
+                "y": np.asarray((0.0, 1.0, 0.0), dtype=float),
+                "z": np.asarray((0.0, 0.0, 1.0), dtype=float),
             }
             axis_colors = {
                 "x": "#d64545",
@@ -2639,13 +2707,16 @@ class ModelViewport(QWidget):
             }
             direction = axis_vectors[free_axis]
 
-            # Two rollers make the support visually distinct from a pin.
+            # Space roller circles in the support base plane. If the released
+            # axis is parallel to the support stem, use the in-plane tangent.
+            projected = direction - down * float(np.dot(direction, down))
+            projected_norm = float(np.linalg.norm(projected))
             roller_offset = (
-                direction
-                if free_axis in {"x", "y"}
-                else np.asarray((1.0, 0.0, 0.0))
+                projected / projected_norm
+                if projected_norm > 1.0e-9
+                else tangent
             )
-            base = np.asarray((x, y, z - size * 1.08))
+            base = node + down * size * 1.08
             for sign in (-1.0, 1.0):
                 center = base + roller_offset * sign * size * 0.34
                 self.plotter.add_mesh(
@@ -2662,14 +2733,13 @@ class ModelViewport(QWidget):
                     render=False,
                 )
 
-            # A double-ended guide explicitly communicates the released
-            # translation direction X/Y/Z, including the ambiguous Roller Z.
-            if free_axis == "z":
-                guide_center = np.asarray(
-                    (x + size * 0.92, y, z - size * 0.45)
-                )
-            else:
-                guide_center = np.asarray((x, y, z + size * 0.28))
+            # Keep a released-axis guide clear of the support body.
+            parallel = abs(float(np.dot(direction, down))) > 0.85
+            guide_center = (
+                node + tangent * size * 0.92 + up * size * 0.12
+                if parallel
+                else node + up * size * 0.28
+            )
             half = size * 0.78
             p1 = guide_center - direction * half
             p2 = guide_center + direction * half
@@ -2681,10 +2751,10 @@ class ModelViewport(QWidget):
                 pickable=False,
                 render=False,
             )
-            for end, sign in ((p1, -1.0), (p2, 1.0)):
+            for arrow_end, sign in ((p1, -1.0), (p2, 1.0)):
                 self.plotter.add_mesh(
                     pv.Cone(
-                        center=tuple(end),
+                        center=tuple(arrow_end),
                         direction=tuple(direction * sign),
                         height=size * 0.26,
                         radius=size * 0.10,
@@ -2701,7 +2771,7 @@ class ModelViewport(QWidget):
         self.plotter.add_mesh(
             pv.Sphere(
                 radius=size * 0.18,
-                center=(x, y, z - size * 1.05),
+                center=tuple(node + down * size * 1.05),
                 theta_resolution=12,
                 phi_resolution=8,
             ),
@@ -5016,7 +5086,10 @@ class ModelViewport(QWidget):
             if not any(node.fixity):
                 continue
             self._draw_support_symbol(
-                classify_fixity(node.fixity),
+                classify_fixity(
+                    node.fixity,
+                    ndm=self._model.ndm,
+                ),
                 node.xyz,
                 support_size,
             )
