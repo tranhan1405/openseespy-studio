@@ -16635,6 +16635,337 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _create_lead_rubber_x(self) -> None:
+        if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+            QMessageBox.warning(
+                self,
+                "Create LeadRubberX",
+                "LeadRubberX requires a 3D/6DOF model.",
+            )
+            return
+        nodes = self._special_default_nodes()
+        if nodes is None:
+            return
+        dialog = LeadRubberXDialog(
+            tag=self.project.next_element_tag(),
+            node_i=nodes[0],
+            node_j=nodes[1],
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create LeadRubberX", str(exc))
+            return
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type="LeadRubberX",
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Create LeadRubberX", str(exc))
+            self._refresh_all()
+            return
+        self._refresh_all(f"Created LeadRubberX {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(f"Create LeadRubberX {tag}", before)
+
+    def _create_triple_friction_pendulum(self) -> None:
+        if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+            QMessageBox.warning(
+                self,
+                "Create Triple Friction Pendulum",
+                "TripleFrictionPendulum requires a 3D/6DOF model.",
+            )
+            return
+        if not self.project.materials:
+            QMessageBox.information(
+                self,
+                "Triple Friction Pendulum",
+                "Create at least one uniaxial Material first.",
+            )
+            self._create_material()
+            if not self.project.materials:
+                return
+        if not self.project.friction_models:
+            QMessageBox.information(
+                self,
+                "Triple Friction Pendulum",
+                "Create at least one Friction Model first.",
+            )
+            self._create_friction_model()
+            if not self.project.friction_models:
+                return
+        nodes = self._special_default_nodes()
+        if nodes is None:
+            return
+        dialog = TripleFrictionPendulumDialog(
+            tag=self.project.next_element_tag(),
+            node_i=nodes[0],
+            node_j=nodes[1],
+            materials=self.project.materials,
+            friction_models=self.project.friction_models,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Create Triple Friction Pendulum",
+                str(exc),
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type="TripleFrictionPendulum",
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Create Triple Friction Pendulum",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+        self._refresh_all(f"Created TripleFrictionPendulum {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(
+            f"Create TripleFrictionPendulum {tag}",
+            before,
+        )
+
+    def _edit_advanced_bearing(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None:
+            return
+        if element.element_type == "LeadRubberX":
+            dialog = LeadRubberXDialog(
+                tag=element.tag,
+                node_i=element.i,
+                node_j=element.j,
+                units=self.project.units,
+                element=element,
+                parent=self,
+            )
+            title = "Edit LeadRubberX"
+        elif element.element_type == "TripleFrictionPendulum":
+            dialog = TripleFrictionPendulumDialog(
+                tag=element.tag,
+                node_i=element.i,
+                node_j=element.j,
+                materials=self.project.materials,
+                friction_models=self.project.friction_models,
+                units=self.project.units,
+                element=element,
+                parent=self,
+            )
+            title = "Edit Triple Friction Pendulum"
+        else:
+            return
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            _tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, title, str(exc))
+            return
+        before = self.project.to_dict()
+        try:
+            self.model.elements.pop(int(tag))
+            self.model.add_element(
+                int(tag),
+                i,
+                j,
+                element_type=element.element_type,
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(int(tag))
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, title, str(exc))
+            self._refresh_all()
+            return
+        self._refresh_all(f"Updated {element.element_type} {tag}")
+        self.selection.select("element", int(tag), "replace")
+        self._show_entity_properties("element", int(tag))
+        self._record_project_change(
+            f"Edit {element.element_type} {tag}",
+            before,
+        )
+
+    def _create_contact_element(self) -> None:
+        if len(self.model.nodes) < 2:
+            QMessageBox.information(
+                self,
+                "Create Contact / Interface",
+                "Create at least two nodes first.",
+            )
+            return
+        dialog = ContactElementDialog(
+            tag=self.project.next_element_tag(),
+            nodes=self.model.nodes,
+            ndm=self.model.ndm,
+            nd_materials=self.project.nd_materials,
+            transformations=self.project.transformations,
+            units=self.project.units,
+            next_node_tag=self.model.next_node_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            tag, kind, node_tags, parameters, auto_lambda = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Create Contact / Interface",
+                str(exc),
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            i, j, k, l = node_tags
+            if auto_lambda and k is not None and l is not None:
+                if l in self.model.nodes:
+                    raise ValueError(
+                        f"Auto Lagrange node tag {l} already exists."
+                    )
+                source = self.model.nodes[int(k)]
+                lambda_ndf = 2 if kind == "BeamContact2D" else 3
+                self.model.add_node(
+                    int(l),
+                    source.xyz[0],
+                    source.xyz[1],
+                    source.xyz[2],
+                    ndf=lambda_ndf,
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                k=k,
+                l=l,
+                element_type=kind,
+                group="contact-interface",
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Create Contact / Interface",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+        self._refresh_all(f"Created {kind} {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(f"Create {kind} {tag}", before)
+
+    def _edit_contact_element(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None or element.element_type not in CONTACT_ELEMENT_TYPES:
+            return
+        dialog = ContactElementDialog(
+            tag=element.tag,
+            nodes=self.model.nodes,
+            ndm=self.model.ndm,
+            nd_materials=self.project.nd_materials,
+            transformations=self.project.transformations,
+            units=self.project.units,
+            element=element,
+            next_node_tag=self.model.next_node_tag(),
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            _tag, kind, node_tags, parameters, auto_lambda = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Edit Contact / Interface",
+                str(exc),
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            i, j, k, l = node_tags
+            if auto_lambda and k is not None and l is not None:
+                source = self.model.nodes[int(k)]
+                lambda_ndf = 2 if kind == "BeamContact2D" else 3
+                self.model.add_node(
+                    int(l),
+                    source.xyz[0],
+                    source.xyz[1],
+                    source.xyz[2],
+                    ndf=lambda_ndf,
+                )
+            self.model.elements.pop(int(tag))
+            self.model.add_element(
+                int(tag),
+                i,
+                j,
+                k=k,
+                l=l,
+                element_type=kind,
+                group=element.group or "contact-interface",
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(int(tag))
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Edit Contact / Interface",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+        self._refresh_all(f"Updated {kind} {tag}")
+        self.selection.select("element", int(tag), "replace")
+        self._show_entity_properties("element", int(tag))
+        self._record_project_change(f"Edit {kind} {tag}", before)
+
     def _edit_special_element(self, tag: int) -> None:
         element = self.model.elements.get(int(tag))
         if element is None:
