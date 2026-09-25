@@ -15,6 +15,8 @@ from .model import (
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
+    TRUSS_MATERIAL_ELEMENT_TYPES,
+    TRUSS_SECTION_ELEMENT_TYPES,
     WALL_MACRO_3D_ELEMENT_TYPES,
     WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
@@ -7294,6 +7296,22 @@ class ProjectDatabase:
                 + " and must remain a shell-compatible section."
             )
 
+        truss_section_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in TRUSS_SECTION_ELEMENT_TYPES
+                and element.section_tag == original_tag
+            )
+        )
+        if truss_section_users and section.section_type in SHELL_SECTION_TYPES:
+            raise ValueError(
+                f"Section {original_tag} is used by section-based truss "
+                "element(s) "
+                + ", ".join(map(str, truss_section_users))
+                + " and cannot become a shell section."
+            )
+
         self_weight_users = sorted(
             load.tag
             for load in self.element_loads.values()
@@ -9141,6 +9159,37 @@ class ProjectDatabase:
 
         element = self.model.elements[element_tag]
         self._validate_element_geometry(element)
+
+        if element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES:
+            if element.truss_area <= 0.0:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "a positive cross-sectional area."
+                )
+            material_tag = element.truss_material_tag
+            if material_tag is None or int(material_tag) not in self.materials:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "an existing uniaxial material."
+                )
+
+        if element.element_type in TRUSS_SECTION_ELEMENT_TYPES:
+            section_tag = element.section_tag
+            section = (
+                self.sections.get(int(section_tag))
+                if section_tag is not None
+                else None
+            )
+            if section is None:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "an existing section."
+                )
+            if section.section_type in SHELL_SECTION_TYPES:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} cannot "
+                    f"use shell section {section.tag}."
+                )
 
         if element.element_type == "elastomericBearingPlasticity":
             referenced = {
