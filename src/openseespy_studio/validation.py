@@ -315,7 +315,7 @@ def _element_geometry_checks(
                     "current generator does not yet emit faithfully.",
                     "element",
                     tag,
-                    "Choose a formulation supported by SARE.",
+                    "Choose a formulation supported by FEWIZ.",
                 )
             )
             continue
