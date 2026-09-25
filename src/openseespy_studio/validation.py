@@ -14,6 +14,8 @@ from .model import (
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SUPPORTED_ELEMENT_TYPES,
+    TRUSS_MATERIAL_ELEMENT_TYPES,
+    TRUSS_SECTION_ELEMENT_TYPES,
 )
 from .project import (
     AnalysisSettingsData,
@@ -759,13 +761,14 @@ def _element_geometry_checks(
                 )
             )
 
-        if element.element_type == "truss":
+        if element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES:
             if element.truss_area <= 0.0:
                 issues.append(
                     ValidationIssue(
                         "ERROR",
                         "Truss",
-                        f"Truss element {tag} has non-positive area.",
+                        f"{element.element_type} element {tag} has "
+                        "non-positive area.",
                         "element",
                         tag,
                         "Assign a positive cross-sectional area.",
@@ -776,7 +779,8 @@ def _element_geometry_checks(
                     ValidationIssue(
                         "ERROR",
                         "Material",
-                        f"Truss element {tag} has no material assigned.",
+                        f"{element.element_type} element {tag} has no "
+                        "material assigned.",
                         "element",
                         tag,
                         "Assign a uniaxial material before running.",
@@ -787,13 +791,55 @@ def _element_geometry_checks(
                     ValidationIssue(
                         "ERROR",
                         "Material",
-                        f"Truss element {tag} references missing material "
-                        f"{element.truss_material_tag}.",
+                        f"{element.element_type} element {tag} references "
+                        f"missing material {element.truss_material_tag}.",
                         "element",
                         tag,
                         "Assign an existing uniaxial material.",
                     )
                 )
+            continue
+
+        if element.element_type in TRUSS_SECTION_ELEMENT_TYPES:
+            section_tag = element.section_tag
+            if section_tag is None:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Section",
+                        f"{element.element_type} element {tag} has no "
+                        "section assigned.",
+                        "element",
+                        tag,
+                        "Assign an existing axial-compatible section.",
+                    )
+                )
+            else:
+                section = project.sections.get(int(section_tag))
+                if section is None:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Section",
+                            f"{element.element_type} element {tag} references "
+                            f"missing section {section_tag}.",
+                            "element",
+                            tag,
+                            "Assign an existing section.",
+                        )
+                    )
+                elif section.section_type in SHELL_SECTION_TYPES:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Section",
+                            f"{element.element_type} element {tag} cannot use "
+                            f"shell section {section_tag}.",
+                            "element",
+                            tag,
+                            "Assign an Elastic/Fiber axial section.",
+                        )
+                    )
             continue
 
         if element.element_type in CONTACT_TWO_NODE_ELEMENT_TYPES:
