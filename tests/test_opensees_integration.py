@@ -52,6 +52,31 @@ if importlib.util.find_spec("openseespy") is None:
     )
 
 
+def test_asd_embedded_node_element_exists_in_real_opensees():
+    import openseespy.opensees as ops
+
+    ops.wipe()
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
+    ops.node(1, 0.0, 0.0)
+    ops.node(2, 1.0, 0.0)
+    ops.node(3, 0.0, 1.0)
+    ops.node(4, 0.25, 0.25)
+    ops.element(
+        "ASDEmbeddedNodeElement",
+        1,
+        4,
+        1,
+        2,
+        3,
+        "-rot",
+        "-K",
+        3.0e10,
+    )
+
+    assert 1 in ops.getEleTags()
+    ops.wipe()
+
+
 def test_generated_static_cantilever_runs_in_real_opensees(tmp_path: Path):
     model = StructuralModel("real-opensees-smoke")
     model.add_node(1, 0.0, 0.0, 0.0)
