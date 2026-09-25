@@ -469,7 +469,9 @@ def test_shell_deformation_ui_routes_and_tables_exist():
     prepare_source = inspect.getsource(
         MainWindow._prepare_solution_result_prerequisites
     )
-    assert '{"ShellForce", "ShellDeformation"}' in prepare_source
+    assert "ShellDisplacement" in prepare_source
+    assert "ShellForce" in prepare_source
+    assert "ShellDeformation" in prepare_source
 
     render_source = inspect.getsource(
         MainWindow._render_result_data
@@ -487,7 +489,9 @@ def test_shell_deformation_ui_routes_and_tables_exist():
         ResultsPanel._populate_shell_results
     )
     assert "shell_deformation_gp_table" in build_source
-    assert "Membrane Strain" in build_source
+    assert 'self.shell_tables["Strain"]' in build_source
+    assert "Curvature" in build_source
+    assert "Shear Strain" in build_source
     assert "shell_section_deformations" in populate_source
 
 
