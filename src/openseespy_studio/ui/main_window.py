@@ -10203,16 +10203,15 @@ class MainWindow(QMainWindow):
                         )
                 elif property_id == "element_type":
                     new_type = str(value)
-                    if new_type not in {
-                        "elasticBeamColumn",
-                        "forceBeamColumn",
-                        "dispBeamColumn",
-                    }:
+                    if new_type not in FRAME_ELEMENT_TYPES:
                         raise ValueError(
                             f"Unsupported frame formulation: {new_type}"
                         )
                     element.element_type = new_type
-                    if new_type == "elasticBeamColumn":
+                    if new_type in {
+                        "elasticBeamColumn",
+                        "ElasticTimoshenkoBeam",
+                    }:
                         section = self.project.sections.get(
                             element.section_tag
                         )
@@ -10221,6 +10220,24 @@ class MainWindow(QMainWindow):
                             and section.section_type != "Elastic"
                         ):
                             element.section_tag = None
+                    elif new_type == "dispBeamColumnInt":
+                        section = self.project.sections.get(
+                            element.section_tag
+                        )
+                        transformation = self.project.transformations.get(
+                            element.transf_tag
+                        )
+                        if (
+                            section is not None
+                            and section.section_type != "FiberInt"
+                        ):
+                            element.section_tag = None
+                        if (
+                            transformation is not None
+                            and transformation.transformation_type
+                            != "LinearInt"
+                        ):
+                            element.transf_tag = None
                 elif property_id == "group":
                     element.group = str(value).strip() or "frame"
                 elif property_id == "section_tag":
@@ -10232,11 +10249,20 @@ class MainWindow(QMainWindow):
                                 f"Section {section_tag} does not exist."
                             )
                         if (
-                            element.element_type == "elasticBeamColumn"
+                            element.element_type
+                            in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                             and section.section_type != "Elastic"
                         ):
                             raise ValueError(
-                                "elasticBeamColumn requires an Elastic section."
+                                f"{element.element_type} requires an "
+                                "Elastic section."
+                            )
+                        if (
+                            element.element_type == "dispBeamColumnInt"
+                            and section.section_type != "FiberInt"
+                        ):
+                            raise ValueError(
+                                "dispBeamColumnInt requires a FiberInt section."
                             )
                         if (
                             element.element_type in SHELL_ELEMENT_TYPES
@@ -10256,6 +10282,28 @@ class MainWindow(QMainWindow):
                         raise ValueError(
                             f"Transformation {transf_tag} does not exist."
                         )
+                    if transf_tag is not None:
+                        transformation = self.project.transformations[
+                            transf_tag
+                        ]
+                        if (
+                            element.element_type == "dispBeamColumnInt"
+                            and transformation.transformation_type
+                            != "LinearInt"
+                        ):
+                            raise ValueError(
+                                "dispBeamColumnInt requires a LinearInt "
+                                "transformation."
+                            )
+                        if (
+                            element.element_type != "dispBeamColumnInt"
+                            and transformation.transformation_type
+                            == "LinearInt"
+                        ):
+                            raise ValueError(
+                                "LinearInt is reserved for "
+                                "dispBeamColumnInt."
+                            )
                     element.transf_tag = transf_tag
                 elif property_id == "integration_type":
                     element.integration_type = str(value)
@@ -10267,6 +10315,8 @@ class MainWindow(QMainWindow):
                     element.force_tolerance = float(str(value).strip())
                 elif property_id == "mass_per_length":
                     element.mass_per_length = float(str(value).strip())
+                elif property_id == "beam_center_ratio":
+                    element.beam_center_ratio = float(str(value).strip())
                 elif property_id == "consistent_mass":
                     if isinstance(value, bool):
                         element.consistent_mass = value
@@ -11070,8 +11120,14 @@ class MainWindow(QMainWindow):
             for section_tag in sorted(self.project.sections):
                 section = self.project.sections[section_tag]
                 if (
-                    element.element_type == "elasticBeamColumn"
+                    element.element_type
+                    in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                     and section.section_type != "Elastic"
+                ):
+                    continue
+                if (
+                    element.element_type == "dispBeamColumnInt"
+                    and section.section_type != "FiberInt"
                 ):
                     continue
                 section_choices.append((
@@ -11089,11 +11145,22 @@ class MainWindow(QMainWindow):
                 for transf_tag, transformation in sorted(
                     self.project.transformations.items()
                 )
+                if (
+                    (
+                        element.element_type == "dispBeamColumnInt"
+                        and transformation.transformation_type == "LinearInt"
+                    )
+                    or (
+                        element.element_type != "dispBeamColumnInt"
+                        and transformation.transformation_type != "LinearInt"
+                    )
+                )
             )
 
             nonlinear = element.element_type in {
                 "forceBeamColumn", "dispBeamColumn"
             }
+            interaction = element.element_type == "dispBeamColumnInt"
             force_based = element.element_type == "forceBeamColumn"
             rows = [
                 ("Tag", tag),
@@ -11107,8 +11174,23 @@ class MainWindow(QMainWindow):
                         "current": element.element_type,
                         "choices": [
                             ("elasticBeamColumn", "elasticBeamColumn"),
+                            (
+                                "ElasticTimoshenkoBeam",
+                                "ElasticTimoshenkoBeam",
+                            ),
                             ("forceBeamColumn", "forceBeamColumn"),
                             ("dispBeamColumn", "dispBeamColumn"),
+                            *(
+                                [(
+                                    "dispBeamColumnInt",
+                                    "dispBeamColumnInt",
+                                )]
+                                if (
+                                    int(self.model.ndm),
+                                    int(self.model.ndf),
+                                ) == (2, 3)
+                                else []
+                            ),
                         ],
                     },
                 ),
@@ -11145,14 +11227,14 @@ class MainWindow(QMainWindow):
                     },
                 ),
             ]
-            if nonlinear:
+            if nonlinear or interaction:
                 rows.extend([
                     (
                         "Integration",
-                        element.integration_type,
+                        "-" if interaction else element.integration_type,
                         {
                             "id": "integration_type",
-                            "editable": True,
+                            "editable": not interaction,
                             "kind": "choice",
                             "current": element.integration_type,
                             "choices": [
@@ -11205,6 +11287,19 @@ class MainWindow(QMainWindow):
                     ("Force tolerance", "-"),
                 ])
 
+            if interaction:
+                rows.append((
+                    "Center of rotation cRot",
+                    f"{element.beam_center_ratio:g}",
+                    {
+                        "id": "beam_center_ratio",
+                        "editable": True,
+                        "kind": "float",
+                    },
+                ))
+            else:
+                rows.append(("Center of rotation cRot", "-"))
+
             rows.extend([
                 (
                     "Mass / length",
@@ -11220,7 +11315,12 @@ class MainWindow(QMainWindow):
                     "Consistent" if element.consistent_mass else "Lumped",
                     {
                         "id": "consistent_mass",
-                        "editable": True,
+                        "editable": element.element_type
+                        in {
+                            "elasticBeamColumn",
+                            "ElasticTimoshenkoBeam",
+                            "dispBeamColumn",
+                        },
                         "kind": "choice",
                         "current": bool(element.consistent_mass),
                         "choices": [
@@ -15428,11 +15528,7 @@ class MainWindow(QMainWindow):
         create_if_missing: bool = False,
         frame_only: bool = False,
     ) -> set[int] | None:
-        frame_types = {
-            "elasticBeamColumn",
-            "forceBeamColumn",
-            "dispBeamColumn",
-        }
+        frame_types = set(FRAME_ELEMENT_TYPES)
 
         def eligible(tag: int) -> bool:
             element = self.model.elements.get(int(tag))
@@ -15514,6 +15610,7 @@ class MainWindow(QMainWindow):
                 element.force_tolerance,
                 element.mass_per_length,
                 element.consistent_mass,
+                element.beam_center_ratio,
             )
             == (
                 first.integration_type,
@@ -15522,6 +15619,7 @@ class MainWindow(QMainWindow):
                 first.force_tolerance,
                 first.mass_per_length,
                 first.consistent_mass,
+                first.beam_center_ratio,
             )
             for element in selected
         )
@@ -15530,11 +15628,7 @@ class MainWindow(QMainWindow):
             element_type=(
                 first.element_type
                 if same_type and first.element_type
-                in {
-                    "elasticBeamColumn",
-                    "forceBeamColumn",
-                    "dispBeamColumn",
-                }
+                in FRAME_ELEMENT_TYPES
                 else "elasticBeamColumn"
             ),
             integration_type=(
@@ -15567,6 +15661,13 @@ class MainWindow(QMainWindow):
                 if same_integration
                 else False
             ),
+            beam_center_ratio=(
+                first.beam_center_ratio
+                if same_integration
+                else 0.4
+            ),
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             units=self.project.units,
             parent=self,
         )
@@ -16192,6 +16293,8 @@ class MainWindow(QMainWindow):
             transformations=self.project.transformations,
             new_section_callback=self._create_frame_section_dependency,
             new_transformation_callback=self._create_transformation_dependency,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -16208,6 +16311,7 @@ class MainWindow(QMainWindow):
                 group,
                 integration_type,
                 integration_points,
+                beam_center_ratio,
             ) = dialog.values()
         except ValueError as exc:
             QMessageBox.warning(
@@ -16233,13 +16337,18 @@ class MainWindow(QMainWindow):
                 group=group,
                 integration_type=integration_type,
                 integration_points=integration_points,
+                beam_center_ratio=beam_center_ratio,
             )
+            self.project.validate_element_state(tag)
         except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(
                 self,
                 "Create Frame Member",
                 str(exc),
             )
+            self._refresh_all()
             return
 
         self._refresh_all(
@@ -24590,6 +24699,7 @@ class MainWindow(QMainWindow):
             if element.element_type in {
                 "forceBeamColumn",
                 "dispBeamColumn",
+                "dispBeamColumnInt",
             }
         )
 
@@ -24601,18 +24711,18 @@ class MainWindow(QMainWindow):
             if (
                 tag in self.model.elements
                 and self.model.elements[tag].element_type
-                in {
-                    "elasticBeamColumn",
-                    "forceBeamColumn",
-                    "dispBeamColumn",
-                }
+                in FRAME_ELEMENT_TYPES
             )
         ]
         if not selected:
             return
         if any(
             self.model.elements[tag].element_type
-            in {"forceBeamColumn", "dispBeamColumn"}
+            in {
+                "forceBeamColumn",
+                "dispBeamColumn",
+                "dispBeamColumnInt",
+            }
             for tag in selected
         ):
             return
@@ -24692,7 +24802,8 @@ class MainWindow(QMainWindow):
         }
         return any(
             section_tag in self.project.sections
-            and self.project.sections[section_tag].section_type == "Fiber"
+            and self.project.sections[section_tag].section_type
+            in {"Fiber", "FiberInt"}
             for section_tag in section_tags
         )
 
