@@ -2289,6 +2289,9 @@ class MainWindow(QMainWindow):
         self.results_panel.shell_deformation_requested.connect(
             self._show_shell_deformation_result
         )
+        self.results_panel.shell_deformation_frame_requested.connect(
+            self._show_shell_deformation_frame_result
+        )
         self.results_panel.hinge_state_requested.connect(
             self._show_hinge_state_result
         )
@@ -33586,6 +33589,53 @@ class MainWindow(QMainWindow):
                 f"{crack_count}/{crack_panels} cracked · "
                 f"max epsilon1/epsilon_cr = {crack_ratio:.3f}"
             )
+
+    def _show_shell_deformation_frame_result(
+        self,
+        frame_index: int,
+        component: str,
+        location: str,
+        element_scope: object,
+    ) -> None:
+        if not self._last_result:
+            return
+
+        elements: set[int] = set()
+        if isinstance(element_scope, (list, tuple, set)):
+            for raw_tag in element_scope:
+                try:
+                    elements.add(int(raw_tag))
+                except (TypeError, ValueError):
+                    continue
+
+        stats = self.viewport.show_shell_deformation_contour(
+            self._last_result,
+            str(component),
+            location=str(location),
+            frame_index=max(0, int(frame_index)),
+            element_tags=elements or None,
+            cache_key=self._last_result_cache_key,
+        )
+        rendered = int(stats.get("rendered_elements", 0))
+        missing = int(stats.get("missing_thickness", 0))
+        label = {
+            "E1": "ε1",
+            "E2": "ε2",
+        }.get(str(component), str(component))
+        location_label = {
+            "mid": "mid",
+            "top": "top",
+            "bottom": "bottom",
+        }.get(str(location), str(location))
+        suffix = (
+            f" · {missing} shell(s) missing thickness"
+            if missing > 0
+            else ""
+        )
+        self.status_message.setText(
+            f"Shell strain animation · frame {int(frame_index) + 1} · "
+            f"{label} · {location_label} · {rendered} element(s){suffix}"
+        )
 
     def _show_shell_deformation_result(
         self,
