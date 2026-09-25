@@ -75,8 +75,9 @@ def shell_surface_strains(
     """Return in-plane strains at shell coordinate z.
 
     The generalized shell deformation vector is interpreted as
-    [Exx, Eyy, Gxy, Kxx, Kyy, Kxy, ...].  Positive z follows the shell
-    section local normal, so Top uses +h/2 and Bottom uses -h/2.
+    [Exx, Eyy, Gxy, Kxx, Kyy, Kxy, ...].  OpenSees plate-fiber
+    sections use epsilon(z) = epsilon_0 - z * kappa. Positive z follows
+    the shell section local normal, so Top uses +h/2 and Bottom uses -h/2.
     """
     if len(values) < 6:
         return None
@@ -96,9 +97,9 @@ def shell_surface_strains(
     ):
         return None
     return (
-        exx + z_value * kxx,
-        eyy + z_value * kyy,
-        gxy + z_value * kxy,
+        exx - z_value * kxx,
+        eyy - z_value * kyy,
+        gxy - z_value * kxy,
     )
 
 
