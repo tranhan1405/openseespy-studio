@@ -343,6 +343,13 @@ class LineGeometryDialog(QDialog):
         )
         recipe_form.addRow("cRot (dispBeamColumnInt):", self.center_rotation)
 
+        self.formulation_note = QLabel()
+        self.formulation_note.setWordWrap(True)
+        self.formulation_note.setStyleSheet(
+            "padding: 6px; background: #f3f6f9; color: #526476;"
+        )
+        recipe_form.addRow("", self.formulation_note)
+
         self.mass_per_length = _float_spin(
             line.mass_per_length if line else 0.0,
             low=0.0,
@@ -550,6 +557,35 @@ class LineGeometryDialog(QDialog):
         self.consistent_mass.setEnabled(frame and not interaction)
         if interaction:
             self.consistent_mass.setChecked(False)
+
+        if not frame:
+            self.formulation_note.setText(
+                "Truss recipe: assign a uniaxial material and cross-sectional "
+                "area. Frame-only formulation controls are disabled."
+            )
+        elif interaction:
+            self.formulation_note.setText(
+                "dispBeamColumnInt line recipe requires a FiberInt section "
+                "and LinearInt transformation. cRot is stored on every "
+                "generated element; no separate beamIntegration tag is used."
+            )
+        elif formulation == "ElasticTimoshenkoBeam":
+            self.formulation_note.setText(
+                "Elastic Timoshenko line recipe includes shear deformation. "
+                "Use an Elastic section with the required shear properties."
+            )
+        elif formulation == "elasticBeamColumn":
+            self.formulation_note.setText(
+                "Elastic Euler-Bernoulli line recipe. Shear deformation is "
+                "neglected."
+            )
+        else:
+            self.formulation_note.setText(
+                "Distributed-plasticity frame recipe. The selected section, "
+                "transformation and beam integration are copied to generated "
+                "elements."
+            )
+
         self._refresh_section_choices()
         self._refresh_transformation_choices()
 
