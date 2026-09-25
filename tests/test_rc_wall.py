@@ -340,6 +340,184 @@ def test_rc_wall_hybrid_mesh_aligned_horizontal_bars_reduce_rho_x():
         assert element.truss_material_tag == result.material_tags[0]
 
 
+def test_rc_wall_embedded_vertical_web_rebar_builds_independent_nodes():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    spec = RCWallSpec(
+        width=1220.0,
+        height=2209.8,
+        thickness=152.4,
+        boundary_width=228.6,
+        vertical_elements=7,
+        macro_fibers=8,
+        boundary_unconfined_thickness=50.8,
+        boundary_confined_thickness=101.6,
+        reinforcement_mode="hybrid",
+        boundary_bar_count=4,
+        boundary_bar_diameter=16.0,
+        boundary_cover=30.0,
+        web_vertical_mode="embedded",
+        web_vertical_bar_diameter=6.0,
+        web_vertical_spacing=250.0,
+        web_vertical_edge_offset=50.0,
+        web_vertical_layer_mode="front_back",
+    )
+
+    result = build_rc_wall(project, spec)
+
+    assert len(result.web_vertical_positions) == 4
+    assert result.web_vertical_positions[0] == pytest.approx(281.6)
+    assert result.web_vertical_positions[-1] == pytest.approx(938.4)
+    assert result.web_vertical_actual_spacing == pytest.approx(
+        (938.4 - 281.6) / 3.0
+    )
+
+    # Four bar positions × two projected layers × eight grid levels.
+    assert len(result.web_vertical_node_tags) == 64
+    assert len(result.embedded_coupling_element_tags) == 64
+    # Four positions × two layers × seven vertical segments.
+    assert len(result.web_vertical_element_tags) == 56
+
+    bar_area = math.pi * 6.0 ** 2 / 4.0
+    expected_rho = (
+        4 * 2 * bar_area
+        / ((1220.0 - 2.0 * 228.6) * 152.4)
+    )
+    assert result.web_vertical_discrete_rho_y == pytest.approx(
+        expected_rho
+    )
+    assert result.web_smeared_rho_y == pytest.approx(
+        0.0027 - expected_rho
+    )
+
+    web_steel = project.nd_materials[result.nd_material_tags[2]]
+    assert web_steel.parameters["ratio2"] == pytest.approx(
+        0.0027 - expected_rho
+    )
+
+    for tag in result.web_vertical_element_tags:
+        element = project.model.elements[tag]
+        assert element.element_type == "corotTruss"
+        assert element.group.startswith("rc-wall-rebar-web-vertical-")
+        assert element.truss_area == pytest.approx(bar_area)
+        assert element.truss_material_tag == result.material_tags[1]
+
+    for tag in result.embedded_coupling_element_tags:
+        element = project.model.elements[tag]
+        assert element.element_type == "ASDEmbeddedNodeElement"
+        assert element.group.startswith(
+            "rc-wall-embedded-coupling-web-vertical-"
+        )
+        assert len(element.node_tags()) == 4
+        assert element.embedded_constrain_rotation
+        assert element.embedded_penalty == pytest.approx(
+            result.embedded_penalty
+        )
+
+    issues = validate_project(project)
+    assert not [
+        issue
+        for issue in issues
+        if issue.severity == "ERROR"
+    ]
+    assert not [
+        issue
+        for issue in issues
+        if issue.category == "Embedded reinforcement"
+    ]
+
+
+def test_rc_wall_embedded_vertical_web_rebar_roundtrip_and_export():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    result = build_rc_wall(
+        project,
+        RCWallSpec(
+            width=1220.0,
+            height=2209.8,
+            thickness=152.4,
+            boundary_width=228.6,
+            vertical_elements=7,
+            macro_fibers=8,
+            boundary_unconfined_thickness=50.8,
+            boundary_confined_thickness=101.6,
+            reinforcement_mode="hybrid",
+            boundary_bar_count=4,
+            boundary_bar_diameter=16.0,
+            boundary_cover=30.0,
+            web_vertical_mode="embedded",
+            web_vertical_bar_diameter=6.0,
+            web_vertical_spacing=250.0,
+            web_vertical_edge_offset=50.0,
+            web_vertical_layer_mode="single",
+        ),
+    )
+
+    first_coupling_tag = result.embedded_coupling_element_tags[0]
+    source = project.model.elements[first_coupling_tag]
+    restored = ProjectDatabase.from_dict(project.to_dict())
+    restored_element = restored.model.elements[first_coupling_tag]
+
+    assert restored_element.element_type == "ASDEmbeddedNodeElement"
+    assert restored_element.node_tags() == source.node_tags()
+    assert restored_element.embedded_constrain_rotation
+    assert restored_element.embedded_penalty == pytest.approx(
+        source.embedded_penalty
+    )
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+
+    penalty_model_units = result.embedded_penalty / 1.0e6
+    coupling = project.model.elements[first_coupling_tag]
+    assert (
+        "ops.element('ASDEmbeddedNodeElement', "
+        f"{first_coupling_tag}, {coupling.i}, {coupling.j}, "
+        f"{coupling.k}, {coupling.l}, '-rot', '-K', "
+        in script
+    )
+    assert f"{penalty_model_units:g}" in script
+
+
+def test_rc_wall_embedded_vertical_rebar_rejects_excess_rho_y():
+    project = ProjectDatabase()
+    before = project.to_dict()
+
+    with pytest.raises(
+        ValueError,
+        match=r"Embedded vertical web steel exceeds",
+    ):
+        build_rc_wall(
+            project,
+            RCWallSpec(
+                reinforcement_mode="hybrid",
+                web_vertical_mode="embedded",
+                web_vertical_bar_diameter=0.016,
+                web_vertical_spacing=0.10,
+                web_vertical_edge_offset=0.01,
+                web_vertical_layer_mode="front_back",
+            ),
+        )
+
+    assert project.to_dict() == before
+
+
 def test_rc_wall_hybrid_export_contains_corot_truss():
     project = ProjectDatabase()
     spec = RCWallSpec(
