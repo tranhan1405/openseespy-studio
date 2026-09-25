@@ -57,6 +57,11 @@ class RCWallPreview(QWidget):
         self.boundary_cover = 0.0
         self.web_horizontal_mode = "smeared"
         self.web_horizontal_layer_mode = "front_back"
+        self.web_vertical_mode = "smeared"
+        self.web_vertical_bar_diameter = 0.0
+        self.web_vertical_spacing = 0.2
+        self.web_vertical_edge_offset = 0.05
+        self.web_vertical_layer_mode = "front_back"
         self.detailed_annotations = False
         self.warning_keys: set[str] = set()
         self.setMinimumHeight(190)
@@ -76,6 +81,11 @@ class RCWallPreview(QWidget):
         boundary_cover: float = 0.0,
         web_horizontal_mode: str = "smeared",
         web_horizontal_layer_mode: str = "front_back",
+        web_vertical_mode: str = "smeared",
+        web_vertical_bar_diameter: float = 0.0,
+        web_vertical_spacing: float = 0.2,
+        web_vertical_edge_offset: float = 0.05,
+        web_vertical_layer_mode: str = "front_back",
         detailed_annotations: bool = False,
         warning_keys: set[str] | None = None,
     ) -> None:
@@ -91,6 +101,17 @@ class RCWallPreview(QWidget):
         self.boundary_cover = max(float(boundary_cover), 0.0)
         self.web_horizontal_mode = str(web_horizontal_mode)
         self.web_horizontal_layer_mode = str(web_horizontal_layer_mode)
+        self.web_vertical_mode = str(web_vertical_mode)
+        self.web_vertical_bar_diameter = max(
+            float(web_vertical_bar_diameter), 0.0
+        )
+        self.web_vertical_spacing = max(
+            float(web_vertical_spacing), 1.0e-12
+        )
+        self.web_vertical_edge_offset = max(
+            float(web_vertical_edge_offset), 0.0
+        )
+        self.web_vertical_layer_mode = str(web_vertical_layer_mode)
         self.detailed_annotations = bool(detailed_annotations)
         self.warning_keys = set(warning_keys or ())
         self.update()
@@ -259,6 +280,78 @@ class RCWallPreview(QWidget):
                     painter.drawLine(
                         int(web_left), int(y),
                         int(web_right), int(y),
+                    )
+
+        if (
+            self.reinforcement_mode == "hybrid"
+            and self.web_vertical_mode == "embedded"
+        ):
+            diameter = self.web_vertical_bar_diameter
+            local_left = (
+                self.boundary_value
+                + self.web_vertical_edge_offset
+                + 0.5 * diameter
+            )
+            local_right = (
+                self.width_value
+                - self.boundary_value
+                - self.web_vertical_edge_offset
+                - 0.5 * diameter
+            )
+            if local_right >= local_left:
+                local_span = local_right - local_left
+                intervals = (
+                    max(
+                        1,
+                        int(
+                            math.ceil(
+                                local_span / self.web_vertical_spacing
+                            )
+                        ),
+                    )
+                    if local_span > 1.0e-12
+                    else 1
+                )
+                positions = (
+                    [local_left]
+                    if local_span <= 1.0e-12
+                    else [
+                        local_left + local_span * index / intervals
+                        for index in range(intervals + 1)
+                    ]
+                )
+                layers = (
+                    ("front", "back")
+                    if self.web_vertical_layer_mode == "front_back"
+                    else ("center",)
+                )
+                for layer_index, layer_name in enumerate(layers):
+                    pen = QPen(
+                        QColor(
+                            "#188977"
+                            if layer_name != "back"
+                            else "#12685b"
+                        ),
+                        1.9,
+                    )
+                    if layer_name == "back":
+                        pen.setStyle(Qt.PenStyle.DashLine)
+                    painter.setPen(pen)
+                    shift = 1.5 * layer_index
+                    for value in positions:
+                        x = left + value * scale + shift
+                        painter.drawLine(
+                            int(x), int(top),
+                            int(x), int(top + wall_h),
+                        )
+
+                if "web_vertical" in self.warning_keys:
+                    painter.setPen(QPen(QColor("#c62828"), 2.2))
+                    painter.drawRect(
+                        int(left + boundary_px),
+                        int(top),
+                        int(max(wall_w - 2.0 * boundary_px, 1.0)),
+                        int(wall_h),
                     )
 
         painter.setPen(QPen(QColor("#26394c"), 2.2))
@@ -675,6 +768,31 @@ class RCWallWizard(QWizard):
             "single",
         )
 
+        self.web_vertical_mode = QComboBox()
+        self.web_vertical_mode.addItem(
+            "Smeared in RCLMS",
+            "smeared",
+        )
+        self.web_vertical_mode.addItem(
+            "Discrete · Embedded independent bars",
+            "embedded",
+        )
+        self.web_vertical_bar_diameter = _double(6.0, 1.0e-9)
+        self.web_vertical_spacing = _double(200.0, 1.0e-9)
+        self.web_vertical_edge_offset = _double(50.0, 0.0)
+        self.web_vertical_layer_mode = QComboBox()
+        self.web_vertical_layer_mode.addItem(
+            "Front + Back faces",
+            "front_back",
+        )
+        self.web_vertical_layer_mode.addItem(
+            "Single centerline layer",
+            "single",
+        )
+        self.embedded_penalty_factor = _double(
+            1.0, 1.0e-6, 1.0e6, 4
+        )
+
         self.boundary_truss_type = QComboBox()
         self.boundary_truss_type.addItem("CorotTruss", "corotTruss")
         self.boundary_truss_type.addItem("Truss", "truss")
@@ -717,6 +835,30 @@ class RCWallWizard(QWizard):
             self.web_horizontal_layer_mode,
         )
         form.addRow(
+            "Vertical web steel:",
+            self.web_vertical_mode,
+        )
+        form.addRow(
+            f"Vertical bar diameter [{self.units.length}]:",
+            self.web_vertical_bar_diameter,
+        )
+        form.addRow(
+            f"Vertical target spacing [{self.units.length}]:",
+            self.web_vertical_spacing,
+        )
+        form.addRow(
+            f"Vertical edge offset [{self.units.length}]:",
+            self.web_vertical_edge_offset,
+        )
+        form.addRow(
+            "Vertical layers:",
+            self.web_vertical_layer_mode,
+        )
+        form.addRow(
+            "Embedded penalty factor:",
+            self.embedded_penalty_factor,
+        )
+        form.addRow(
             "Discrete element formulation:",
             self.boundary_truss_type,
         )
@@ -728,9 +870,10 @@ class RCWallWizard(QWizard):
             "edge node chain (perfect bond); front/back and cover are shown "
             "schematically in the viewport. Horizontal web bars can also be "
             "discretized on existing internal MEFI node rows, with their rho-x "
-            "automatically removed from the smeared RCLMS steel. Vertical web "
-            "bars remain smeared until embedded/interpolation coupling is "
-            "implemented."
+            "automatically removed from smeared RCLMS steel. Vertical web bars "
+            "may use independent steel nodes coupled to the MEFI host through "
+            "ASDEmbeddedNodeElement interpolation; their rho-y is then removed "
+            "from the smeared web steel automatically."
         )
         note.setWordWrap(True)
         note.setStyleSheet(
@@ -751,6 +894,10 @@ class RCWallWizard(QWizard):
             self.boundary_bar_diameter,
             self.boundary_cover,
             self.web_horizontal_bar_diameter,
+            self.web_vertical_bar_diameter,
+            self.web_vertical_spacing,
+            self.web_vertical_edge_offset,
+            self.embedded_penalty_factor,
         ):
             widget.valueChanged.connect(
                 lambda _value: self._mark_custom()
@@ -770,6 +917,12 @@ class RCWallWizard(QWizard):
         self.web_horizontal_layer_mode.currentIndexChanged.connect(
             lambda _index: self._reinforcement_layout_changed()
         )
+        self.web_vertical_mode.currentIndexChanged.connect(
+            lambda _index: self._reinforcement_layout_changed()
+        )
+        self.web_vertical_layer_mode.currentIndexChanged.connect(
+            lambda _index: self._reinforcement_layout_changed()
+        )
         self.boundary_bar_count.valueChanged.connect(
             lambda _value: self._update_preview()
         )
@@ -782,7 +935,19 @@ class RCWallWizard(QWizard):
         self.web_horizontal_bar_diameter.valueChanged.connect(
             lambda _value: self._update_preview()
         )
+        self.web_vertical_bar_diameter.valueChanged.connect(
+            lambda _value: self._update_preview()
+        )
+        self.web_vertical_spacing.valueChanged.connect(
+            lambda _value: self._update_preview()
+        )
+        self.web_vertical_edge_offset.valueChanged.connect(
+            lambda _value: self._update_preview()
+        )
         self.rho_y_boundary.valueChanged.connect(
+            lambda _value: self._update_reinforcement_info()
+        )
+        self.rho_y_web.valueChanged.connect(
             lambda _value: self._update_reinforcement_info()
         )
         self.rho_x_web.valueChanged.connect(
@@ -813,12 +978,22 @@ class RCWallWizard(QWizard):
         self.boundary_cover.setEnabled(enabled)
         self.boundary_truss_type.setEnabled(enabled)
         self.web_horizontal_mode.setEnabled(enabled)
+        self.web_vertical_mode.setEnabled(enabled)
         horizontal_enabled = (
             enabled
             and self.web_horizontal_mode.currentData() == "mesh_aligned"
         )
         self.web_horizontal_bar_diameter.setEnabled(horizontal_enabled)
         self.web_horizontal_layer_mode.setEnabled(horizontal_enabled)
+        vertical_enabled = (
+            enabled
+            and self.web_vertical_mode.currentData() == "embedded"
+        )
+        self.web_vertical_bar_diameter.setEnabled(vertical_enabled)
+        self.web_vertical_spacing.setEnabled(vertical_enabled)
+        self.web_vertical_edge_offset.setEnabled(vertical_enabled)
+        self.web_vertical_layer_mode.setEnabled(vertical_enabled)
+        self.embedded_penalty_factor.setEnabled(vertical_enabled)
         self._update_reinforcement_info()
         self._update_preview()
         self._update_review()
@@ -967,6 +1142,7 @@ class RCWallWizard(QWizard):
             "<span style='color:#7897b5'>■</span> Boundary zone · "
             "<span style='color:#d64545'>━</span> Boundary bars · "
             "<span style='color:#2f80c9'>━</span> Horizontal web bars · "
+            "<span style='color:#188977'>━</span> Embedded vertical bars · "
             "<span style='color:#26394c'>━</span> MEFI mesh"
         )
         self.preview_legend.setWordWrap(True)
@@ -1022,10 +1198,11 @@ class RCWallWizard(QWizard):
 
         warning = QLabel(
             "Preview is generated from the current wizard inputs before the "
-            "project is modified. Front/back reinforcement separation is "
-            "schematic for this 2D MEFI model; FE bars still use shared-node "
-            "perfect bond. Vertical web reinforcement remains smeared until "
-            "embedded/interpolation coupling is implemented."
+            "project is modified. Boundary and mesh-aligned horizontal bars "
+            "use shared-node perfect bond. Embedded vertical web bars use "
+            "independent steel nodes coupled to MEFI host triangles by "
+            "ASDEmbeddedNodeElement; front/back separation remains schematic "
+            "in this 2D wall model."
         )
         warning.setWordWrap(True)
         warning.setStyleSheet(
@@ -1095,6 +1272,31 @@ class RCWallWizard(QWizard):
                 if hasattr(self, "web_horizontal_layer_mode")
                 else "front_back"
             ),
+            web_vertical_mode=(
+                str(self.web_vertical_mode.currentData())
+                if hasattr(self, "web_vertical_mode")
+                else "smeared"
+            ),
+            web_vertical_bar_diameter=(
+                float(self.web_vertical_bar_diameter.value())
+                if hasattr(self, "web_vertical_bar_diameter")
+                else 0.0
+            ),
+            web_vertical_spacing=(
+                float(self.web_vertical_spacing.value())
+                if hasattr(self, "web_vertical_spacing")
+                else 1.0
+            ),
+            web_vertical_edge_offset=(
+                float(self.web_vertical_edge_offset.value())
+                if hasattr(self, "web_vertical_edge_offset")
+                else 0.0
+            ),
+            web_vertical_layer_mode=(
+                str(self.web_vertical_layer_mode.currentData())
+                if hasattr(self, "web_vertical_layer_mode")
+                else "front_back"
+            ),
         )
         self.preview.set_wall(**preview_kwargs)
         if hasattr(self, "final_preview"):
@@ -1162,6 +1364,22 @@ class RCWallWizard(QWizard):
             self.web_horizontal_mode.setCurrentIndex(smeared_horizontal)
             self.web_horizontal_mode.blockSignals(False)
         self.web_horizontal_bar_diameter.setValue(self._from_mm(8.0))
+        self.web_vertical_bar_diameter.setValue(self._from_mm(6.0))
+        self.web_vertical_spacing.setValue(self._from_mm(200.0))
+        self.web_vertical_edge_offset.setValue(self._from_mm(50.0))
+        self.embedded_penalty_factor.setValue(1.0)
+        smeared_vertical = self.web_vertical_mode.findData("smeared")
+        if smeared_vertical >= 0:
+            self.web_vertical_mode.blockSignals(True)
+            self.web_vertical_mode.setCurrentIndex(smeared_vertical)
+            self.web_vertical_mode.blockSignals(False)
+        vertical_layers = self.web_vertical_layer_mode.findData(
+            "front_back"
+        )
+        if vertical_layers >= 0:
+            self.web_vertical_layer_mode.blockSignals(True)
+            self.web_vertical_layer_mode.setCurrentIndex(vertical_layers)
+            self.web_vertical_layer_mode.blockSignals(False)
         horizontal_layers = self.web_horizontal_layer_mode.findData(
             "front_back"
         )
@@ -1246,6 +1464,24 @@ class RCWallWizard(QWizard):
             ),
             web_horizontal_layer_mode=str(
                 self.web_horizontal_layer_mode.currentData()
+            ),
+            web_vertical_mode=str(
+                self.web_vertical_mode.currentData()
+            ),
+            web_vertical_bar_diameter=float(
+                self.web_vertical_bar_diameter.value()
+            ),
+            web_vertical_spacing=float(
+                self.web_vertical_spacing.value()
+            ),
+            web_vertical_edge_offset=float(
+                self.web_vertical_edge_offset.value()
+            ),
+            web_vertical_layer_mode=str(
+                self.web_vertical_layer_mode.currentData()
+            ),
+            embedded_penalty_factor=float(
+                self.embedded_penalty_factor.value()
             ),
             boundary_unconfined_thickness=unconfined,
             boundary_confined_thickness=confined,
