@@ -5653,17 +5653,48 @@ class MainWindow(QMainWindow):
             fe_model.addChild(reinforcement_root)
 
             reinforcement_groups = (
-                ("left", "Boundary Bars · Left"),
-                ("right", "Boundary Bars · Right"),
+                (
+                    "left-front",
+                    "Boundary Bars · Left · Front",
+                    "rc-wall-rebar-left-front-",
+                ),
+                (
+                    "left-back",
+                    "Boundary Bars · Left · Back",
+                    "rc-wall-rebar-left-back-",
+                ),
+                (
+                    "left-center",
+                    "Boundary Bars · Left · Center",
+                    "rc-wall-rebar-left-center-",
+                ),
+                (
+                    "right-front",
+                    "Boundary Bars · Right · Front",
+                    "rc-wall-rebar-right-front-",
+                ),
+                (
+                    "right-back",
+                    "Boundary Bars · Right · Back",
+                    "rc-wall-rebar-right-back-",
+                ),
+                (
+                    "right-center",
+                    "Boundary Bars · Right · Center",
+                    "rc-wall-rebar-right-center-",
+                ),
+                (
+                    "web-horizontal",
+                    "Web Bars · Horizontal",
+                    "rc-wall-rebar-web-horizontal-",
+                ),
             )
             grouped_reinforcement_tags: set[int] = set()
-            for side, label in reinforcement_groups:
+            for group_key, label, prefix in reinforcement_groups:
                 tags = [
                     tag
                     for tag in reinforcement_tags
-                    if str(self.model.elements[tag].group).endswith(
-                        f"-{side}"
-                    )
+                    if str(self.model.elements[tag].group).startswith(prefix)
                 ]
                 if not tags:
                     continue
@@ -5675,7 +5706,7 @@ class MainWindow(QMainWindow):
                 group_item.setData(
                     0,
                     Qt.UserRole,
-                    ("reinforcement_group", side),
+                    ("reinforcement_group", group_key),
                 )
                 group_item.setExpanded(True)
                 reinforcement_root.addChild(group_item)
@@ -6726,21 +6757,23 @@ class MainWindow(QMainWindow):
                 element_type_group = str(tag)
             elif kind == "reinforcement_group":
                 reinforcement_group = str(tag)
-                group_suffix = (
-                    f"-{reinforcement_group}"
-                    if reinforcement_group in {"left", "right"}
-                    else ""
+                reinforcement_prefixes = {
+                    "left-front": "rc-wall-rebar-left-front-",
+                    "left-back": "rc-wall-rebar-left-back-",
+                    "left-center": "rc-wall-rebar-left-center-",
+                    "right-front": "rc-wall-rebar-right-front-",
+                    "right-back": "rc-wall-rebar-right-back-",
+                    "right-center": "rc-wall-rebar-right-center-",
+                    "web-horizontal": "rc-wall-rebar-web-horizontal-",
+                }
+                prefix = reinforcement_prefixes.get(
+                    reinforcement_group,
+                    "rc-wall-rebar",
                 )
                 elements.update(
                     int(element_tag)
                     for element_tag, element in self.model.elements.items()
-                    if (
-                        str(element.group).startswith("rc-wall-rebar")
-                        and (
-                            not group_suffix
-                            or str(element.group).endswith(group_suffix)
-                        )
-                    )
+                    if str(element.group).startswith(prefix)
                 )
             elif kind == "boundary_group":
                 boundary_group = str(tag)
@@ -26006,12 +26039,19 @@ class MainWindow(QMainWindow):
             left = sum(
                 1
                 for element in reinforcement
-                if str(element.group).endswith("-left")
+                if str(element.group).startswith("rc-wall-rebar-left-")
             )
             right = sum(
                 1
                 for element in reinforcement
-                if str(element.group).endswith("-right")
+                if str(element.group).startswith("rc-wall-rebar-right-")
+            )
+            horizontal = sum(
+                1
+                for element in reinforcement
+                if str(element.group).startswith(
+                    "rc-wall-rebar-web-horizontal-"
+                )
             )
             materials = {
                 int(element.truss_material_tag)
@@ -26028,6 +26068,7 @@ class MainWindow(QMainWindow):
                     ("Elements", len(reinforcement)),
                     ("Left Boundary", left),
                     ("Right Boundary", right),
+                    ("Horizontal Web", horizontal),
                     ("Materials", len(materials)),
                     (
                         "Formulations",
@@ -26796,25 +26837,24 @@ class MainWindow(QMainWindow):
 
     def _show_reinforcement_group_properties(
         self,
-        side: str,
+        group_key: str,
     ) -> None:
         """Show summary properties for one RC-wall discrete bar group."""
-        target = str(side)
-        suffix = (
-            f"-{target}"
-            if target in {"left", "right"}
-            else ""
-        )
+        target = str(group_key)
+        prefixes = {
+            "left-front": "rc-wall-rebar-left-front-",
+            "left-back": "rc-wall-rebar-left-back-",
+            "left-center": "rc-wall-rebar-left-center-",
+            "right-front": "rc-wall-rebar-right-front-",
+            "right-back": "rc-wall-rebar-right-back-",
+            "right-center": "rc-wall-rebar-right-center-",
+            "web-horizontal": "rc-wall-rebar-web-horizontal-",
+        }
+        prefix = prefixes.get(target, "rc-wall-rebar")
         elements = [
             element
             for element in self.model.elements.values()
-            if (
-                str(element.group).startswith("rc-wall-rebar")
-                and (
-                    not suffix
-                    or str(element.group).endswith(suffix)
-                )
-            )
+            if str(element.group).startswith(prefix)
         ]
         total_area = sum(
             float(element.truss_area)
@@ -26829,16 +26869,21 @@ class MainWindow(QMainWindow):
             str(element.element_type)
             for element in elements
         }
-        label = (
-            target.title() + " Boundary"
-            if target in {"left", "right"}
-            else "Discrete Reinforcement"
-        )
+        labels = {
+            "left-front": "Left Boundary · Front",
+            "left-back": "Left Boundary · Back",
+            "left-center": "Left Boundary · Center",
+            "right-front": "Right Boundary · Front",
+            "right-back": "Right Boundary · Back",
+            "right-center": "Right Boundary · Center",
+            "web-horizontal": "Web · Horizontal",
+        }
+        label = labels.get(target, "Discrete Reinforcement")
         self.properties_panel.set_properties(
             f"Reinforcement · {label}",
             [
                 ("Elements", len(elements)),
-                ("Total Element Area", f"{total_area:g}"),
+                ("Summed Element Area", f"{total_area:g}"),
                 ("Materials", len(materials)),
                 (
                     "Formulations",
@@ -26847,6 +26892,12 @@ class MainWindow(QMainWindow):
                 (
                     "Perfect Bond",
                     "Shared FE nodes",
+                ),
+                (
+                    "Display",
+                    "Schematic bar separation"
+                    if target != "web-horizontal"
+                    else "MEFI mesh-aligned",
                 ),
             ],
         )
@@ -28557,22 +28608,25 @@ class MainWindow(QMainWindow):
             return
 
         if kind == "reinforcement_group":
-            side = str(value)
-            suffix = f"-{side}" if side in {"left", "right"} else ""
+            group_key = str(value)
+            prefixes = {
+                "left-front": "rc-wall-rebar-left-front-",
+                "left-back": "rc-wall-rebar-left-back-",
+                "left-center": "rc-wall-rebar-left-center-",
+                "right-front": "rc-wall-rebar-right-front-",
+                "right-back": "rc-wall-rebar-right-back-",
+                "right-center": "rc-wall-rebar-right-center-",
+                "web-horizontal": "rc-wall-rebar-web-horizontal-",
+            }
+            prefix = prefixes.get(group_key, "rc-wall-rebar")
             tags = {
                 int(tag)
                 for tag, element in self.model.elements.items()
-                if (
-                    str(element.group).startswith("rc-wall-rebar")
-                    and (
-                        not suffix
-                        or str(element.group).endswith(suffix)
-                    )
-                )
+                if str(element.group).startswith(prefix)
             }
             properties = menu.addAction("Properties")
             properties.triggered.connect(
-                lambda checked=False, s=side:
+                lambda checked=False, s=group_key:
                 self._show_reinforcement_group_properties(s)
             )
             select_all = menu.addAction(
