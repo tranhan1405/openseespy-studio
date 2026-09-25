@@ -15,6 +15,7 @@ from .model import (
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
+    WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
 )
 from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
@@ -344,6 +345,16 @@ def material_to_openseespy(
             f"{material.tag}, {stress(p['fc']):g}, {p['epsc']:g}, "
             f"{p['epscu']:g}, {stress(p['Ec']):g}, {stress(p['fct']):g}, "
             f"{p['et']:g}, {p['beta']:g})"
+        )
+
+    if material.material_type == "ConcreteCM":
+        return (
+            "ops.uniaxialMaterial('ConcreteCM', "
+            f"{material.tag}, {stress(p['fpcc']):g}, {p['epcc']:g}, "
+            f"{stress(p['Ec']):g}, {p['rc']:g}, {p['xcrn']:g}, "
+            f"{stress(p['ft']):g}, {p['et']:g}, {p['rt']:g}, "
+            f"{p['xcrp']:g}, '-GapClose', "
+            f"{int(round(p['GapClose']))})"
         )
 
     if material.material_type == "Hysteretic":
@@ -694,6 +705,16 @@ def nd_material_to_openseespy(
             f"{material.tag}, {int(round(value('mat1')))}, "
             f"{int(round(value('mat2')))}, {value('ratio1'):g}, "
             f"{value('ratio2'):g}, {value('orientation'):g})"
+        )
+
+    if material.material_type == "FSAM":
+        return (
+            "ops.nDMaterial('FSAM', "
+            f"{material.tag}, {value('rho'):g}, "
+            f"{int(round(value('sX')))}, {int(round(value('sY')))}, "
+            f"{int(round(value('conc')))}, {value('rouX'):g}, "
+            f"{value('rouY'):g}, {value('nu'):g}, "
+            f"{value('alfadow'):g})"
         )
 
     raise ValueError(
@@ -5363,6 +5384,93 @@ def to_openseespy(
                 f"{len(e.mefi_widths)}, '-width', {widths}, "
                 f"'-sec', {sec_tags})"
             )
+            continue
+
+        if e.element_type in WALL_MACRO_ELEMENT_TYPES:
+            m = len(e.wall_widths)
+            thick = ", ".join(
+                f"{float(value):g}" for value in e.wall_thicknesses
+            )
+            widths = ", ".join(
+                f"{float(value):g}" for value in e.wall_widths
+            )
+            if e.element_type == "SFI_MVLEM":
+                missing = [
+                    int(mat_tag)
+                    for mat_tag in e.wall_nd_material_tags
+                    if nd_materials is None or int(mat_tag) not in nd_materials
+                ]
+                if missing:
+                    lines.append(
+                        f"# ERROR: SFI_MVLEM element {tag} references "
+                        "missing nDMaterial tag(s) "
+                        + ", ".join(map(str, sorted(set(missing))))
+                        + "; element not generated."
+                    )
+                    continue
+                mats = ", ".join(
+                    str(int(value)) for value in e.wall_nd_material_tags
+                )
+                lines.append(
+                    "ops.element('SFI_MVLEM', "
+                    f"{tag}, {e.i}, {e.j}, {m}, "
+                    f"{e.wall_center_ratio:g}, '-thick', {thick}, "
+                    f"'-width', {widths}, '-mat', {mats})"
+                )
+                continue
+
+            direct_tags = {*e.wall_concrete_tags, *e.wall_steel_tags}
+            if e.wall_shear_tag is not None:
+                direct_tags.add(int(e.wall_shear_tag))
+            missing = [
+                int(mat_tag)
+                for mat_tag in direct_tags
+                if materials is None or int(mat_tag) not in materials
+            ]
+            if missing:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} references "
+                    "missing uniaxial material tag(s) "
+                    + ", ".join(map(str, sorted(set(missing))))
+                    + "; element not generated."
+                )
+                continue
+            rhos = ", ".join(f"{float(value):g}" for value in e.wall_rhos)
+            concrete = ", ".join(
+                str(int(value)) for value in e.wall_concrete_tags
+            )
+            steel = ", ".join(
+                str(int(value)) for value in e.wall_steel_tags
+            )
+            if e.element_type == "MVLEM":
+                lines.append(
+                    "ops.element('MVLEM', "
+                    f"{tag}, {e.wall_density:g}, {e.i}, {e.j}, "
+                    f"{m}, {e.wall_center_ratio:g}, "
+                    f"'-thick', {thick}, '-width', {widths}, "
+                    f"'-rho', {rhos}, '-matConcrete', {concrete}, "
+                    f"'-matSteel', {steel}, '-matShear', "
+                    f"{int(e.wall_shear_tag)})"
+                )
+            else:
+                if e.k is None or e.l is None:
+                    lines.append(
+                        f"# ERROR: MVLEM_3D element {tag} is missing "
+                        "K/L nodes; element not generated."
+                    )
+                    continue
+                lines.append(
+                    "ops.element('MVLEM_3D', "
+                    f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, {m}, "
+                    f"'-thick', {thick}, '-width', {widths}, "
+                    f"'-rho', {rhos}, '-matConcrete', {concrete}, "
+                    f"'-matSteel', {steel}, '-matShear', "
+                    f"{int(e.wall_shear_tag)}, '-CoR', "
+                    f"{e.wall_center_ratio:g}, '-ThickMod', "
+                    f"{e.wall_thick_mod:g}, '-Poisson', "
+                    f"{e.wall_poisson:g}, '-Density', "
+                    f"{e.wall_density:g})"
+                )
             continue
 
         if e.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:

@@ -67,6 +67,7 @@ class NDMaterialDialog(QDialog):
         ("ASD concrete 3D", "ASDConcrete3D"),
         ("Orthotropic rotating-angle concrete", "OrthotropicRAConcrete"),
         ("Smeared steel double layer", "SmearedSteelDoubleLayer"),
+        ("FSAM RC panel", "FSAM"),
     )
 
     PARAMETER_LABELS = {
@@ -134,6 +135,11 @@ class NDMaterialDialog(QDialog):
         "ratio1": "Reinforcement ratio ρ1",
         "ratio2": "Reinforcement ratio ρ2",
         "orientation": "Layer orientation [rad]",
+        "sX": "Uniaxial steel tag X",
+        "sY": "Uniaxial steel tag Y",
+        "rouX": "Reinforcement ratio rouX",
+        "rouY": "Reinforcement ratio rouY",
+        "alfadow": "Dowel coefficient alfadow",
     }
 
     def __init__(
@@ -219,6 +225,10 @@ class NDMaterialDialog(QDialog):
     def _parameter_label(self, material_type: str, key: str) -> str:
         if material_type == "DruckerPrager" and key == "rho":
             base = "Frictional strength parameter ρ"
+        elif material_type == "FSAM" and key == "nu":
+            base = "Concrete friction coefficient ν"
+        elif material_type == "FSAM" and key == "conc":
+            base = "ConcreteCM uniaxial material tag"
         else:
             base = self.PARAMETER_LABELS.get(key, key)
         kind = nd_material_parameter_kind(material_type, key)

@@ -26,17 +26,24 @@ CONTINUUM_QUAD_ELEMENT_TYPES = {
     "enhancedQuad",
 }
 SOLID_ELEMENT_TYPES = {"stdBrick", "SSPbrick", "bbarBrick"}
+WALL_MACRO_2D_ELEMENT_TYPES = {"MVLEM", "SFI_MVLEM"}
+WALL_MACRO_3D_ELEMENT_TYPES = {"MVLEM_3D"}
+WALL_MACRO_ELEMENT_TYPES = (
+    WALL_MACRO_2D_ELEMENT_TYPES | WALL_MACRO_3D_ELEMENT_TYPES
+)
 TRUSS_ELEMENT_TYPES = {"truss", "corotTruss"}
 EMBEDDED_ELEMENT_TYPES = {"ASDEmbeddedNodeElement"}
 QUAD_ELEMENT_TYPES = (
     SHELL_ELEMENT_TYPES
     | MEMBRANE_ELEMENT_TYPES
     | CONTINUUM_QUAD_ELEMENT_TYPES
+    | WALL_MACRO_3D_ELEMENT_TYPES
 )
 SUPPORTED_ELEMENT_TYPES = (
     FRAME_ELEMENT_TYPES
     | QUAD_ELEMENT_TYPES
     | SOLID_ELEMENT_TYPES
+    | WALL_MACRO_2D_ELEMENT_TYPES
     | TRUSS_ELEMENT_TYPES
     | EMBEDDED_ELEMENT_TYPES
 )
@@ -238,6 +245,17 @@ class Element:
     q: int | None = None
     solid_material_tag: int | None = None
     solid_body_force: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    wall_center_ratio: float = 0.4
+    wall_density: float = 0.0
+    wall_thicknesses: tuple[float, ...] = ()
+    wall_widths: tuple[float, ...] = ()
+    wall_rhos: tuple[float, ...] = ()
+    wall_concrete_tags: tuple[int, ...] = ()
+    wall_steel_tags: tuple[int, ...] = ()
+    wall_shear_tag: int | None = None
+    wall_nd_material_tags: tuple[int, ...] = ()
+    wall_thick_mod: float = 0.63
+    wall_poisson: float = 0.25
 
     @property
     def is_shell(self) -> bool:
@@ -258,6 +276,10 @@ class Element:
     @property
     def is_solid(self) -> bool:
         return self.element_type in SOLID_ELEMENT_TYPES
+
+    @property
+    def is_wall_macro(self) -> bool:
+        return self.element_type in WALL_MACRO_ELEMENT_TYPES
 
     def node_tags(self) -> tuple[int, ...]:
         if self.is_solid:
@@ -585,11 +607,154 @@ class Element:
             self.solid_material_tag = None
             self.solid_body_force = (0.0, 0.0, 0.0)
 
+        self.wall_center_ratio = float(self.wall_center_ratio)
+        self.wall_density = float(self.wall_density)
+        self.wall_thicknesses = tuple(
+            float(value) for value in self.wall_thicknesses
+        )
+        self.wall_widths = tuple(
+            float(value) for value in self.wall_widths
+        )
+        self.wall_rhos = tuple(float(value) for value in self.wall_rhos)
+        self.wall_concrete_tags = tuple(
+            _strict_int(value, "MVLEM concrete material tag")
+            for value in self.wall_concrete_tags
+        )
+        self.wall_steel_tags = tuple(
+            _strict_int(value, "MVLEM steel material tag")
+            for value in self.wall_steel_tags
+        )
+        self.wall_nd_material_tags = tuple(
+            _strict_int(value, "SFI_MVLEM nDMaterial tag")
+            for value in self.wall_nd_material_tags
+        )
+        self.wall_thick_mod = float(self.wall_thick_mod)
+        self.wall_poisson = float(self.wall_poisson)
+        if self.is_wall_macro:
+            fiber_count = len(self.wall_widths)
+            if fiber_count < 2:
+                raise ValueError(
+                    f"{self.element_type} requires at least two macro-fibers."
+                )
+            if len(self.wall_thicknesses) != fiber_count:
+                raise ValueError(
+                    f"{self.element_type} requires one thickness per "
+                    "macro-fiber."
+                )
+            if any(
+                not math.isfinite(value) or value <= 0.0
+                for value in (*self.wall_widths, *self.wall_thicknesses)
+            ):
+                raise ValueError(
+                    "Wall macro-fiber widths/thicknesses must be finite "
+                    "and positive."
+                )
+            if (
+                not math.isfinite(self.wall_center_ratio)
+                or not 0.0 <= self.wall_center_ratio <= 1.0
+            ):
+                raise ValueError(
+                    "Wall center-of-rotation ratio c must satisfy 0 <= c <= 1."
+                )
+            if (
+                not math.isfinite(self.wall_density)
+                or self.wall_density < 0.0
+            ):
+                raise ValueError(
+                    "Wall macro-element density must be finite and "
+                    "non-negative."
+                )
+
+            if self.element_type == "SFI_MVLEM":
+                if len(self.wall_nd_material_tags) != fiber_count:
+                    raise ValueError(
+                        "SFI_MVLEM requires one FSAM nDMaterial tag per "
+                        "macro-fiber."
+                    )
+                if any(tag <= 0 for tag in self.wall_nd_material_tags):
+                    raise ValueError(
+                        "SFI_MVLEM nDMaterial tags must be positive."
+                    )
+                self.wall_rhos = ()
+                self.wall_concrete_tags = ()
+                self.wall_steel_tags = ()
+                self.wall_shear_tag = None
+                self.wall_density = 0.0
+            else:
+                if (
+                    len(self.wall_rhos) != fiber_count
+                    or len(self.wall_concrete_tags) != fiber_count
+                    or len(self.wall_steel_tags) != fiber_count
+                ):
+                    raise ValueError(
+                        f"{self.element_type} requires rho, concrete, and "
+                        "steel values for every macro-fiber."
+                    )
+                if any(
+                    not math.isfinite(value) or not 0.0 <= value <= 1.0
+                    for value in self.wall_rhos
+                ):
+                    raise ValueError(
+                        "MVLEM reinforcement ratios must satisfy 0 <= rho <= 1."
+                    )
+                if any(
+                    tag <= 0
+                    for tag in (
+                        *self.wall_concrete_tags,
+                        *self.wall_steel_tags,
+                    )
+                ):
+                    raise ValueError(
+                        "MVLEM concrete/steel material tags must be positive."
+                    )
+                if self.wall_shear_tag is None:
+                    raise ValueError(
+                        f"{self.element_type} requires a shear material tag."
+                    )
+                self.wall_shear_tag = _strict_int(
+                    self.wall_shear_tag,
+                    "MVLEM shear material tag",
+                )
+                if self.wall_shear_tag <= 0:
+                    raise ValueError(
+                        "MVLEM shear material tag must be positive."
+                    )
+                self.wall_nd_material_tags = ()
+
+            if self.element_type == "MVLEM_3D":
+                if (
+                    not math.isfinite(self.wall_thick_mod)
+                    or self.wall_thick_mod <= 0.0
+                ):
+                    raise ValueError(
+                        "MVLEM_3D thickness modifier must be positive."
+                    )
+                if not -1.0 < self.wall_poisson < 0.5:
+                    raise ValueError(
+                        "MVLEM_3D Poisson ratio must satisfy -1 < nu < 0.5."
+                    )
+            else:
+                self.wall_thick_mod = 0.63
+                self.wall_poisson = 0.25
+        else:
+            self.wall_center_ratio = 0.4
+            self.wall_density = 0.0
+            self.wall_thicknesses = ()
+            self.wall_widths = ()
+            self.wall_rhos = ()
+            self.wall_concrete_tags = ()
+            self.wall_steel_tags = ()
+            self.wall_shear_tag = None
+            self.wall_nd_material_tags = ()
+            self.wall_thick_mod = 0.63
+            self.wall_poisson = 0.25
+
         uses_section_reference = self.element_type not in (
             TRUSS_ELEMENT_TYPES
             | EMBEDDED_ELEMENT_TYPES
             | CONTINUUM_QUAD_ELEMENT_TYPES
             | SOLID_ELEMENT_TYPES
+            | WALL_MACRO_ELEMENT_TYPES
             | {"MEFI"}
         )
         uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
@@ -614,7 +779,12 @@ class Element:
                 else int(self.transf_tag)
             )
         )
-        if self.is_quad or self.is_embedded or self.is_solid:
+        if (
+            self.is_quad
+            or self.is_embedded
+            or self.is_solid
+            or self.is_wall_macro
+        ):
             self.transf_tag = None
 
         if self.element_type in FRAME_ELEMENT_TYPES and self.integration_type not in {
@@ -793,6 +963,17 @@ class StructuralModel:
         solid_body_force: tuple[float, float, float] | list[float] = (
             0.0, 0.0, 0.0
         ),
+        wall_center_ratio: float = 0.4,
+        wall_density: float = 0.0,
+        wall_thicknesses: tuple[float, ...] | list[float] = (),
+        wall_widths: tuple[float, ...] | list[float] = (),
+        wall_rhos: tuple[float, ...] | list[float] = (),
+        wall_concrete_tags: tuple[int, ...] | list[int] = (),
+        wall_steel_tags: tuple[int, ...] | list[int] = (),
+        wall_shear_tag: int | None = None,
+        wall_nd_material_tags: tuple[int, ...] | list[int] = (),
+        wall_thick_mod: float = 0.63,
+        wall_poisson: float = 0.25,
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -858,6 +1039,22 @@ class StructuralModel:
         if is_solid and (self.ndm, self.ndf) != (3, 3):
             raise ValueError(
                 f"{element_type} requires ndm=3/ndf=3; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if (
+            element_type in WALL_MACRO_2D_ELEMENT_TYPES
+            and (self.ndm, self.ndf) != (2, 3)
+        ):
+            raise ValueError(
+                f"{element_type} requires ndm=2/ndf=3; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if (
+            element_type in WALL_MACRO_3D_ELEMENT_TYPES
+            and (self.ndm, self.ndf) != (3, 6)
+        ):
+            raise ValueError(
+                f"{element_type} requires ndm=3/ndf=6; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
         if is_embedded and (
@@ -1019,6 +1216,17 @@ class StructuralModel:
             q=q,
             solid_material_tag=solid_material_tag,
             solid_body_force=tuple(solid_body_force),
+            wall_center_ratio=wall_center_ratio,
+            wall_density=wall_density,
+            wall_thicknesses=tuple(wall_thicknesses),
+            wall_widths=tuple(wall_widths),
+            wall_rhos=tuple(wall_rhos),
+            wall_concrete_tags=tuple(wall_concrete_tags),
+            wall_steel_tags=tuple(wall_steel_tags),
+            wall_shear_tag=wall_shear_tag,
+            wall_nd_material_tags=tuple(wall_nd_material_tags),
+            wall_thick_mod=wall_thick_mod,
+            wall_poisson=wall_poisson,
         )
         self.elements[tag] = ele
         return ele
@@ -1544,6 +1752,17 @@ class StructuralModel:
                     ),
                     solid_material_tag=source.solid_material_tag,
                     solid_body_force=source.solid_body_force,
+                    wall_center_ratio=source.wall_center_ratio,
+                    wall_density=source.wall_density,
+                    wall_thicknesses=source.wall_thicknesses,
+                    wall_widths=source.wall_widths,
+                    wall_rhos=source.wall_rhos,
+                    wall_concrete_tags=source.wall_concrete_tags,
+                    wall_steel_tags=source.wall_steel_tags,
+                    wall_shear_tag=source.wall_shear_tag,
+                    wall_nd_material_tags=source.wall_nd_material_tags,
+                    wall_thick_mod=source.wall_thick_mod,
+                    wall_poisson=source.wall_poisson,
                 )
                 created_elements.add(new_tag)
 
@@ -1615,6 +1834,19 @@ class StructuralModel:
                     "q": element.q,
                     "solid_material_tag": element.solid_material_tag,
                     "solid_body_force": list(element.solid_body_force),
+                    "wall_center_ratio": element.wall_center_ratio,
+                    "wall_density": element.wall_density,
+                    "wall_thicknesses": list(element.wall_thicknesses),
+                    "wall_widths": list(element.wall_widths),
+                    "wall_rhos": list(element.wall_rhos),
+                    "wall_concrete_tags": list(element.wall_concrete_tags),
+                    "wall_steel_tags": list(element.wall_steel_tags),
+                    "wall_shear_tag": element.wall_shear_tag,
+                    "wall_nd_material_tags": list(
+                        element.wall_nd_material_tags
+                    ),
+                    "wall_thick_mod": element.wall_thick_mod,
+                    "wall_poisson": element.wall_poisson,
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -1737,6 +1969,31 @@ class StructuralModel:
                 solid_material_tag=item.get("solid_material_tag"),
                 solid_body_force=tuple(
                     item.get("solid_body_force", (0.0, 0.0, 0.0))
+                ),
+                wall_center_ratio=float(
+                    item.get("wall_center_ratio", 0.4)
+                ),
+                wall_density=float(item.get("wall_density", 0.0)),
+                wall_thicknesses=tuple(
+                    item.get("wall_thicknesses", ())
+                ),
+                wall_widths=tuple(item.get("wall_widths", ())),
+                wall_rhos=tuple(item.get("wall_rhos", ())),
+                wall_concrete_tags=tuple(
+                    item.get("wall_concrete_tags", ())
+                ),
+                wall_steel_tags=tuple(
+                    item.get("wall_steel_tags", ())
+                ),
+                wall_shear_tag=item.get("wall_shear_tag"),
+                wall_nd_material_tags=tuple(
+                    item.get("wall_nd_material_tags", ())
+                ),
+                wall_thick_mod=float(
+                    item.get("wall_thick_mod", 0.63)
+                ),
+                wall_poisson=float(
+                    item.get("wall_poisson", 0.25)
                 ),
             )
 

@@ -12,6 +12,8 @@ from .model import (
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
+    WALL_MACRO_3D_ELEMENT_TYPES,
+    WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
     Vec3,
 )
@@ -62,7 +64,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 46
+PROJECT_FORMAT_VERSION = 47
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -76,6 +78,7 @@ MATERIAL_CATEGORIES: dict[str, str] = {
     "Concrete01": "Concrete",
     "Concrete02": "Concrete",
     "Concrete04": "Concrete",
+    "ConcreteCM": "Concrete",
     "Hysteretic": "Hysteretic / Connection",
     "HystereticSmooth": "Hysteretic / Connection",
     "Pinching4": "Hysteretic / Connection",
@@ -104,6 +107,10 @@ MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Concrete01": ("fpc", "epsc0", "fpcu", "epsU"),
     "Concrete02": ("fpc", "epsc0", "fpcu", "epsU", "lambda", "ft", "Ets"),
     "Concrete04": ("fc", "epsc", "epscu", "Ec", "fct", "et", "beta"),
+    "ConcreteCM": (
+        "fpcc", "epcc", "Ec", "rc", "xcrn",
+        "ft", "et", "rt", "xcrp", "GapClose",
+    ),
     "HystereticSmooth": ("ka", "kb", "fbar", "beta"),
     "Hysteretic": (
         "s1p", "e1p", "s2p", "e2p", "s3p", "e3p",
@@ -161,6 +168,9 @@ MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
     },
     "Concrete04": {
         "fc": "stress", "Ec": "stress", "fct": "stress",
+    },
+    "ConcreteCM": {
+        "fpcc": "stress", "Ec": "stress", "ft": "stress",
     },
     "Hysteretic": {},
     "HystereticSmooth": {},
@@ -307,6 +317,11 @@ MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
     "Concrete01": {"fpc": -30.0e6, "epsc0": -0.002, "fpcu": -6.0e6, "epsU": -0.006},
     "Concrete02": {"fpc": -30.0e6, "epsc0": -0.002, "fpcu": -6.0e6, "epsU": -0.006, "lambda": 0.1, "ft": 3.0e6, "Ets": 2.0e8},
     "Concrete04": {"fc": -30.0e6, "epsc": -0.002, "epscu": -0.006, "Ec": 3.0e10, "fct": 3.0e6, "et": 0.0002, "beta": 0.1},
+    "ConcreteCM": {
+        "fpcc": -30.0e6, "epcc": -0.002, "Ec": 3.0e10,
+        "rc": 7.0, "xcrn": 1.02, "ft": 3.0e6, "et": 0.0001,
+        "rt": 1.2, "xcrp": 10000.0, "GapClose": 0.0,
+    },
     "Hysteretic": {"s1p": 1.0, "e1p": 0.001, "s2p": 1.2, "e2p": 0.01, "s3p": 1.0, "e3p": 0.03, "s1n": -1.0, "e1n": -0.001, "s2n": -1.2, "e2n": -0.01, "s3n": -1.0, "e3n": -0.03, "pinchX": 0.5, "pinchY": 0.5, "damage1": 0.0, "damage2": 0.0, "beta": 0.0},
     "HystereticSmooth": {
         "ka": 1.0,
@@ -459,7 +474,7 @@ class MaterialData:
                     f"Concrete02 material {self.tag} has zero epsc0."
                 )
             return abs(2.0 * float(self.parameters["fpc"]) / epsc0)
-        if self.material_type == "Concrete04":
+        if self.material_type in {"Concrete04", "ConcreteCM"}:
             return float(self.parameters["Ec"])
         if self.material_type == "FRPConfinedConcrete02":
             return float(self.parameters["Ec"])
@@ -557,6 +572,9 @@ ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     ),
     "SmearedSteelDoubleLayer": (
         "mat1", "mat2", "ratio1", "ratio2", "orientation",
+    ),
+    "FSAM": (
+        "rho", "sX", "sY", "conc", "rouX", "rouY", "nu", "alfadow",
     ),
 }
 
@@ -662,6 +680,16 @@ ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "ratio2": "dimensionless",
         "orientation": "dimensionless",
     },
+    "FSAM": {
+        "rho": "density",
+        "sX": "dimensionless",
+        "sY": "dimensionless",
+        "conc": "dimensionless",
+        "rouX": "dimensionless",
+        "rouY": "dimensionless",
+        "nu": "dimensionless",
+        "alfadow": "dimensionless",
+    },
 }
 
 ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
@@ -766,6 +794,16 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "ratio2": 0.01,
         "orientation": 0.0,
     },
+    "FSAM": {
+        "rho": 0.0,
+        "sX": 1.0,
+        "sY": 2.0,
+        "conc": 3.0,
+        "rouX": 0.0025,
+        "rouY": 0.0025,
+        "nu": 0.35,
+        "alfadow": 0.005,
+    },
 }
 
 
@@ -798,6 +836,7 @@ ND_MATERIAL_FORMULATIONS: dict[str, tuple[str, ...]] = {
     "ASDConcrete3D": ("ThreeDimensional",),
     "OrthotropicRAConcrete": ("Plane Stress",),
     "SmearedSteelDoubleLayer": ("Plane Stress",),
+    "FSAM": ("Plane Stress",),
 }
 
 
@@ -1072,6 +1111,29 @@ class NDMaterialData:
                         f"SmearedSteelDoubleLayer {key} must satisfy 0 <= "
                         f"{key} <= 1."
                     )
+        elif self.material_type == "FSAM":
+            for key in ("sX", "sY", "conc"):
+                tag = self.parameters[key]
+                if not tag.is_integer() or tag <= 0.0:
+                    raise ValueError(
+                        f"FSAM {key} must be a positive uniaxial material tag."
+                    )
+            if self.parameters["rho"] < 0.0:
+                raise ValueError("FSAM density rho cannot be negative.")
+            for key in ("rouX", "rouY"):
+                if not 0.0 <= self.parameters[key] <= 1.0:
+                    raise ValueError(
+                        f"FSAM {key} must satisfy 0 <= {key} <= 1."
+                    )
+            if not 0.0 < self.parameters["nu"] < 1.5:
+                raise ValueError(
+                    "FSAM friction coefficient nu must satisfy 0 < nu < 1.5."
+                )
+            if not 0.0 < self.parameters["alfadow"] < 0.05:
+                raise ValueError(
+                    "FSAM dowel coefficient alfadow must satisfy "
+                    "0 < alfadow < 0.05."
+                )
         if not isinstance(self.source, dict):
             raise ValueError("nDMaterial source metadata must be an object.")
         self.source = deepcopy(self.source)
@@ -6446,6 +6508,12 @@ class ProjectDatabase:
                 int(round(material.parameters["mat1"])),
                 int(round(material.parameters["mat2"])),
             ]
+        if material.material_type == "FSAM":
+            return [
+                int(round(material.parameters["sX"])),
+                int(round(material.parameters["sY"])),
+                int(round(material.parameters["conc"])),
+            ]
         return []
 
     def _validate_nd_material_dependencies(
@@ -6462,6 +6530,14 @@ class ProjectDatabase:
                 f"{material.material_type} references missing uniaxial "
                 "material tag(s): " + ", ".join(map(str, missing))
             )
+        if material.material_type == "FSAM":
+            concrete_tag = int(round(material.parameters["conc"]))
+            concrete = self.materials.get(concrete_tag)
+            if concrete is not None and concrete.material_type != "ConcreteCM":
+                raise ValueError(
+                    "FSAM concrete dependency must use ConcreteCM; "
+                    f"material {concrete_tag} is {concrete.material_type}."
+                )
 
     def nd_materials_using_material(
         self,
@@ -6523,15 +6599,46 @@ class ProjectDatabase:
                 for layer in section.shell_layers:
                     if layer.material_tag == original_tag:
                         layer.material_tag = material.tag
+            for element in self.model.elements.values():
+                if element.continuum_material_tag == original_tag:
+                    element.continuum_material_tag = material.tag
+                if element.solid_material_tag == original_tag:
+                    element.solid_material_tag = material.tag
+                if element.element_type == "SFI_MVLEM":
+                    element.wall_nd_material_tags = tuple(
+                        material.tag if int(tag) == original_tag else int(tag)
+                        for tag in element.wall_nd_material_tags
+                    )
 
     def remove_nd_material(self, tag: int) -> None:
         tag = _strict_int(tag, "nDMaterial tag")
         section_users = self.sections_using_nd_material(tag)
-        if section_users:
+        element_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.continuum_material_tag == tag
+                or element.solid_material_tag == tag
+                or (
+                    element.element_type == "SFI_MVLEM"
+                    and tag in element.wall_nd_material_tags
+                )
+            )
+        )
+        if section_users or element_users:
+            details = []
+            if section_users:
+                details.append(
+                    "Shell section(s) " + ", ".join(map(str, section_users))
+                )
+            if element_users:
+                details.append(
+                    "element(s) " + ", ".join(map(str, element_users))
+                )
             raise ValueError(
-                f"nDMaterial {tag} is still referenced by Shell section(s): "
-                + ", ".join(map(str, section_users))
-                + ". Reassign those sections before deleting it."
+                f"nDMaterial {tag} is still referenced by "
+                + "; ".join(details)
+                + ". Reassign those references before deleting it."
             )
         self.nd_materials.pop(tag, None)
 
@@ -6619,6 +6726,17 @@ class ProjectDatabase:
             for element in self.model.elements.values():
                 if element.truss_material_tag == original_tag:
                     element.truss_material_tag = material.tag
+                if element.element_type in {"MVLEM", "MVLEM_3D"}:
+                    element.wall_concrete_tags = tuple(
+                        material.tag if int(tag) == original_tag else int(tag)
+                        for tag in element.wall_concrete_tags
+                    )
+                    element.wall_steel_tags = tuple(
+                        material.tag if int(tag) == original_tag else int(tag)
+                        for tag in element.wall_steel_tags
+                    )
+                    if element.wall_shear_tag == original_tag:
+                        element.wall_shear_tag = material.tag
             for connection in self.connections.values():
                 connection.materials_by_dof = {
                     int(dof): (
@@ -6661,6 +6779,13 @@ class ProjectDatabase:
                             == original_tag
                         ):
                             nd_material.parameters[key] = float(material.tag)
+                elif nd_material.material_type == "FSAM":
+                    for key in ("sX", "sY", "conc"):
+                        if (
+                            int(round(nd_material.parameters[key]))
+                            == original_tag
+                        ):
+                            nd_material.parameters[key] = float(material.tag)
 
     def remove_material(self, tag: int) -> None:
         tag = _strict_int(tag, "Material tag")
@@ -6671,6 +6796,18 @@ class ProjectDatabase:
             element.tag
             for element in self.model.elements.values()
             if element.truss_material_tag == tag
+        )
+        dependent_wall_elements = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in {"MVLEM", "MVLEM_3D"}
+                and (
+                    tag in element.wall_concrete_tags
+                    or tag in element.wall_steel_tags
+                    or element.wall_shear_tag == tag
+                )
+            )
         )
         dependent_connections = self.connections_using_material(tag)
         dependent_recorders = sorted(
@@ -6686,6 +6823,7 @@ class ProjectDatabase:
             or dependent_sections
             or dependent_nd_materials
             or dependent_trusses
+            or dependent_wall_elements
             or dependent_connections
             or dependent_recorders
         ):
@@ -6707,6 +6845,11 @@ class ProjectDatabase:
                 details.append(
                     "truss elements "
                     + ", ".join(map(str, dependent_trusses))
+                )
+            if dependent_wall_elements:
+                details.append(
+                    "wall macro-elements "
+                    + ", ".join(map(str, dependent_wall_elements))
                 )
             if dependent_connections:
                 details.append(
@@ -6976,7 +7119,9 @@ class ProjectDatabase:
                 + ", ".join(map(str, missing))
             )
 
-        if element.element_type in SHELL_ELEMENT_TYPES:
+        if element.element_type in (
+            SHELL_ELEMENT_TYPES | WALL_MACRO_3D_ELEMENT_TYPES
+        ):
             if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
                 raise ValueError(
                     f"{element.element_type} element {element.tag} requires "
@@ -8594,6 +8739,41 @@ class ProjectDatabase:
                 raise ValueError(
                     f"{element.element_type} element {element_tag} requires "
                     "an existing nDMaterial."
+                )
+
+        if element.element_type in {"MVLEM", "MVLEM_3D"}:
+            direct_tags = {*element.wall_concrete_tags, *element.wall_steel_tags}
+            if element.wall_shear_tag is not None:
+                direct_tags.add(int(element.wall_shear_tag))
+            missing = sorted(
+                tag for tag in direct_tags if int(tag) not in self.materials
+            )
+            if missing:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    "references missing uniaxial material tag(s): "
+                    + ", ".join(map(str, missing))
+                )
+        elif element.element_type == "SFI_MVLEM":
+            missing = sorted(
+                tag for tag in element.wall_nd_material_tags
+                if int(tag) not in self.nd_materials
+            )
+            if missing:
+                raise ValueError(
+                    f"SFI_MVLEM element {element_tag} references missing "
+                    "nDMaterial tag(s): " + ", ".join(map(str, missing))
+                )
+            incompatible = [
+                int(tag)
+                for tag in element.wall_nd_material_tags
+                if self.nd_materials[int(tag)].material_type != "FSAM"
+            ]
+            if incompatible:
+                raise ValueError(
+                    f"SFI_MVLEM element {element_tag} requires FSAM "
+                    "nDMaterials; incompatible tag(s): "
+                    + ", ".join(map(str, incompatible))
                 )
 
         if element.section_tag is not None:
