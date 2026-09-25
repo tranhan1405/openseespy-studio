@@ -7,7 +7,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .model import FRAME_ELEMENT_TYPES, SHELL_ELEMENT_TYPES, StructuralModel, Vec3
+from .model import (
+    CONTINUUM_QUAD_ELEMENT_TYPES,
+    FRAME_ELEMENT_TYPES,
+    SHELL_ELEMENT_TYPES,
+    StructuralModel,
+    Vec3,
+)
 from .result_catalog import result_choices_for_analysis
 from .section_response import validate_section_response_request
 from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
@@ -8572,6 +8578,14 @@ class ProjectDatabase:
 
         element = self.model.elements[element_tag]
         self._validate_element_geometry(element)
+
+        if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
+            material_tag = element.continuum_material_tag
+            if material_tag is None or int(material_tag) not in self.nd_materials:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "an existing nDMaterial."
+                )
 
         if element.section_tag is not None:
             section = self.sections.get(int(element.section_tag))

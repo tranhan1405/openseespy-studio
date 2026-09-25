@@ -19,9 +19,14 @@ SHELL_ELEMENT_TYPES = {
     "ShellNLDKGQ",
 }
 MEMBRANE_ELEMENT_TYPES = {"MEFI"}
+CONTINUUM_QUAD_ELEMENT_TYPES = {"quad", "SSPquad"}
 TRUSS_ELEMENT_TYPES = {"truss", "corotTruss"}
 EMBEDDED_ELEMENT_TYPES = {"ASDEmbeddedNodeElement"}
-QUAD_ELEMENT_TYPES = SHELL_ELEMENT_TYPES | MEMBRANE_ELEMENT_TYPES
+QUAD_ELEMENT_TYPES = (
+    SHELL_ELEMENT_TYPES
+    | MEMBRANE_ELEMENT_TYPES
+    | CONTINUUM_QUAD_ELEMENT_TYPES
+)
 SUPPORTED_ELEMENT_TYPES = (
     FRAME_ELEMENT_TYPES
     | QUAD_ELEMENT_TYPES
@@ -214,6 +219,12 @@ class Element:
     mefi_section_tags: tuple[int, ...] = ()
     embedded_penalty: float | None = None
     embedded_constrain_rotation: bool = False
+    continuum_thickness: float = 1.0
+    continuum_material_tag: int | None = None
+    continuum_type: str = "PlaneStrain"
+    continuum_pressure: float = 0.0
+    continuum_density: float = 0.0
+    continuum_body_force: tuple[float, float] = (0.0, 0.0)
 
     @property
     def is_shell(self) -> bool:
@@ -226,6 +237,10 @@ class Element:
     @property
     def is_embedded(self) -> bool:
         return self.element_type in EMBEDDED_ELEMENT_TYPES
+
+    @property
+    def is_continuum_quad(self) -> bool:
+        return self.element_type in CONTINUUM_QUAD_ELEMENT_TYPES
 
     def node_tags(self) -> tuple[int, ...]:
         if self.is_quad or self.is_embedded:
@@ -372,7 +387,7 @@ class Element:
             self.k = None
             self.l = None
 
-        if not self.is_quad:
+        if not self.is_shell:
             self.shell_corotational = False
             self.shell_local_x = None
             self.shell_no_eas = False
@@ -427,9 +442,67 @@ class Element:
             self.embedded_penalty = None
             self.embedded_constrain_rotation = False
 
+        self.continuum_type = str(self.continuum_type)
+        self.continuum_thickness = float(self.continuum_thickness)
+        self.continuum_pressure = float(self.continuum_pressure)
+        self.continuum_density = float(self.continuum_density)
+        self.continuum_body_force = tuple(
+            float(value) for value in self.continuum_body_force
+        )
+        if self.is_continuum_quad:
+            if self.continuum_type not in {"PlaneStress", "PlaneStrain"}:
+                raise ValueError(
+                    "2D continuum type must be PlaneStress or PlaneStrain."
+                )
+            if (
+                not math.isfinite(self.continuum_thickness)
+                or self.continuum_thickness <= 0.0
+            ):
+                raise ValueError(
+                    "2D continuum thickness must be finite and positive."
+                )
+            if self.continuum_material_tag is None:
+                raise ValueError(
+                    f"{self.element_type} requires an nDMaterial tag."
+                )
+            self.continuum_material_tag = _strict_int(
+                self.continuum_material_tag,
+                "2D continuum nDMaterial tag",
+            )
+            if self.continuum_material_tag <= 0:
+                raise ValueError(
+                    "2D continuum nDMaterial tag must be positive."
+                )
+            if len(self.continuum_body_force) != 2 or any(
+                not math.isfinite(value)
+                for value in self.continuum_body_force
+            ):
+                raise ValueError(
+                    "2D continuum body force needs two finite values."
+                )
+            if (
+                not math.isfinite(self.continuum_pressure)
+                or not math.isfinite(self.continuum_density)
+                or self.continuum_density < 0.0
+            ):
+                raise ValueError(
+                    "2D continuum pressure/density values are invalid."
+                )
+            if self.element_type == "SSPquad":
+                self.continuum_pressure = 0.0
+                self.continuum_density = 0.0
+        else:
+            self.continuum_thickness = 1.0
+            self.continuum_material_tag = None
+            self.continuum_type = "PlaneStrain"
+            self.continuum_pressure = 0.0
+            self.continuum_density = 0.0
+            self.continuum_body_force = (0.0, 0.0)
+
         uses_section_reference = self.element_type not in (
             TRUSS_ELEMENT_TYPES
             | EMBEDDED_ELEMENT_TYPES
+            | CONTINUUM_QUAD_ELEMENT_TYPES
             | {"MEFI"}
         )
         uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
@@ -619,6 +692,12 @@ class StructuralModel:
         mefi_section_tags: tuple[int, ...] | list[int] = (),
         embedded_penalty: float | None = None,
         embedded_constrain_rotation: bool = False,
+        continuum_thickness: float = 1.0,
+        continuum_material_tag: int | None = None,
+        continuum_type: str = "PlaneStrain",
+        continuum_pressure: float = 0.0,
+        continuum_density: float = 0.0,
+        continuum_body_force: tuple[float, float] | list[float] = (0.0, 0.0),
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -669,6 +748,42 @@ class StructuralModel:
                 "ASDEmbeddedNodeElement infrastructure currently supports "
                 "2D models with ndf=2 or ndf=3."
             )
+        if (
+            element_type in CONTINUUM_QUAD_ELEMENT_TYPES
+            and (self.ndm, self.ndf) != (2, 2)
+        ):
+            raise ValueError(
+                f"{element_type} requires ndm=2/ndf=2; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
+            points = [
+                self.nodes[node_tag].xyz
+                for node_tag in (i, j, k, l)
+            ]
+            cross_values = []
+            for index in range(4):
+                a = points[index]
+                b = points[(index + 1) % 4]
+                c = points[(index + 2) % 4]
+                cross_values.append(
+                    (b[0] - a[0]) * (c[1] - b[1])
+                    - (b[1] - a[1]) * (c[0] - b[0])
+                )
+            scale = max(
+                max(
+                    abs(float(point[axis]))
+                    for point in points
+                )
+                for axis in (0, 1)
+            )
+            tol = max(1.0, scale * scale) * 1.0e-12
+            if any(value <= tol for value in cross_values):
+                raise ValueError(
+                    f"{element_type} requires four convex nodes ordered "
+                    "counter-clockwise in the XY plane."
+                )
+
         if element_type == "MEFI" and (self.ndm, self.ndf) not in {
             (2, 3), (3, 6),
         }:
@@ -725,6 +840,12 @@ class StructuralModel:
             tuple(mefi_section_tags),
             embedded_penalty=embedded_penalty,
             embedded_constrain_rotation=embedded_constrain_rotation,
+            continuum_thickness=continuum_thickness,
+            continuum_material_tag=continuum_material_tag,
+            continuum_type=continuum_type,
+            continuum_pressure=continuum_pressure,
+            continuum_density=continuum_density,
+            continuum_body_force=tuple(continuum_body_force),
         )
         self.elements[tag] = ele
         return ele
@@ -1222,6 +1343,12 @@ class StructuralModel:
                     embedded_constrain_rotation=(
                         source.embedded_constrain_rotation
                     ),
+                    continuum_thickness=source.continuum_thickness,
+                    continuum_material_tag=source.continuum_material_tag,
+                    continuum_type=source.continuum_type,
+                    continuum_pressure=source.continuum_pressure,
+                    continuum_density=source.continuum_density,
+                    continuum_body_force=source.continuum_body_force,
                 )
                 created_elements.add(new_tag)
 
@@ -1281,6 +1408,12 @@ class StructuralModel:
                     "embedded_constrain_rotation": (
                         element.embedded_constrain_rotation
                     ),
+                    "continuum_thickness": element.continuum_thickness,
+                    "continuum_material_tag": element.continuum_material_tag,
+                    "continuum_type": element.continuum_type,
+                    "continuum_pressure": element.continuum_pressure,
+                    "continuum_density": element.continuum_density,
+                    "continuum_body_force": list(element.continuum_body_force),
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -1390,6 +1523,12 @@ class StructuralModel:
                 tuple(item.get("mefi_section_tags", ())),
                 item.get("embedded_penalty"),
                 item.get("embedded_constrain_rotation", False),
+                float(item.get("continuum_thickness", 1.0)),
+                item.get("continuum_material_tag"),
+                str(item.get("continuum_type", "PlaneStrain")),
+                float(item.get("continuum_pressure", 0.0)),
+                float(item.get("continuum_density", 0.0)),
+                tuple(item.get("continuum_body_force", (0.0, 0.0))),
             )
 
         return model

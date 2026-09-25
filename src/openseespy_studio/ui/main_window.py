@@ -79,6 +79,7 @@ from ..importer import import_openseespy_source
 from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import (
+    CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
@@ -179,6 +180,7 @@ from .calibration_dialog import (
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
+from .continuum_dialog import ContinuumQuadDialog
 from .geometry_dialogs import (
     ElementDialog,
     ElementFormulationDialog,
@@ -2445,6 +2447,13 @@ class MainWindow(QMainWindow):
             "Create a Truss element by entering nodes, area, and material",
         )
         self._make_action(
+            "continuum_quad",
+            "2D Quad...",
+            "continuum-quad",
+            self._create_continuum_quad,
+            "Create a FourNodeQuad or SSPquad continuum element",
+        )
+        self._make_action(
             "sketch_plane_offset",
             "Offset Plane...",
             "sketch-plane",
@@ -3027,6 +3036,7 @@ class MainWindow(QMainWindow):
         truss_menu.setIcon(studio_icon("truss-menu"))
         truss_menu.addAction(self.actions["truss_pick"])
         truss_menu.addAction(self.actions["truss_input"])
+        geometry_menu.addAction(self.actions["continuum_quad"])
         geometry_menu.addAction(self.actions["surface_geometry"])
         geometry_menu.addSeparator()
         geometry_menu.addActions([
@@ -3604,7 +3614,7 @@ class MainWindow(QMainWindow):
             home,
             "FE Model",
             large=("node",),
-            small=("shell_input", "rc_wall_wizard"),
+            small=("shell_input", "continuum_quad", "rc_wall_wizard"),
             widgets=(frame_button, truss_button),
         )
         add_group(
@@ -5619,12 +5629,16 @@ class MainWindow(QMainWindow):
                     "shell-element"
                     if "shell" in element_type_lower
                     else (
+                        "continuum-quad"
+                        if "quad" in element_type_lower
+                        else (
                         "frame"
                         if any(
                             token in element_type_lower
                             for token in ("beam", "column")
                         )
                         else "element"
+                        )
                     )
                 )
             )
@@ -5870,12 +5884,16 @@ class MainWindow(QMainWindow):
                     "shell-element"
                     if "shell" in element_type_lower
                     else (
+                        "continuum-quad"
+                        if "quad" in element_type_lower
+                        else (
                         "frame"
                         if any(
                             token in element_type_lower
                             for token in ("beam", "column")
                         )
                         else "element"
+                        )
                     )
                 )
             )
@@ -10079,7 +10097,67 @@ class MainWindow(QMainWindow):
                 if element is None:
                     return
 
-                if element.element_type in SHELL_ELEMENT_TYPES:
+                if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
+                material = (
+                    self.project.nd_materials.get(
+                        int(element.continuum_material_tag)
+                    )
+                    if element.continuum_material_tag is not None
+                    else None
+                )
+                material_text = (
+                    f"{element.continuum_material_tag} - {material.name} "
+                    f"({material.material_type})"
+                    if material is not None
+                    else (
+                        f"{element.continuum_material_tag} (missing)"
+                        if element.continuum_material_tag is not None
+                        else "Unassigned"
+                    )
+                )
+                b1, b2 = element.continuum_body_force
+                self.properties_panel.set_properties(
+                    "2D Continuum Quad",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        (
+                            "Nodes",
+                            ", ".join(map(str, element.node_tags())),
+                        ),
+                        ("Topology", "4-node XY continuum · CCW"),
+                        ("Behavior", element.continuum_type),
+                        ("Thickness", f"{element.continuum_thickness:g}"),
+                        ("nD Material", material_text),
+                        (
+                            "Body force",
+                            f"({float(b1):g}, {float(b2):g})",
+                        ),
+                        (
+                            "Pressure",
+                            (
+                                f"{element.continuum_pressure:g}"
+                                if element.element_type == "quad"
+                                else "Not used by SSPquad"
+                            ),
+                        ),
+                        (
+                            "Density",
+                            (
+                                f"{element.continuum_density:g}"
+                                if element.element_type == "quad"
+                                else "Not used by SSPquad"
+                            ),
+                        ),
+                        ("Section", "Not used by 2D continuum"),
+                        ("Transformation", "Not used by 2D continuum"),
+                        ("Group", element.group),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in SHELL_ELEMENT_TYPES:
                     shell_direct_fields = {
                         "group",
                         "section_tag",
@@ -16023,6 +16101,92 @@ class MainWindow(QMainWindow):
         )
         self.selection.select("element", tag, "replace")
         self._record_project_change(f"Create frame {tag}", before)
+
+    def _create_continuum_quad(self) -> None:
+        """Create one direct 2-D continuum quadrilateral element."""
+        if (int(self.model.ndm), int(self.model.ndf)) != (2, 2):
+            QMessageBox.warning(
+                self,
+                "2D Continuum Quad",
+                "FourNodeQuad and SSPquad require an OpenSees 2D/2DOF "
+                "model (ndm=2, ndf=2).",
+            )
+            return
+        if not self._ensure_node_count(4, title="2D Continuum Quad"):
+            return
+        if not self._ensure_prerequisite(
+            title="2D Continuum Quad",
+            message=(
+                "A 2D continuum element requires an nDMaterial. "
+                "Create one now?"
+            ),
+            action_label="Create nD Material Now...",
+            available=lambda: bool(self.project.nd_materials),
+            creator=self._create_nd_material,
+        ):
+            return
+
+        selected_nodes = [
+            int(tag)
+            for tag in sorted(self.selection.nodes)
+            if int(tag) in self.model.nodes
+        ]
+        dialog = ContinuumQuadDialog(
+            tag=self.project.next_element_tag(),
+            nodes=self.model.nodes,
+            nd_materials=self.project.nd_materials,
+            initial_nodes=selected_nodes[:4],
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "2D Continuum Quad", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            if values["tag"] in self.project.connections:
+                raise ValueError(
+                    f"Element tag {values['tag']} is already used by "
+                    "a connection."
+                )
+            self.model.add_element(
+                values["tag"],
+                values["nodes"][0],
+                values["nodes"][1],
+                element_type=values["formulation"],
+                group="continuum-2d",
+                k=values["nodes"][2],
+                l=values["nodes"][3],
+                continuum_thickness=values["thickness"],
+                continuum_material_tag=values["material_tag"],
+                continuum_type=values["behavior"],
+                continuum_pressure=values["pressure"],
+                continuum_density=values["density"],
+                continuum_body_force=values["body_force"],
+            )
+            self.project.validate_element_state(values["tag"])
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "2D Continuum Quad", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Created {values['formulation']} {values['tag']}: nodes "
+            + ", ".join(map(str, values["nodes"]))
+            + f" · {values['behavior']} · nDMaterial "
+            + str(values["material_tag"])
+        )
+        self.selection.select("element", values["tag"], "replace")
+        self._record_project_change(
+            f"Create {values['formulation']} {values['tag']}",
+            before,
+        )
 
     def _create_shell_mesh(self) -> None:
         if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):

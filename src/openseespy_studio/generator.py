@@ -10,6 +10,7 @@ from .beam_loads import (
 )
 from .units import UnitSystem
 from .model import (
+    CONTINUUM_QUAD_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
@@ -5361,6 +5362,61 @@ def to_openseespy(
                 f"{len(e.mefi_widths)}, '-width', {widths}, "
                 f"'-sec', {sec_tags})"
             )
+            continue
+
+        if e.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
+            if e.k is None or e.l is None:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} is missing "
+                    "K/L nodes; element not generated."
+                )
+                continue
+            if e.continuum_material_tag is None:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} has no "
+                    "nDMaterial assigned; element not generated."
+                )
+                continue
+            if (
+                nd_materials is None
+                or int(e.continuum_material_tag) not in nd_materials
+            ):
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} references "
+                    f"missing nDMaterial {e.continuum_material_tag}; "
+                    "element not generated."
+                )
+                continue
+            b1, b2 = e.continuum_body_force
+            if e.element_type == "quad":
+                args = (
+                    "ops.element('quad', "
+                    f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, "
+                    f"{e.continuum_thickness:g}, "
+                    f"'{e.continuum_type}', "
+                    f"{e.continuum_material_tag}"
+                )
+                if any((
+                    abs(float(e.continuum_pressure)) > 0.0,
+                    abs(float(e.continuum_density)) > 0.0,
+                    abs(float(b1)) > 0.0,
+                    abs(float(b2)) > 0.0,
+                )):
+                    args += (
+                        f", {e.continuum_pressure:g}, "
+                        f"{e.continuum_density:g}, "
+                        f"{b1:g}, {b2:g}"
+                    )
+                args += ")"
+                lines.append(args)
+            else:
+                lines.append(
+                    "ops.element('SSPquad', "
+                    f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, "
+                    f"{e.continuum_material_tag}, "
+                    f"'{e.continuum_type}', "
+                    f"{e.continuum_thickness:g}, {b1:g}, {b2:g})"
+                )
             continue
 
         if e.element_type in SHELL_ELEMENT_TYPES:
