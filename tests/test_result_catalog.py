@@ -77,7 +77,7 @@ def test_nonmodal_catalog_exposes_concrete_crack_pattern():
         )
         assert crack.category == "Concrete Results"
         assert crack.settings["accumulate"] is False
-        assert crack.settings["line_scale"] == 0.82
+        assert crack.settings["line_scale"] == 0.65
 
 
 def test_modal_and_response_spectrum_catalogs_exclude_crack_pattern():
