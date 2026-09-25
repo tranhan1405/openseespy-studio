@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .model import (
+    BEAM_CONTACT_ELEMENT_TYPES,
     BEARING_ELEMENT_TYPES,
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
@@ -65,7 +66,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 50
+PROJECT_FORMAT_VERSION = 51
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -658,6 +659,8 @@ ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "FSAM": (
         "rho", "sX", "sY", "conc", "rouX", "rouY", "nu", "alfadow",
     ),
+    "ContactMaterial2D": ("mu", "G", "c", "t"),
+    "ContactMaterial3D": ("mu", "G", "c", "t"),
 }
 
 ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
@@ -771,6 +774,18 @@ ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "rouY": "dimensionless",
         "nu": "dimensionless",
         "alfadow": "dimensionless",
+    },
+    "ContactMaterial2D": {
+        "mu": "dimensionless",
+        "G": "stress",
+        "c": "stress",
+        "t": "stress",
+    },
+    "ContactMaterial3D": {
+        "mu": "dimensionless",
+        "G": "stress",
+        "c": "stress",
+        "t": "stress",
     },
 }
 
@@ -886,6 +901,18 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "nu": 0.35,
         "alfadow": 0.005,
     },
+    "ContactMaterial2D": {
+        "mu": 0.30,
+        "G": 1.0e8,
+        "c": 0.0,
+        "t": 0.0,
+    },
+    "ContactMaterial3D": {
+        "mu": 0.30,
+        "G": 1.0e8,
+        "c": 0.0,
+        "t": 0.0,
+    },
 }
 
 
@@ -919,6 +946,8 @@ ND_MATERIAL_FORMULATIONS: dict[str, tuple[str, ...]] = {
     "OrthotropicRAConcrete": ("Plane Stress",),
     "SmearedSteelDoubleLayer": ("Plane Stress",),
     "FSAM": ("Plane Stress",),
+    "ContactMaterial2D": ("Contact 2D",),
+    "ContactMaterial3D": ("Contact 3D",),
 }
 
 
@@ -1219,6 +1248,23 @@ class NDMaterialData:
         if not isinstance(self.source, dict):
             raise ValueError("nDMaterial source metadata must be an object.")
         self.source = deepcopy(self.source)
+
+        elif self.material_type in {
+            "ContactMaterial2D",
+            "ContactMaterial3D",
+        }:
+            if self.parameters["mu"] < 0.0:
+                raise ValueError(
+                    f"{self.material_type} mu cannot be negative."
+                )
+            if self.parameters["G"] <= 0.0:
+                raise ValueError(
+                    f"{self.material_type} G must be positive."
+                )
+            if self.parameters["c"] < 0.0 or self.parameters["t"] < 0.0:
+                raise ValueError(
+                    f"{self.material_type} c/t cannot be negative."
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -6816,6 +6862,12 @@ class ProjectDatabase:
                         material.tag if int(tag) == original_tag else int(tag)
                         for tag in element.wall_nd_material_tags
                     )
+                if (
+                    element.element_type in BEAM_CONTACT_ELEMENT_TYPES
+                    and element.special_parameters.get("nd_material_tag")
+                    == original_tag
+                ):
+                    element.special_parameters["nd_material_tag"] = material.tag
 
     def remove_nd_material(self, tag: int) -> None:
         tag = _strict_int(tag, "nDMaterial tag")
@@ -6829,6 +6881,10 @@ class ProjectDatabase:
                 or (
                     element.element_type == "SFI_MVLEM"
                     and tag in element.wall_nd_material_tags
+                )
+                or (
+                    element.element_type in BEAM_CONTACT_ELEMENT_TYPES
+                    and element.special_parameters.get("nd_material_tag") == tag
                 )
             )
         )
@@ -9161,6 +9217,34 @@ class ProjectDatabase:
                     "references missing friction model tag(s): "
                     + ", ".join(map(str, missing_friction))
                 )
+
+        if element.element_type in BEAM_CONTACT_ELEMENT_TYPES:
+            nd_tag = int(element.special_parameters["nd_material_tag"])
+            nd_material = self.nd_materials.get(nd_tag)
+            if nd_material is None:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    f"references missing nDMaterial {nd_tag}."
+                )
+            expected_type = (
+                "ContactMaterial2D"
+                if element.element_type == "BeamContact2D"
+                else "ContactMaterial3D"
+            )
+            if nd_material.material_type != expected_type:
+                raise ValueError(
+                    f"{element.element_type} requires {expected_type}; "
+                    f"nDMaterial {nd_tag} is {nd_material.material_type}."
+                )
+            if element.element_type == "BeamContact3D":
+                transf_tag = int(
+                    element.special_parameters["transf_tag"]
+                )
+                if transf_tag not in self.transformations:
+                    raise ValueError(
+                        f"BeamContact3D element {element_tag} references "
+                        f"missing transformation {transf_tag}."
+                    )
 
         if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
             material_tag = element.continuum_material_tag
