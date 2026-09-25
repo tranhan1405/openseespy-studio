@@ -674,7 +674,9 @@ class ContactElementDialog(_ScrollableDialog):
             minimum=1.0e-15,
             decimals=12,
         )
-        self.cflag = QCheckBox("Contact initially active (cFlag=1)")
+        self.cflag = QCheckBox(
+            "Initially open / no contact assumed (cFlag=1)"
+        )
         self.cflag.setChecked(bool(int(p.get("cFlag", 0))))
         self.transformation = _combo_by_tag(
             [
