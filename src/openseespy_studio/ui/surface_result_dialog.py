@@ -215,7 +215,15 @@ class SurfaceResultDialog(QDialog):
                 }
                 if str(self.result_type.currentData())
                 == "ShellDisplacement"
-                else {"component": self.component.currentText()}
+                else (
+                    {
+                        "component": self.component.currentText(),
+                        "location": "mid",
+                    }
+                    if str(self.result_type.currentData())
+                    == "ShellDeformation"
+                    else {"component": self.component.currentText()}
+                )
             ),
         )
 
