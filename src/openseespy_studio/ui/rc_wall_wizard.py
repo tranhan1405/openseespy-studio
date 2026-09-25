@@ -982,85 +982,95 @@ class RCWallWizard(QWizard):
         self._sync_reinforcement_mode()
 
     def _sync_reinforcement_mode(self) -> None:
-        enabled = (
-            str(self.reinforcement_mode.currentData()) == "hybrid"
-        )
+        mode = str(self.reinforcement_mode.currentData())
+        enabled = mode in {"hybrid", "fully_discrete"}
+        fully_discrete = mode == "fully_discrete"
+
         self.boundary_bar_count.setEnabled(enabled)
-        self.boundary_bar_diameter.setEnabled(enabled)
+        self.boundary_bar_diameter.setEnabled(
+            enabled and not fully_discrete
+        )
         self.boundary_layer_mode.setEnabled(enabled)
         self.boundary_cover.setEnabled(enabled)
         self.boundary_truss_type.setEnabled(enabled)
-        self.web_horizontal_mode.setEnabled(enabled)
-        self.web_vertical_mode.setEnabled(enabled)
+
+        # Sub-mode selectors are meaningful only for Hybrid. Fully Discrete
+        # always uses segmented horizontal bars + embedded vertical bars.
+        self.web_horizontal_mode.setEnabled(
+            enabled and not fully_discrete
+        )
+        self.web_vertical_mode.setEnabled(
+            enabled and not fully_discrete
+        )
+
         horizontal_enabled = (
             enabled
-            and self.web_horizontal_mode.currentData() == "mesh_aligned"
+            and (
+                fully_discrete
+                or self.web_horizontal_mode.currentData() == "mesh_aligned"
+            )
         )
-        self.web_horizontal_bar_diameter.setEnabled(horizontal_enabled)
+        self.web_horizontal_bar_diameter.setEnabled(
+            horizontal_enabled and not fully_discrete
+        )
         self.web_horizontal_layer_mode.setEnabled(horizontal_enabled)
+
         vertical_enabled = (
             enabled
-            and self.web_vertical_mode.currentData() == "embedded"
+            and (
+                fully_discrete
+                or self.web_vertical_mode.currentData() == "embedded"
+            )
         )
-        self.web_vertical_bar_diameter.setEnabled(vertical_enabled)
+        self.web_vertical_bar_diameter.setEnabled(
+            vertical_enabled and not fully_discrete
+        )
         self.web_vertical_spacing.setEnabled(vertical_enabled)
         self.web_vertical_edge_offset.setEnabled(vertical_enabled)
         self.web_vertical_layer_mode.setEnabled(vertical_enabled)
         self.embedded_penalty_factor.setEnabled(vertical_enabled)
+
+        if fully_discrete:
+            horizontal_index = self.web_horizontal_mode.findData(
+                "mesh_aligned"
+            )
+            if horizontal_index >= 0:
+                self.web_horizontal_mode.blockSignals(True)
+                self.web_horizontal_mode.setCurrentIndex(horizontal_index)
+                self.web_horizontal_mode.blockSignals(False)
+            vertical_index = self.web_vertical_mode.findData("embedded")
+            if vertical_index >= 0:
+                self.web_vertical_mode.blockSignals(True)
+                self.web_vertical_mode.setCurrentIndex(vertical_index)
+                self.web_vertical_mode.blockSignals(False)
+
         self._update_reinforcement_info()
         self._update_preview()
         self._update_review()
 
     def _vertical_web_metrics(self) -> dict[str, object]:
-        width = float(self.width.value())
-        boundary = float(self.boundary_width.value())
-        thickness = float(self.thickness.value())
-        diameter = float(self.web_vertical_bar_diameter.value())
-        target = float(self.web_vertical_spacing.value())
-        edge = float(self.web_vertical_edge_offset.value())
-        layers = (
-            2
-            if self.web_vertical_layer_mode.currentData() == "front_back"
-            else 1
-        )
-
-        local_left = boundary + edge + 0.5 * diameter
-        local_right = width - boundary - edge - 0.5 * diameter
-        positions: tuple[float, ...] = ()
-        actual_spacing = 0.0
-        if (
-            target > 0.0
-            and diameter > 0.0
-            and local_right >= local_left
-        ):
-            span = local_right - local_left
-            if span <= 1.0e-12:
-                positions = (local_left,)
-            else:
-                intervals = max(1, int(math.ceil(span / target)))
-                positions = tuple(
-                    local_left + span * index / intervals
-                    for index in range(intervals + 1)
-                )
-                actual_spacing = span / intervals
-
-        bar_area = math.pi * diameter * diameter / 4.0
-        web_width = width - 2.0 * boundary
-        gross = web_width * thickness
-        discrete_rho = (
-            len(positions) * layers * bar_area / gross
-            if gross > 0.0
-            else float("inf")
-        )
-        total_rho = float(self.rho_y_web.value()) / 100.0
+        spec = self.data()
+        summary = rc_wall_reinforcement_summary(spec)
+        positions = tuple(summary["web_vertical_positions"])
         return {
             "positions": positions,
             "bar_count_per_layer": len(positions),
-            "layers": layers,
-            "bar_area": bar_area,
-            "actual_spacing": actual_spacing,
-            "discrete_rho": discrete_rho,
-            "remaining_rho": total_rho - discrete_rho,
+            "layers": (
+                2
+                if self.web_vertical_layer_mode.currentData() == "front_back"
+                else 1
+            ),
+            "bar_area": float(summary["web_vertical_bar_area"]),
+            "equivalent_diameter": float(
+                summary["web_vertical_equivalent_diameter"]
+            ),
+            "actual_spacing": float(
+                summary["web_vertical_actual_spacing"]
+            ),
+            "discrete_rho": float(
+                summary["web_vertical_discrete_rho_y"]
+            ),
+            "remaining_rho": float(summary["web_smeared_rho_y"]),
             "fits": bool(positions),
         }
 
@@ -1517,6 +1527,9 @@ class RCWallWizard(QWizard):
         fc_boundary = self._stress_store(self.fc_boundary.value())
         ft = self._stress_store(self.ft.value())
 
+        reinforcement_mode = str(self.reinforcement_mode.currentData())
+        fully_discrete = reinforcement_mode == "fully_discrete"
+
         return RCWallSpec(
             width=float(self.width.value()),
             height=float(self.height.value()),
@@ -1544,9 +1557,7 @@ class RCWallWizard(QWizard):
             rho_y_web=float(self.rho_y_web.value()) / 100.0,
             rho_x_boundary=float(self.rho_x_boundary.value()) / 100.0,
             rho_y_boundary=float(self.rho_y_boundary.value()) / 100.0,
-            reinforcement_mode=str(
-                self.reinforcement_mode.currentData()
-            ),
+            reinforcement_mode=reinforcement_mode,
             boundary_bar_count=int(self.boundary_bar_count.value()),
             boundary_bar_diameter=float(
                 self.boundary_bar_diameter.value()
@@ -1559,9 +1570,13 @@ class RCWallWizard(QWizard):
             ),
             boundary_cover=float(self.boundary_cover.value()),
             web_horizontal_mode=(
-                str(self.web_horizontal_mode.currentData())
-                if self.reinforcement_mode.currentData() == "hybrid"
-                else "smeared"
+                "mesh_aligned"
+                if fully_discrete
+                else (
+                    str(self.web_horizontal_mode.currentData())
+                    if reinforcement_mode == "hybrid"
+                    else "smeared"
+                )
             ),
             web_horizontal_bar_diameter=float(
                 self.web_horizontal_bar_diameter.value()
@@ -1570,9 +1585,13 @@ class RCWallWizard(QWizard):
                 self.web_horizontal_layer_mode.currentData()
             ),
             web_vertical_mode=(
-                str(self.web_vertical_mode.currentData())
-                if self.reinforcement_mode.currentData() == "hybrid"
-                else "smeared"
+                "embedded"
+                if fully_discrete
+                else (
+                    str(self.web_vertical_mode.currentData())
+                    if reinforcement_mode == "hybrid"
+                    else "smeared"
+                )
             ),
             web_vertical_bar_diameter=float(
                 self.web_vertical_bar_diameter.value()
