@@ -2459,14 +2459,14 @@ class MainWindow(QMainWindow):
         self._make_action(
             "catenary_cable",
             "Catenary Cable...",
-            "element",
+            "link",
             self._create_catenary_cable,
             "Create a 3D OpenSees CatenaryCable element",
         )
         self._make_action(
             "elastomeric_bearing",
             "Elastomeric Bearing...",
-            "connection",
+            "spring",
             self._create_elastomeric_bearing,
             "Create an elastomericBearingPlasticity isolation element",
         )
@@ -5671,9 +5671,15 @@ class MainWindow(QMainWindow):
             ])
             element_type_lower = element_type.lower()
             element_icon = (
-                "truss"
-                if "truss" in element_type_lower
+                "link"
+                if "catenary" in element_type_lower
                 else (
+                    "spring"
+                    if "bearing" in element_type_lower
+                    else (
+                        "truss"
+                        if "truss" in element_type_lower
+                        else (
                     "shell-element"
                     if "shell" in element_type_lower
                     else (
@@ -5694,6 +5700,8 @@ class MainWindow(QMainWindow):
                                     else "element"
                                 )
                             )
+                        )
+                        )
                         )
                     )
                 )
@@ -5934,9 +5942,15 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([f"Element {tag}"])
             element_type_lower = element.element_type.lower()
             element_icon = (
-                "truss"
-                if "truss" in element_type_lower
+                "link"
+                if "catenary" in element_type_lower
                 else (
+                    "spring"
+                    if "bearing" in element_type_lower
+                    else (
+                        "truss"
+                        if "truss" in element_type_lower
+                        else (
                     "shell-element"
                     if "shell" in element_type_lower
                     else (
