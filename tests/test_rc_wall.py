@@ -381,6 +381,21 @@ def test_rc_wall_embedded_vertical_web_rebar_builds_independent_nodes():
     assert len(result.embedded_coupling_element_tags) == 64
     # Four positions × two layers × seven vertical segments.
     assert len(result.web_vertical_element_tags) == 56
+    assert result.web_vertical_selection_name in project.selection_sets
+    assert result.embedded_coupling_selection_name in project.selection_sets
+    vertical_set = project.selection_sets[
+        result.web_vertical_selection_name
+    ]
+    coupling_set = project.selection_sets[
+        result.embedded_coupling_selection_name
+    ]
+    assert vertical_set.element_tags == set(
+        result.web_vertical_element_tags
+    )
+    assert vertical_set.node_tags == set(result.web_vertical_node_tags)
+    assert coupling_set.element_tags == set(
+        result.embedded_coupling_element_tags
+    )
 
     bar_area = math.pi * 6.0 ** 2 / 4.0
     expected_rho = (
@@ -645,6 +660,65 @@ def test_rc_wall_builds_mefi_crack_specs_from_material_ecr():
         math.isclose(float(panel["cracking_strain"]), 8.0e-5)
         for panel in first["panels"]
     )
+
+
+def test_embedded_coupling_helpers_are_not_captured_as_result_elements():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    result = build_rc_wall(
+        project,
+        RCWallSpec(
+            width=1220.0,
+            height=2209.8,
+            thickness=152.4,
+            boundary_width=228.6,
+            vertical_elements=7,
+            macro_fibers=8,
+            boundary_unconfined_thickness=50.8,
+            boundary_confined_thickness=101.6,
+            reinforcement_mode="hybrid",
+            web_vertical_mode="embedded",
+            web_vertical_bar_diameter=6.0,
+            web_vertical_spacing=250.0,
+            web_vertical_edge_offset=50.0,
+            web_vertical_layer_mode="single",
+        ),
+    )
+    analysis = AnalysisSettingsData(
+        1,
+        "Embedded result filtering",
+        analysis_type="Static",
+        steps=1,
+        integrator="LoadControl",
+        load_increment=1.0,
+    )
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+        analyses={1: analysis},
+        active_analysis_tag=1,
+    )
+
+    element_tag_line = next(
+        line
+        for line in script.splitlines()
+        if line.startswith("_studio_element_tags = ")
+    )
+    coupling_tag = result.embedded_coupling_element_tags[0]
+    vertical_tag = result.web_vertical_element_tags[0]
+    assert str(coupling_tag) not in element_tag_line
+    assert str(vertical_tag) in element_tag_line
 
 
 def test_rc_wall_analysis_script_captures_mefi_panel_strain_history():
@@ -978,6 +1052,120 @@ def test_rc_wall_wizard_hybrid_mode_roundtrip():
         _APP.processEvents()
 
 
+def test_rc_wall_wizard_exposes_embedded_vertical_web_bars():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    dialog = RCWallWizard(project)
+    try:
+        dialog.reinforcement_mode.setCurrentIndex(
+            dialog.reinforcement_mode.findData("hybrid")
+        )
+        dialog.web_vertical_mode.setCurrentIndex(
+            dialog.web_vertical_mode.findData("embedded")
+        )
+        dialog.web_vertical_bar_diameter.setValue(6.0)
+        dialog.web_vertical_spacing.setValue(250.0)
+        dialog.web_vertical_edge_offset.setValue(50.0)
+        dialog.web_vertical_layer_mode.setCurrentIndex(
+            dialog.web_vertical_layer_mode.findData("front_back")
+        )
+        dialog.embedded_penalty_factor.setValue(1.0)
+        dialog._update_review()
+        _APP.processEvents()
+
+        spec = dialog.data()
+        assert spec.web_vertical_mode == "embedded"
+        assert spec.web_vertical_bar_diameter == pytest.approx(6.0)
+        assert spec.web_vertical_spacing == pytest.approx(250.0)
+        assert spec.web_vertical_edge_offset == pytest.approx(50.0)
+        assert spec.web_vertical_layer_mode == "front_back"
+        assert spec.embedded_penalty_factor == pytest.approx(1.0)
+
+        metrics = dialog._vertical_web_metrics()
+        assert metrics["bar_count_per_layer"] == 4
+        assert metrics["layers"] == 2
+        assert metrics["actual_spacing"] == pytest.approx(
+            (938.4 - 281.6) / 3.0
+        )
+        assert float(metrics["remaining_rho"]) > 0.0
+
+        counts = dialog._preview_object_counts()
+        assert counts["host_nodes"] == 16
+        assert counts["embedded_nodes"] == 64
+        assert counts["vertical_rebar"] == 56
+        assert counts["embedded_coupling"] == 64
+        assert counts["structural_elements"] == 119
+        assert counts["elements"] == 183
+        assert counts["selection_sets"] == 6
+
+        assert dialog.web_vertical_bar_diameter.isEnabled()
+        assert dialog.web_vertical_spacing.isEnabled()
+        assert dialog.preview.web_vertical_mode == "embedded"
+        assert dialog.final_preview.web_vertical_mode == "embedded"
+        assert "Vertical embedded" in dialog.reinforcement_info.text()
+        assert "Vertical web bar elements: 56" in (
+            dialog.preview_object_summary.text()
+        )
+        assert "Embedded coupling helpers: 64" in (
+            dialog.preview_object_summary.text()
+        )
+        assert "ASDEmbeddedNodeElement" in (
+            dialog.preview_material_summary.text()
+        )
+        assert "Vertical Web Bars" in (
+            dialog.preview_selection_summary.text()
+        )
+        assert "Embedded Coupling" in (
+            dialog.preview_selection_summary.text()
+        )
+        assert dialog.final_preview.warning_keys == set()
+        assert "Ready to create wall" in (
+            dialog.preview_validation_status.text()
+        )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_rc_wall_wizard_embedded_rho_error_locks_create():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    dialog = RCWallWizard(project)
+    try:
+        dialog.reinforcement_mode.setCurrentIndex(
+            dialog.reinforcement_mode.findData("hybrid")
+        )
+        dialog.web_vertical_mode.setCurrentIndex(
+            dialog.web_vertical_mode.findData("embedded")
+        )
+        dialog.web_vertical_bar_diameter.setValue(16.0)
+        dialog.web_vertical_spacing.setValue(100.0)
+        dialog.web_vertical_edge_offset.setValue(10.0)
+        dialog._update_review()
+        _APP.processEvents()
+
+        assert "web_vertical" in dialog.final_preview.warning_keys
+        assert "Embedded vertical reinforcement" in (
+            dialog.preview_validation_status.text()
+        )
+        finish = dialog.button(QWizard.WizardButton.FinishButton)
+        assert finish is not None
+        assert not finish.isEnabled()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
 def test_rc_wall_wizard_pages_are_vertically_scrollable():
     project = ProjectDatabase()
     dialog = RCWallWizard(project)
@@ -1026,11 +1214,16 @@ def test_rc_wall_final_page_previews_objects_before_accept():
 
         assert counts == {
             "nodes": 16,
+            "host_nodes": 16,
+            "embedded_nodes": 0,
             "mefi": 7,
             "boundary_rebar": 0,
             "horizontal_rebar": 0,
+            "vertical_rebar": 0,
+            "embedded_coupling": 0,
             "discrete_rebar": 0,
             "elements": 7,
+            "structural_elements": 7,
             "uniaxial_materials": 5,
             "nd_materials": 4,
             "sections": 2,
