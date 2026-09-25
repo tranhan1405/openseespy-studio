@@ -2449,6 +2449,19 @@ class ResultsPanel(QWidget):
             self._result,
             element_tags=scope,
         )
+        health["thresholds"] = sum(
+            1 for state in current_states
+            if state.cracking_strain is not None
+        )
+        health["strains"] = sum(
+            1 for state in current_states
+            if state.epsilon_1 is not None
+        )
+        health["valid"] = sum(
+            1 for state in current_states
+            if state.valid
+        )
+        health["panels"] = len(current_states)
 
         self.crack_summary.setText(
             f"{int(summary['elements'])} MEFI element(s) · "
