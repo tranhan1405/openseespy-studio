@@ -20,7 +20,8 @@ from ..project import AnalysisSettingsData, SolutionResultData
 
 FORCE_COMPONENTS = ("Nxx", "Nyy", "Nxy", "Mxx", "Myy", "Mxy", "Qx", "Qy")
 DEFORMATION_COMPONENTS = (
-    "Exx", "Eyy", "Gxy", "Kxx", "Kyy", "Kxy", "Gxz", "Gyz"
+    "Exx", "Eyy", "Gxy", "E1", "E2",
+    "Kxx", "Kyy", "Kxy", "Gxz", "Gyz"
 )
 DISPLACEMENT_COMPONENTS = ("|U|", "UX", "UY", "UZ")
 
