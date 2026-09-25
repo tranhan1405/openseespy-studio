@@ -334,15 +334,7 @@ class NDMaterialDialog(QDialog):
                     "e", "cs1", "cs2", "cs3", "c",
                 }:
                     low = 0.0
-            elif material_type in {"ContactMaterial2D", "ContactMaterial3D"}:
-            text = (
-                f"{material_type} defines regularized Coulomb interface "
-                "behavior for OpenSees contact elements. G, c and t are "
-                "stored as stress-like quantities; BeamContact2D requires "
-                "ContactMaterial2D and BeamContact3D requires "
-                "ContactMaterial3D."
-            )
-        elif material_type == "ASDConcrete3D":
+            elif material_type == "ASDConcrete3D":
                 if key == "nu":
                     low, high, decimals = -0.999999, 0.499999, 6
                 elif key == "implex":
@@ -430,6 +422,14 @@ class NDMaterialDialog(QDialog):
                 "requires updateMaterialStage. SARE supports the automatic "
                 "yield-surface form, including documented critical-state "
                 "optional parameters, but not explicit custom surface pairs."
+            )
+        elif material_type in {"ContactMaterial2D", "ContactMaterial3D"}:
+            text = (
+                f"{material_type} defines regularized Coulomb interface "
+                "behavior for OpenSees contact elements. G, c and t are "
+                "stored as stress-like quantities; BeamContact2D requires "
+                "ContactMaterial2D and BeamContact3D requires "
+                "ContactMaterial3D."
             )
         elif material_type == "ASDConcrete3D":
             text = (
