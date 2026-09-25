@@ -5300,7 +5300,10 @@ def to_openseespy(
             if e.embedded_constrain_rotation:
                 args += ", '-rot'"
             if e.embedded_penalty is not None:
-                args += f", '-K', {e.embedded_penalty:g}"
+                penalty = UnitSystem.from_mapping(
+                    units
+                ).stress_from_pa(e.embedded_penalty)
+                args += f", '-K', {penalty:g}"
             args += ")"
             lines.append(args)
             continue
