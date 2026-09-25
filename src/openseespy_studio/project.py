@@ -13,6 +13,7 @@ from .model import (
     CONTACT_TWO_NODE_ELEMENT_TYPES,
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
+    FRICTION_BEARING_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
     TRUSS_MATERIAL_ELEMENT_TYPES,
@@ -7198,14 +7199,19 @@ class ProjectDatabase:
         self.friction_models[model.tag] = model
         if model.tag != original_tag:
             for element in self.model.elements.values():
-                if element.element_type != "TripleFrictionPendulum":
-                    continue
-                for key in ("frnTag1", "frnTag2", "frnTag3"):
+                if element.element_type == "TripleFrictionPendulum":
+                    for key in ("frnTag1", "frnTag2", "frnTag3"):
+                        if (
+                            element.special_parameters.get(key)
+                            == original_tag
+                        ):
+                            element.special_parameters[key] = model.tag
+                elif element.element_type in FRICTION_BEARING_ELEMENT_TYPES:
                     if (
-                        element.special_parameters.get(key)
+                        element.special_parameters.get("frn_model_tag")
                         == original_tag
                     ):
-                        element.special_parameters[key] = model.tag
+                        element.special_parameters["frn_model_tag"] = model.tag
 
     def remove_friction_model(self, tag: int) -> None:
         tag = _strict_int(tag, "Friction model tag")
@@ -7213,17 +7219,25 @@ class ProjectDatabase:
             element.tag
             for element in self.model.elements.values()
             if (
-                element.element_type == "TripleFrictionPendulum"
-                and tag in {
-                    int(element.special_parameters[key])
-                    for key in ("frnTag1", "frnTag2", "frnTag3")
-                }
+                (
+                    element.element_type == "TripleFrictionPendulum"
+                    and tag in {
+                        int(element.special_parameters[key])
+                        for key in ("frnTag1", "frnTag2", "frnTag3")
+                    }
+                )
+                or (
+                    element.element_type in FRICTION_BEARING_ELEMENT_TYPES
+                    and int(
+                        element.special_parameters["frn_model_tag"]
+                    ) == tag
+                )
             )
         )
         if users:
             raise ValueError(
-                f"Friction model {tag} is still referenced by "
-                "TripleFrictionPendulum element(s): "
+                f"Friction model {tag} is still referenced by bearing "
+                "element(s): "
                 + ", ".join(map(str, users))
                 + "."
             )
@@ -9195,6 +9209,48 @@ class ProjectDatabase:
                 raise ValueError(
                     f"{element.element_type} element {element_tag} cannot "
                     f"use shell section {section.tag}."
+                )
+
+        if element.element_type in FRICTION_BEARING_ELEMENT_TYPES:
+            referenced = {
+                int(value)
+                for key in (
+                    "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                )
+                for value in [element.special_parameters.get(key)]
+                if value is not None
+            }
+            missing = sorted(
+                tag for tag in referenced if tag not in self.materials
+            )
+            if missing:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    "references missing uniaxial material tag(s): "
+                    + ", ".join(map(str, missing))
+                )
+            friction_tag = int(
+                element.special_parameters["frn_model_tag"]
+            )
+            if friction_tag not in self.friction_models:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    f"references missing friction model tag {friction_tag}."
+                )
+            signature = (int(self.model.ndm), int(self.model.ndf))
+            if signature == (3, 6):
+                if (
+                    element.special_parameters.get("t_mat_tag") is None
+                    or element.special_parameters.get("my_mat_tag") is None
+                ):
+                    raise ValueError(
+                        f"3D {element.element_type} requires torsion and "
+                        "My material tags."
+                    )
+            elif signature != (2, 3):
+                raise ValueError(
+                    f"{element.element_type} requires a 2D/3DOF or "
+                    "3D/6DOF model."
                 )
 
         if element.element_type == "elastomericBearingPlasticity":
