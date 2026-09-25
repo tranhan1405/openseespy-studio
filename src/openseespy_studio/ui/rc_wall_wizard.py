@@ -468,7 +468,7 @@ class RCWallPreview(QWidget):
 
 
 class RCWallWizard(QWizard):
-    """Create a planar RC wall using OrthotropicRAConcrete/RCLMS/MEFI."""
+    """Create RC walls with MEFI/RCLMS or OpenSees MVLEM formulations."""
 
     def __init__(
         self,
@@ -479,7 +479,7 @@ class RCWallWizard(QWizard):
         self.project = project
         self.units = UnitSystem.from_mapping(project.units)
         self._applying_preset = False
-        self.setWindowTitle("RC Wall Wizard · MEFI / RCLMS")
+        self.setWindowTitle("RC Wall Wizard · MEFI / MVLEM Family")
         self.resize(760, 650)
         self.setOption(
             QWizard.WizardOption.NoBackButtonOnStartPage,
@@ -497,6 +497,7 @@ class RCWallWizard(QWizard):
 
         self.currentIdChanged.connect(self._page_changed)
         self._apply_rw_a20_preset()
+        self._sync_wall_formulation()
         self._update_review()
 
     def _page_changed(self, _page: int) -> None:
@@ -549,9 +550,10 @@ class RCWallWizard(QWizard):
         page = QWizardPage()
         page.setTitle("1 · Geometry & discretization")
         page.setSubTitle(
-            "Planar 2D cantilever wall. V1 generates an ndm=2 / ndf=3 "
-            "MEFI model. Choose Replace for a standalone wall or Append "
-            "to place a wall at a project-space origin."
+            "Choose the OpenSees wall formulation first. MEFI/RCLMS uses "
+            "two edge-node chains; MVLEM and SFI_MVLEM use a centerline "
+            "macro-element stack. MVLEM_3D is exposed now for workflow "
+            "continuity and will be enabled in the next implementation stage."
         )
         body = self._scrollable_page_body(page, "geometry")
         layout = QVBoxLayout(body)
@@ -568,6 +570,28 @@ class RCWallWizard(QWizard):
         )
         self.preset.currentIndexChanged.connect(self._preset_changed)
         form.addRow("Preset:", self.preset)
+
+        self.formulation = QComboBox()
+        self.formulation.addItem(
+            "MEFI / RCLMS · detailed membrane-fiber wall",
+            "MEFI",
+        )
+        self.formulation.addItem(
+            "MVLEM · 2D macro-element stack",
+            "MVLEM",
+        )
+        self.formulation.addItem(
+            "SFI_MVLEM · 2D shear-flexure interaction stack",
+            "SFI_MVLEM",
+        )
+        self.formulation.addItem(
+            "MVLEM_3D · 3D wall panel (coming in next stage)",
+            "MVLEM_3D",
+        )
+        self.formulation.currentIndexChanged.connect(
+            self._wall_formulation_changed
+        )
+        form.addRow("Wall formulation:", self.formulation)
 
         self.wall_name = QLineEdit("RC Wall")
         self.replace_geometry = QCheckBox(
@@ -597,8 +621,8 @@ class RCWallWizard(QWizard):
         form.addRow(f"Boundary width each side [{length}]:", self.boundary_width)
         form.addRow(f"Origin X [{length}]:", self.origin_x)
         form.addRow(f"Origin Y [{length}]:", self.origin_y)
-        form.addRow("MEFI rows over height:", self.vertical_elements)
-        form.addRow("Macro-fibers per MEFI element:", self.macro_fibers)
+        form.addRow("Vertical wall elements:", self.vertical_elements)
+        form.addRow("Macro-fibers per wall element:", self.macro_fibers)
         layout.addLayout(form)
 
         note = QLabel(
@@ -874,6 +898,54 @@ class RCWallWizard(QWizard):
             self.boundary_truss_type,
         )
 
+        self.macro_center_ratio = _double(0.4, 0.0, 1.0, 6)
+        self.macro_density = _double(0.0, 0.0, 1.0e20, 6)
+        self.macro_shear_material = QComboBox()
+        self.macro_shear_material.addItem(
+            "Select existing uniaxial shear material…",
+            None,
+        )
+        for tag in sorted(self.project.materials):
+            material = self.project.materials[tag]
+            self.macro_shear_material.addItem(
+                f"{tag} - {material.name} ({material.material_type})",
+                int(tag),
+            )
+
+        self.macro_web_fsam = QComboBox()
+        self.macro_boundary_fsam = QComboBox()
+        for combo, role in (
+            (self.macro_web_fsam, "web"),
+            (self.macro_boundary_fsam, "boundary"),
+        ):
+            combo.addItem(f"Select {role} FSAM nD material…", None)
+            for tag in sorted(self.project.nd_materials):
+                material = self.project.nd_materials[tag]
+                if material.material_type != "FSAM":
+                    continue
+                combo.addItem(
+                    f"{tag} - {material.name} (FSAM)",
+                    int(tag),
+                )
+
+        form.addRow("Macro CoR ratio c:", self.macro_center_ratio)
+        form.addRow("Macro density:", self.macro_density)
+        form.addRow("MVLEM shear material:", self.macro_shear_material)
+        form.addRow("SFI_MVLEM web FSAM:", self.macro_web_fsam)
+        form.addRow("SFI_MVLEM boundary FSAM:", self.macro_boundary_fsam)
+
+        self.macro_dependency_note = QLabel(
+            "MVLEM creates its Concrete02/Steel02 fiber materials from the "
+            "wizard values and reuses one existing uniaxial shear material. "
+            "SFI_MVLEM reuses existing FSAM nD materials for web/boundary "
+            "macro-fibers."
+        )
+        self.macro_dependency_note.setWordWrap(True)
+        self.macro_dependency_note.setStyleSheet(
+            "padding: 8px; background: #fff7e0; color: #6e5200;"
+        )
+        form.addRow(self.macro_dependency_note)
+
         note = QLabel(
             "Hybrid moves only the selected reinforcement into discrete "
             "bars. Fully Discrete moves all target ρx/ρy into truss bars and "
@@ -920,6 +992,21 @@ class RCWallWizard(QWizard):
         )
         self.boundary_truss_type.currentIndexChanged.connect(
             lambda _index: self._mark_custom()
+        )
+        self.macro_center_ratio.valueChanged.connect(
+            lambda _value: self._mark_custom()
+        )
+        self.macro_density.valueChanged.connect(
+            lambda _value: self._mark_custom()
+        )
+        self.macro_shear_material.currentIndexChanged.connect(
+            lambda _index: self._update_review()
+        )
+        self.macro_web_fsam.currentIndexChanged.connect(
+            lambda _index: self._update_review()
+        )
+        self.macro_boundary_fsam.currentIndexChanged.connect(
+            lambda _index: self._update_review()
         )
         self.boundary_layer_mode.currentIndexChanged.connect(
             lambda _index: self._reinforcement_layout_changed()
@@ -1391,6 +1478,65 @@ class RCWallWizard(QWizard):
         self._mark_custom()
         self._update_preview()
 
+    def _wall_formulation_changed(self, *_args) -> None:
+        self._sync_wall_formulation()
+        self._update_preview()
+        self._update_review()
+
+    def _sync_wall_formulation(self) -> None:
+        if not hasattr(self, "formulation"):
+            return
+        formulation = str(self.formulation.currentData())
+        is_mefi = formulation == "MEFI"
+        is_mvlem = formulation == "MVLEM"
+        is_sfi = formulation == "SFI_MVLEM"
+        is_3d = formulation == "MVLEM_3D"
+
+        # Detailed discrete-reinforcement controls belong to the MEFI/RCLMS
+        # workflow. Macro-element formulations use fiber reinforcement ratios.
+        for widget in (
+            getattr(self, "reinforcement_mode", None),
+            getattr(self, "boundary_bar_count", None),
+            getattr(self, "boundary_bar_diameter", None),
+            getattr(self, "boundary_layer_mode", None),
+            getattr(self, "boundary_cover", None),
+            getattr(self, "web_horizontal_mode", None),
+            getattr(self, "web_horizontal_bar_diameter", None),
+            getattr(self, "web_horizontal_layer_mode", None),
+            getattr(self, "web_vertical_mode", None),
+            getattr(self, "web_vertical_bar_diameter", None),
+            getattr(self, "web_vertical_spacing", None),
+            getattr(self, "web_vertical_edge_offset", None),
+            getattr(self, "web_vertical_layer_mode", None),
+            getattr(self, "embedded_penalty_factor", None),
+            getattr(self, "boundary_truss_type", None),
+        ):
+            if widget is not None:
+                widget.setEnabled(is_mefi)
+
+        for widget in (
+            getattr(self, "macro_center_ratio", None),
+            getattr(self, "macro_density", None),
+        ):
+            if widget is not None:
+                widget.setEnabled(is_mvlem or is_sfi)
+        if hasattr(self, "macro_shear_material"):
+            self.macro_shear_material.setEnabled(is_mvlem)
+        if hasattr(self, "macro_web_fsam"):
+            self.macro_web_fsam.setEnabled(is_sfi)
+        if hasattr(self, "macro_boundary_fsam"):
+            self.macro_boundary_fsam.setEnabled(is_sfi)
+        if hasattr(self, "macro_dependency_note"):
+            self.macro_dependency_note.setVisible(not is_mefi)
+
+        # MVLEM_3D is intentionally visible in the unified workflow but not
+        # accepted during this first implementation stage.
+        if is_3d:
+            self.statusTip = (
+                "MVLEM_3D workflow is exposed but generation is enabled in "
+                "the second implementation stage."
+            )
+
     def _preset_changed(self, *_args) -> None:
         if self.preset.currentData() == "rw-a20":
             self._apply_rw_a20_preset()
@@ -1614,6 +1760,24 @@ class RCWallWizard(QWizard):
             origin_y=float(self.origin_y.value()),
             vertical_elements=int(self.vertical_elements.value()),
             macro_fibers=int(self.macro_fibers.value()),
+            formulation=str(self.formulation.currentData()),
+            macro_center_ratio=float(self.macro_center_ratio.value()),
+            macro_density=float(self.macro_density.value()),
+            macro_shear_material_tag=(
+                None
+                if self.macro_shear_material.currentData() is None
+                else int(self.macro_shear_material.currentData())
+            ),
+            macro_web_fsam_tag=(
+                None
+                if self.macro_web_fsam.currentData() is None
+                else int(self.macro_web_fsam.currentData())
+            ),
+            macro_boundary_fsam_tag=(
+                None
+                if self.macro_boundary_fsam.currentData() is None
+                else int(self.macro_boundary_fsam.currentData())
+            ),
             steel_E=self._stress_store(self.steel_E.value()),
             steel_fx=self._stress_store(self.fy_x.value()),
             steel_fy_web=self._stress_store(self.fy_y_web.value()),
@@ -1706,6 +1870,12 @@ class RCWallWizard(QWizard):
                         "Boundary width must be positive and smaller than "
                         "half the wall width."
                     )
+                formulation = str(self.formulation.currentData())
+                if formulation == "MVLEM_3D":
+                    raise ValueError(
+                        "MVLEM_3D is exposed in the unified Wall Wizard but "
+                        "will be enabled in the second implementation stage."
+                    )
                 if (
                     not self.replace_geometry.isChecked()
                     and (
@@ -1758,6 +1928,24 @@ class RCWallWizard(QWizard):
                         raise ValueError(
                             f"{label} must be between 0 and 100%."
                         )
+                formulation = str(self.formulation.currentData())
+                if formulation == "MVLEM":
+                    if self.macro_shear_material.currentData() is None:
+                        raise ValueError(
+                            "MVLEM requires an existing uniaxial shear material."
+                        )
+                    return True
+                if formulation == "SFI_MVLEM":
+                    if (
+                        self.macro_web_fsam.currentData() is None
+                        or self.macro_boundary_fsam.currentData() is None
+                    ):
+                        raise ValueError(
+                            "SFI_MVLEM requires FSAM nD materials for both "
+                            "web and boundary macro-fibers."
+                        )
+                    return True
+
                 reinforcement_mode = str(
                     self.reinforcement_mode.currentData()
                 )
