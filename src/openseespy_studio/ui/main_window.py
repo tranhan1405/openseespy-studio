@@ -79,8 +79,11 @@ from ..importer import import_openseespy_source
 from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import (
+    BEAM_CONTACT_ELEMENT_TYPES,
     BEARING_ELEMENT_TYPES,
     CABLE_ELEMENT_TYPES,
+    CONTACT_ELEMENT_TYPES,
+    CONTACT_TWO_NODE_ELEMENT_TYPES,
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
@@ -189,6 +192,12 @@ from .solid_dialog import SolidBrickDialog
 from .special_element_dialog import (
     CatenaryCableDialog,
     ElastomericBearingPlasticityDialog,
+)
+from .isolation_contact_dialog import (
+    ContactElementDialog,
+    FrictionModelDialog,
+    LeadRubberXDialog,
+    TripleFrictionPendulumDialog,
 )
 from .wall_macro_dialog import RCWallMacroElementDialog
 from .geometry_dialogs import (
@@ -1885,7 +1894,9 @@ def element_tree_icon_name(element_type: str) -> str:
     name = str(element_type).lower()
     if "catenary" in name or "cable" in name:
         return "link"
-    if "bearing" in name:
+    if "contact" in name:
+        return "link"
+    if "bearing" in name or "pendulum" in name or "leadrubber" in name:
         return "spring"
     if "truss" in name:
         return "truss"
@@ -2493,6 +2504,27 @@ class MainWindow(QMainWindow):
             "Create an elastomericBearingPlasticity isolation element",
         )
         self._make_action(
+            "lead_rubber_x",
+            "Lead Rubber X...",
+            "spring",
+            self._create_lead_rubber_x,
+            "Create a 3D LeadRubberX isolation bearing",
+        )
+        self._make_action(
+            "triple_friction_pendulum",
+            "Triple Friction Pendulum...",
+            "spring",
+            self._create_triple_friction_pendulum,
+            "Create a TripleFrictionPendulum isolation bearing",
+        )
+        self._make_action(
+            "contact_element",
+            "Contact / Interface...",
+            "link",
+            self._create_contact_element,
+            "Create zeroLengthContact or BeamContact interface elements",
+        )
+        self._make_action(
             "continuum_quad",
             "2D Quad...",
             "continuum-quad",
@@ -2825,6 +2857,13 @@ class MainWindow(QMainWindow):
             "nd-materials-root",
             self._create_nd_material,
             "Create an OpenSees nDMaterial definition",
+        )
+        self._make_action(
+            "new_friction_model",
+            "New Friction Model...",
+            "link",
+            self._create_friction_model,
+            "Create reusable Coulomb or velocity-dependent friction model",
         )
         self._make_action(
             "new_section",
@@ -3679,6 +3718,9 @@ class MainWindow(QMainWindow):
             small=(
                 "catenary_cable",
                 "elastomeric_bearing",
+                "lead_rubber_x",
+                "triple_friction_pendulum",
+                "contact_element",
                 "shell_input",
                 "continuum_quad",
                 "solid_brick",
@@ -6158,6 +6200,27 @@ class MainWindow(QMainWindow):
             item.setIcon(0, studio_icon("nd-material-item"))
             item.setData(0, Qt.UserRole, ("nd_material", tag))
             nd_materials_root.addChild(item)
+
+        friction_models_root = QTreeWidgetItem([
+            f"Friction Models ({len(self.project.friction_models)})"
+        ])
+        friction_models_root.setIcon(0, studio_icon("link"))
+        friction_models_root.setData(
+            0,
+            Qt.UserRole,
+            ("friction_models_root", None),
+        )
+        friction_models_root.setExpanded(True)
+        properties_root.addChild(friction_models_root)
+
+        for tag in sorted(self.project.friction_models):
+            friction = self.project.friction_models[tag]
+            item = QTreeWidgetItem([
+                f"{friction.friction_type} [{tag}]  {friction.name}"
+            ])
+            item.setIcon(0, studio_icon("link"))
+            item.setData(0, Qt.UserRole, ("friction_model", tag))
+            friction_models_root.addChild(item)
 
         sections_root = QTreeWidgetItem([
             f"Sections ({len(self.project.sections)})"
@@ -27451,6 +27514,36 @@ class MainWindow(QMainWindow):
             )
             self.properties_panel.set_properties("Materials", rows)
             return
+        if kind == "friction_models_root":
+            create_action = menu.addAction("New Friction Model...")
+            create_action.triggered.connect(self._create_friction_model)
+            menu.addSeparator()
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "friction_models_root"
+                )
+            )
+            exec_menu()
+            return
+
+        if kind == "friction_model":
+            tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_friction_model_properties(tag)
+            )
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(
+                lambda: self._edit_friction_model(tag)
+            )
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(
+                lambda: self._delete_friction_model(tag)
+            )
+            exec_menu()
+            return
+
         if kind == "nd_materials_root":
             material_types: dict[str, int] = {}
             for material in self.project.nd_materials.values():
@@ -27465,6 +27558,21 @@ class MainWindow(QMainWindow):
                 for name, count in sorted(material_types.items())
             )
             self.properties_panel.set_properties("nD Materials", rows)
+            return
+        if kind == "friction_models_root":
+            types: dict[str, int] = {}
+            for model in self.project.friction_models.values():
+                key = str(model.friction_type)
+                types[key] = types.get(key, 0) + 1
+            rows = [
+                ("Total Friction Models", len(self.project.friction_models)),
+                ("Types", len(types)),
+            ]
+            rows.extend(
+                (f"Type · {name}", count)
+                for name, count in sorted(types.items())
+            )
+            self.properties_panel.set_properties("Friction Models", rows)
             return
         if kind == "sections_root":
             shell_sections = sum(
@@ -30011,6 +30119,12 @@ class MainWindow(QMainWindow):
             create_cable.triggered.connect(self._create_catenary_cable)
             create_bearing = menu.addAction("New Elastomeric Bearing...")
             create_bearing.triggered.connect(self._create_elastomeric_bearing)
+            create_lrb = menu.addAction("New LeadRubberX...")
+            create_lrb.triggered.connect(self._create_lead_rubber_x)
+            create_tfp = menu.addAction("New Triple Friction Pendulum...")
+            create_tfp.triggered.connect(self._create_triple_friction_pendulum)
+            create_contact = menu.addAction("New Contact / Interface...")
+            create_contact.triggered.connect(self._create_contact_element)
             create_shell = menu.addAction("New Shell Element...")
             create_shell.triggered.connect(self._create_shell)
             create_solid = menu.addAction("New 3D Solid Brick...")
@@ -30063,6 +30177,7 @@ class MainWindow(QMainWindow):
                 "LeadRubberX",
                 "TripleFrictionPendulum",
             }
+            is_contact_group = element_type in CONTACT_ELEMENT_TYPES
 
             if is_truss_group:
                 create = menu.addAction("New Truss...")
@@ -30086,10 +30201,17 @@ class MainWindow(QMainWindow):
                 create = menu.addAction("New Elastomeric Bearing...")
                 create.triggered.connect(self._create_elastomeric_bearing)
             elif is_advanced_bearing_group:
-                create = menu.addAction(
-                    "Advanced Bearing Editor — Batch 6 Phase 2"
-                )
-                create.setEnabled(False)
+                if element_type == "LeadRubberX":
+                    create = menu.addAction("New LeadRubberX...")
+                    create.triggered.connect(self._create_lead_rubber_x)
+                else:
+                    create = menu.addAction("New Triple Friction Pendulum...")
+                    create.triggered.connect(
+                        self._create_triple_friction_pendulum
+                    )
+            elif is_contact_group:
+                create = menu.addAction("New Contact / Interface...")
+                create.triggered.connect(self._create_contact_element)
             else:
                 create = menu.addAction("New Frame...")
                 create.triggered.connect(self._create_element)
@@ -30160,6 +30282,28 @@ class MainWindow(QMainWindow):
                             self._edit_special_element(values[0])
                             if len(values) == 1
                             else None
+                        )
+                    )
+                elif is_advanced_bearing_group:
+                    edit_advanced = definition_menu.addAction(
+                        "Edit Isolation Bearing..."
+                    )
+                    edit_advanced.setEnabled(len(tags) == 1)
+                    edit_advanced.triggered.connect(
+                        lambda checked=False, values=tuple(sorted(tags)): (
+                            self._edit_advanced_bearing(values[0])
+                            if len(values) == 1 else None
+                        )
+                    )
+                elif is_contact_group:
+                    edit_contact = definition_menu.addAction(
+                        "Edit Contact / Interface..."
+                    )
+                    edit_contact.setEnabled(len(tags) == 1)
+                    edit_contact.triggered.connect(
+                        lambda checked=False, values=tuple(sorted(tags)): (
+                            self._edit_contact_element(values[0])
+                            if len(values) == 1 else None
                         )
                     )
                 elif is_wall_macro_group:
@@ -30618,6 +30762,8 @@ class MainWindow(QMainWindow):
                     | WALL_MACRO_ELEMENT_TYPES
                     | CABLE_ELEMENT_TYPES
                     | {"elastomericBearingPlasticity"}
+                    | {"LeadRubberX", "TripleFrictionPendulum"}
+                    | CONTACT_ELEMENT_TYPES
                 )
             ):
                 definition_menu = menu.addMenu("Definition")
@@ -30660,6 +30806,26 @@ class MainWindow(QMainWindow):
                     )
                     edit_wall.triggered.connect(
                         lambda: self._edit_wall_macro_element(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in {"LeadRubberX", "TripleFrictionPendulum"}
+                ):
+                    edit_advanced = definition_menu.addAction(
+                        "Edit Isolation Bearing..."
+                    )
+                    edit_advanced.triggered.connect(
+                        lambda: self._edit_advanced_bearing(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in CONTACT_ELEMENT_TYPES
+                ):
+                    edit_contact = definition_menu.addAction(
+                        "Edit Contact / Interface..."
+                    )
+                    edit_contact.triggered.connect(
+                        lambda: self._edit_contact_element(tag)
                     )
                 elif (
                     self.model.elements[tag].element_type
@@ -32961,6 +33127,17 @@ class MainWindow(QMainWindow):
                 )
             ):
                 self._edit_special_element(int(value))
+            elif (
+                element is not None
+                and element.element_type
+                in {"LeadRubberX", "TripleFrictionPendulum"}
+            ):
+                self._edit_advanced_bearing(int(value))
+            elif (
+                element is not None
+                and element.element_type in CONTACT_ELEMENT_TYPES
+            ):
+                self._edit_contact_element(int(value))
             else:
                 self._show_entity_properties("element", int(value))
         elif kind == "nodal_mass":
@@ -32972,6 +33149,8 @@ class MainWindow(QMainWindow):
             self._edit_material(int(value))
         elif kind == "nd_material":
             self._edit_nd_material(int(value))
+        elif kind == "friction_model":
+            self._edit_friction_model(int(value))
         elif kind == "section":
             self._edit_section(int(value))
         elif kind == "transformation":
