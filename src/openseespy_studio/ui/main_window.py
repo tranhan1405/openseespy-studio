@@ -1180,8 +1180,9 @@ class PropertiesPanel(QWidget):
         self.result_shell_location.addItem("Top (+z)", "top")
         self.result_shell_location.addItem("Bottom (-z)", "bottom")
         self.result_shell_location.setToolTip(
-            "For Shell strain components, Top/Bottom derives ε(z)=ε0+zκ "
-            "at z=±h/2 using the assigned Shell section thickness."
+            "For Shell strain components, Top/Bottom follows OpenSees "
+            "plate-fiber kinematics ε(z)=ε0−zκ at z=±h/2 using the "
+            "assigned Shell section thickness."
         )
         self.result_display = QComboBox()
         self.result_display.addItem("Deformed only", "deformed_only")
