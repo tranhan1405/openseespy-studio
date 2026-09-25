@@ -930,6 +930,7 @@ class ResultsPanel(QWidget):
     clear_overlay_requested = Signal()
     member_force_requested = Signal(str, float)
     node_contour_requested = Signal(str, str)
+    shell_displacement_requested = Signal(str, float, str, object)
     hinge_state_requested = Signal()
     element_selected = Signal(int)
     job_selected = Signal(int)
@@ -979,6 +980,7 @@ class ResultsPanel(QWidget):
         self._response2000_source_name = ""
         self._active_solution_kind = ""
         self._active_crack_element_scope: set[int] = set()
+        self._active_shell_element_scope: set[int] = set()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 5, 6, 5)
@@ -1089,6 +1091,7 @@ class ResultsPanel(QWidget):
                         "MemberForce",
                         "ShellForce",
                         "ShellDeformation",
+                        "ShellDisplacement",
                         "ModeShape",
                         "Motion",
                         "ForceDisplacement",
@@ -1162,14 +1165,40 @@ class ResultsPanel(QWidget):
                 self._set_motion_index(self._motion_display_frame_count - 1)
             return
 
+        if kind == "ShellDisplacement":
+            component = str(options.get("component", "|U|"))
+            index = self.shell_disp_component.findText(component)
+            if index >= 0:
+                self.shell_disp_component.setCurrentIndex(index)
+            try:
+                self.shell_disp_scale.setValue(
+                    float(options.get("scale", 10.0))
+                )
+            except (TypeError, ValueError):
+                self.shell_disp_scale.setValue(10.0)
+            display_mode = str(
+                options.get("display_mode", "deformed_only")
+            )
+            index = self.shell_disp_display.findData(display_mode)
+            self.shell_disp_display.setCurrentIndex(
+                index if index >= 0 else 0
+            )
+            self._active_shell_element_scope = {
+                int(tag)
+                for tag in options.get("_element_scope", [])
+            }
+            self.shell_detail_tabs.setCurrentIndex(0)
+            self._select_tab("Shell Results")
+            return
+
         if kind == "ShellForce":
             component = str(options.get("component", "Nxx"))
             tab = (
-                0
+                1
                 if component.startswith("N")
-                else 1
-                if component.startswith("M")
                 else 2
+                if component.startswith("M")
+                else 3
             )
             self.shell_detail_tabs.setCurrentIndex(tab)
             self._select_tab("Shell Results")
@@ -1180,11 +1209,11 @@ class ResultsPanel(QWidget):
         if kind == "ShellDeformation":
             component = str(options.get("component", "Exx"))
             tab = (
-                4
+                5
                 if component in {"Exx", "Eyy", "Gxy"}
-                else 5
-                if component.startswith("K")
                 else 6
+                if component.startswith("K")
+                else 7
             )
             self.shell_detail_tabs.setCurrentIndex(tab)
             self._select_tab("Shell Results")
@@ -2121,6 +2150,66 @@ class ResultsPanel(QWidget):
 
         self.shell_tables: dict[str, QTableWidget] = {}
 
+        displacement_host = QWidget()
+        displacement_layout = QVBoxLayout(displacement_host)
+        displacement_layout.setContentsMargins(5, 5, 5, 5)
+        displacement_layout.setSpacing(6)
+
+        displacement_controls = QHBoxLayout()
+        displacement_controls.addWidget(QLabel("Fringe:"))
+        self.shell_disp_component = QComboBox()
+        self.shell_disp_component.addItems(["|U|", "UX", "UY", "UZ"])
+        self.shell_disp_component.currentTextChanged.connect(
+            self._shell_displacement_controls_changed
+        )
+        displacement_controls.addWidget(self.shell_disp_component)
+
+        displacement_controls.addWidget(QLabel("Shape:"))
+        self.shell_disp_display = QComboBox()
+        self.shell_disp_display.addItem("Deformed", "deformed_only")
+        self.shell_disp_display.addItem(
+            "Undeformed + Deformed",
+            "both",
+        )
+        self.shell_disp_display.addItem("Undeformed", "undeformed_only")
+        self.shell_disp_display.currentIndexChanged.connect(
+            self._shell_displacement_controls_changed
+        )
+        displacement_controls.addWidget(self.shell_disp_display)
+
+        displacement_controls.addWidget(QLabel("Scale:"))
+        self.shell_disp_scale = QDoubleSpinBox()
+        self.shell_disp_scale.setRange(0.0, 1.0e6)
+        self.shell_disp_scale.setDecimals(3)
+        self.shell_disp_scale.setSingleStep(0.5)
+        self.shell_disp_scale.setValue(10.0)
+        self.shell_disp_scale.valueChanged.connect(
+            self._shell_displacement_controls_changed
+        )
+        displacement_controls.addWidget(self.shell_disp_scale)
+
+        show_displacement = QPushButton("Apply Fringe")
+        show_displacement.setToolTip(
+            "Display nodal displacement as a fringe contour on the scoped "
+            "Shell mesh, optionally on the deformed geometry."
+        )
+        show_displacement.clicked.connect(
+            self._display_shell_displacement
+        )
+        displacement_controls.addWidget(show_displacement)
+        displacement_controls.addStretch(1)
+        displacement_layout.addLayout(displacement_controls)
+
+        self.shell_disp_info = QLabel(
+            "LS-PrePost-style nodal displacement fringe restricted to Shell "
+            "elements. |U| uses a magnitude fringe; UX/UY/UZ use signed "
+            "directional contours. The contour is mapped on the Shell surface."
+        )
+        self.shell_disp_info.setWordWrap(True)
+        displacement_layout.addWidget(self.shell_disp_info)
+        displacement_layout.addStretch(1)
+        self.shell_detail_tabs.addTab(displacement_host, "Displacement")
+
         def add_summary_tab(
             title: str,
             components: tuple[str, ...],
@@ -2228,6 +2317,19 @@ class ResultsPanel(QWidget):
 
         self.tabs.addTab(page, "Shell Results")
 
+
+    def _display_shell_displacement(self) -> None:
+        self.shell_displacement_requested.emit(
+            self.shell_disp_component.currentText(),
+            float(self.shell_disp_scale.value()),
+            str(self.shell_disp_display.currentData()),
+            sorted(self._active_shell_element_scope),
+        )
+
+    def _shell_displacement_controls_changed(self, *_args) -> None:
+        if self._active_solution_kind != "ShellDisplacement":
+            return
+        self._display_shell_displacement()
 
     def _build_crack_tab(self) -> None:
         page = QWidget()
