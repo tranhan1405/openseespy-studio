@@ -1566,7 +1566,7 @@ class PropertiesPanel(QWidget):
             ]
         elif kind == "ShellDeformation":
             component_options = [
-                "Exx", "Eyy", "Gxy",
+                "Exx", "Eyy", "Gxy", "E1", "E2",
                 "Kxx", "Kyy", "Kxy",
                 "Gxz", "Gyz",
             ]
