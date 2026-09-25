@@ -733,13 +733,87 @@ def test_rc_wall_final_page_previews_objects_before_accept():
         assert dialog.final_preview.height_value == pytest.approx(2209.8)
         assert dialog.final_preview.thickness_value == pytest.approx(152.4)
         assert "W × H × t" in dialog.preview_geometry_summary.text()
-        assert "Will create" in dialog.preview_object_summary.text()
+        assert "Objects to be created" in dialog.preview_object_summary.text()
         assert "Total elements: 7" in dialog.preview_object_summary.text()
+        assert "Materials & Sections" in dialog.preview_material_summary.text()
+        assert "Steel02 ×3" in dialog.preview_material_summary.text()
+        assert "RCLMS Boundary (2 layers)" in dialog.preview_material_summary.text()
+        assert "Selections & Boundary Conditions" in (
+            dialog.preview_selection_summary.text()
+        )
+        assert "Base · Top · MEFI" in dialog.preview_selection_summary.text()
+        assert "Legend" in dialog.preview_legend.text()
+        assert dialog.final_preview.detailed_annotations
+        assert dialog.final_preview.warning_keys == set()
         assert "Ready to create wall" in dialog.preview_validation_status.text()
         assert (
             dialog.button(QWizard.WizardButton.FinishButton).text()
             == "Create Wall"
         )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_rc_wall_final_preview_marks_boundary_error_and_locks_create():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    dialog = RCWallWizard(project)
+    try:
+        hybrid_index = dialog.reinforcement_mode.findData("hybrid")
+        dialog.reinforcement_mode.setCurrentIndex(hybrid_index)
+        dialog.boundary_bar_count.setValue(5)
+        dialog.boundary_bar_diameter.setValue(16.0)
+        dialog.boundary_cover.setValue(120.0)
+        dialog._update_review()
+        _APP.processEvents()
+
+        assert "boundary" in dialog.final_preview.warning_keys
+        assert "needs attention" in dialog.preview_validation_status.text()
+        assert "Boundary / reinforcement" in (
+            dialog.preview_validation_status.text()
+        )
+        finish = dialog.button(QWizard.WizardButton.FinishButton)
+        assert finish is not None
+        assert not finish.isEnabled()
+
+        dialog.boundary_bar_count.setValue(4)
+        dialog.boundary_cover.setValue(30.0)
+        dialog._update_review()
+        _APP.processEvents()
+
+        assert dialog.final_preview.warning_keys == set()
+        assert finish.isEnabled()
+        assert "Ready to create wall" in dialog.preview_validation_status.text()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
+def test_rc_wall_final_preview_reports_materials_and_hybrid_formulation():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    dialog = RCWallWizard(project)
+    try:
+        hybrid_index = dialog.reinforcement_mode.findData("hybrid")
+        dialog.reinforcement_mode.setCurrentIndex(hybrid_index)
+        dialog._update_review()
+
+        material_text = dialog.preview_material_summary.text()
+        assert "OrthotropicRAConcrete ×2" in material_text
+        assert "SmearedSteelDoubleLayer ×2" in material_text
+        assert "CorotTruss" in material_text
+        assert "Reinforcement" in dialog.preview_selection_summary.text()
     finally:
         dialog.close()
         dialog.deleteLater()
