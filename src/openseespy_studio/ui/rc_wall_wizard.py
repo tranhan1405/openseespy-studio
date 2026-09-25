@@ -2982,7 +2982,7 @@ class RCWallWizard(QWizard):
                     if formulation == "MEFI"
                     else f"Vertical {formulation} elements: {rows}<br>"
                 )
-                f"Macro-fibers: {count} · web fiber width "
+                + f"Macro-fibers: {count} · web fiber width "
                 f"{web_width:g} {self.units.length}<br>"
                 f"Mapping: <code>{mapping}</code><br>"
                 f"Reinforcement: {reinforcement_text}<br>"
