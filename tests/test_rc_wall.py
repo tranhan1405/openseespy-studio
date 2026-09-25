@@ -979,6 +979,9 @@ def test_rc_wall_gui_exposes_reinforcement_tree_and_display_controls():
     viewport_source = inspect.getsource(
         viewport_module.ModelViewport._combined_element_meshes
     )
+    reinforcement_mesh_source = inspect.getsource(
+        viewport_module.ModelViewport._batched_reinforcement_mesh
+    )
     display_source = inspect.getsource(
         viewport_module.ModelViewport._show_display_options_menu
     )
@@ -993,7 +996,7 @@ def test_rc_wall_gui_exposes_reinforcement_tree_and_display_controls():
     assert "Perfect Bond" in group_source
     assert '"reinforcement"' in viewport_source
     assert "_batched_reinforcement_mesh" in viewport_source
-    assert "rc-wall-rebar-web-vertical-" in viewport_source
+    assert "rc-wall-rebar-web-vertical-" in reinforcement_mesh_source
     assert "Discrete reinforcement" in display_source
 
 
