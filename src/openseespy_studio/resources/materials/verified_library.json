@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "policy": {
-    "name": "SARE verified material library",
+    "name": "FEWIZ verified material library",
     "rule": "Official presets require a traceable primary source and exact parameter evidence. Journal references require a DOI.",
     "unverified_values_allowed": false
   },
@@ -16727,6 +16727,334 @@
         "stock_openseespy": false,
         "status": "reference_only",
         "note": "Reference only in SARE: stock OpenSeesPy 3.8.x reports RambergOsgoodSteel as temporarily removed from compiled Tcl/Py builds because of known issues and unreliable results. The published parameters remain available for traceable reference and preview, but this record must not be inserted into an executable model."
+      }
+    },
+    {
+      "id": "opensees-mefi-rwa20-steel-x-steel02",
+      "family": "Reinforcing Steel",
+      "material": "RW-A20-P10-S38 wall reinforcement",
+      "grade": "RW-A20-P10-S38 · Steel X",
+      "standard": "OpenSees MEFI official validation example",
+      "model": "Steel02",
+      "preset_name": "OpenSees MEFI RW-A20 · Steel X",
+      "parameters_si": {
+        "Fy": 469930000,
+        "E0": 200000000000,
+        "b": 0.02,
+        "R0": 20,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0,
+        "a2": 1,
+        "a3": 0,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "RW-A20-P10-S38 reinforced-concrete wall validation model",
+        "Horizontal/X reinforcement used by the MEFI/RCLMS example",
+        "OpenSees Steel02"
+      ],
+      "limitations": [
+        "Specimen-specific validation material set; not a generic reinforcing-steel grade.",
+        "The MEFI example supplies the six required Steel02 inputs; a1/a2/a3/a4 are the documented OpenSees defaults because the example omits optional isotropic-hardening inputs."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Membrane fiber element for reinforced concrete walls – the benefits of macro and micro modeling approaches",
+        "authors": "Carlos N. López; Fabián Rojas; Leonardo M. Massone",
+        "journal": "Engineering Structures",
+        "volume_issue": "254",
+        "article": "113819",
+        "year": 2022,
+        "doi": "10.1016/j.engstruct.2021.113819"
+      },
+      "parameter_evidence": {
+        "type": "official_documentation_example",
+        "title": "MEFI Element — RW-A20-P10-S38 pushover example",
+        "author": "Carlos López Olea / OpenSees",
+        "institution": "OpenSees Documentation",
+        "year": 2024,
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/model/elements/MEFI.html",
+        "location": "RW-A20-P10-S38 pushover example, material-definition block — Steel02 tag 1 (steel X); OpenSees Steel02 documentation for omitted optional defaults",
+        "relationship": "The official MEFI validation example gives Fy=469.93 MPa, E0=200000 MPa, b=0.02, R0=20, cR1=0.925 and cR2=0.15. Optional a1/a2/a3/a4 are omitted by the example and therefore use the official Steel02 defaults 0/1/0/1."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "opensees-mefi-rwa20-steel-y-web-steel02",
+      "family": "Reinforcing Steel",
+      "material": "RW-A20-P10-S38 wall reinforcement",
+      "grade": "RW-A20-P10-S38 · Steel Y web",
+      "standard": "OpenSees MEFI official validation example",
+      "model": "Steel02",
+      "preset_name": "OpenSees MEFI RW-A20 · Steel Y Web",
+      "parameters_si": {
+        "Fy": 409710000,
+        "E0": 200000000000,
+        "b": 0.02,
+        "R0": 20,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0,
+        "a2": 1,
+        "a3": 0,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "RW-A20-P10-S38 reinforced-concrete wall validation model",
+        "Vertical/Y web reinforcement used by the MEFI/RCLMS example",
+        "OpenSees Steel02"
+      ],
+      "limitations": [
+        "Specimen-specific validation material set; not a generic reinforcing-steel grade.",
+        "The MEFI example supplies the six required Steel02 inputs; a1/a2/a3/a4 are the documented OpenSees defaults because the example omits optional isotropic-hardening inputs."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Membrane fiber element for reinforced concrete walls – the benefits of macro and micro modeling approaches",
+        "authors": "Carlos N. López; Fabián Rojas; Leonardo M. Massone",
+        "journal": "Engineering Structures",
+        "volume_issue": "254",
+        "article": "113819",
+        "year": 2022,
+        "doi": "10.1016/j.engstruct.2021.113819"
+      },
+      "parameter_evidence": {
+        "type": "official_documentation_example",
+        "title": "MEFI Element — RW-A20-P10-S38 pushover example",
+        "author": "Carlos López Olea / OpenSees",
+        "institution": "OpenSees Documentation",
+        "year": 2024,
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/model/elements/MEFI.html",
+        "location": "RW-A20-P10-S38 pushover example, material-definition block — Steel02 tag 2 (steel Y web); OpenSees Steel02 documentation for omitted optional defaults",
+        "relationship": "The official MEFI validation example gives Fy=409.71 MPa, E0=200000 MPa, b=0.02, R0=20, cR1=0.925 and cR2=0.15. Optional a1/a2/a3/a4 are omitted by the example and therefore use the official Steel02 defaults 0/1/0/1."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "opensees-mefi-rwa20-steel-y-boundary-steel02",
+      "family": "Reinforcing Steel",
+      "material": "RW-A20-P10-S38 wall reinforcement",
+      "grade": "RW-A20-P10-S38 · Steel Y boundary",
+      "standard": "OpenSees MEFI official validation example",
+      "model": "Steel02",
+      "preset_name": "OpenSees MEFI RW-A20 · Steel Y Boundary",
+      "parameters_si": {
+        "Fy": 429780000,
+        "E0": 200000000000,
+        "b": 0.01,
+        "R0": 20,
+        "cR1": 0.925,
+        "cR2": 0.15,
+        "a1": 0,
+        "a2": 1,
+        "a3": 0,
+        "a4": 1
+      },
+      "verified_parameters": [
+        "Fy",
+        "E0",
+        "b",
+        "R0",
+        "cR1",
+        "cR2",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "applicability": [
+        "RW-A20-P10-S38 reinforced-concrete wall validation model",
+        "Vertical/Y boundary reinforcement used by the MEFI/RCLMS example",
+        "OpenSees Steel02"
+      ],
+      "limitations": [
+        "Specimen-specific validation material set; not a generic reinforcing-steel grade.",
+        "The MEFI example supplies the six required Steel02 inputs; a1/a2/a3/a4 are the documented OpenSees defaults because the example omits optional isotropic-hardening inputs."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Membrane fiber element for reinforced concrete walls – the benefits of macro and micro modeling approaches",
+        "authors": "Carlos N. López; Fabián Rojas; Leonardo M. Massone",
+        "journal": "Engineering Structures",
+        "volume_issue": "254",
+        "article": "113819",
+        "year": 2022,
+        "doi": "10.1016/j.engstruct.2021.113819"
+      },
+      "parameter_evidence": {
+        "type": "official_documentation_example",
+        "title": "MEFI Element — RW-A20-P10-S38 pushover example",
+        "author": "Carlos López Olea / OpenSees",
+        "institution": "OpenSees Documentation",
+        "year": 2024,
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/model/elements/MEFI.html",
+        "location": "RW-A20-P10-S38 pushover example, material-definition block — Steel02 tag 3 (steel Y boundary); OpenSees Steel02 documentation for omitted optional defaults",
+        "relationship": "The official MEFI validation example gives Fy=429.78 MPa, E0=200000 MPa, b=0.01, R0=20, cR1=0.925 and cR2=0.15. Optional a1/a2/a3/a4 are omitted by the example and therefore use the official Steel02 defaults 0/1/0/1."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "opensees-mefi-rwa20-unconfined-concrete02",
+      "family": "Reinforced Concrete",
+      "material": "RW-A20-P10-S38 unconfined concrete",
+      "grade": "RW-A20-P10-S38 · Unconfined",
+      "standard": "OpenSees MEFI official validation example",
+      "model": "Concrete02",
+      "preset_name": "OpenSees MEFI RW-A20 · Unconfined Concrete02",
+      "parameters_si": {
+        "fpc": -47090000,
+        "epsc0": -0.00232,
+        "fpcu": 0,
+        "epsU": -0.037,
+        "lambda": 0.1,
+        "ft": 2130000,
+        "Ets": 1738330000
+      },
+      "verified_parameters": [
+        "fpc",
+        "epsc0",
+        "fpcu",
+        "epsU",
+        "lambda",
+        "ft",
+        "Ets"
+      ],
+      "applicability": [
+        "RW-A20-P10-S38 reinforced-concrete wall validation model",
+        "Unconfined wall concrete used by the MEFI/RCLMS example",
+        "OpenSees Concrete02"
+      ],
+      "limitations": [
+        "Specimen-specific validation material set; not a generic concrete strength class.",
+        "Stress values are converted from the official N-mm-MPa example to Pa for FEWIZ SI storage."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Membrane fiber element for reinforced concrete walls – the benefits of macro and micro modeling approaches",
+        "authors": "Carlos N. López; Fabián Rojas; Leonardo M. Massone",
+        "journal": "Engineering Structures",
+        "volume_issue": "254",
+        "article": "113819",
+        "year": 2022,
+        "doi": "10.1016/j.engstruct.2021.113819"
+      },
+      "parameter_evidence": {
+        "type": "official_documentation_example",
+        "title": "MEFI Element — RW-A20-P10-S38 pushover example",
+        "author": "Carlos López Olea / OpenSees",
+        "institution": "OpenSees Documentation",
+        "year": 2024,
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/model/elements/MEFI.html",
+        "location": "RW-A20-P10-S38 pushover example, material-definition block — Concrete02 tag 4 (unconfined concrete)",
+        "relationship": "The official example directly specifies fpc=-47.09 MPa, epsc0=-0.00232, fpcu=0 MPa, epsU=-0.037, lambda=0.1, ft=2.13 MPa and Ets=1738.33 MPa."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
+      }
+    },
+    {
+      "id": "opensees-mefi-rwa20-confined-concrete02",
+      "family": "Reinforced Concrete",
+      "material": "RW-A20-P10-S38 confined concrete",
+      "grade": "RW-A20-P10-S38 · Confined",
+      "standard": "OpenSees MEFI official validation example",
+      "model": "Concrete02",
+      "preset_name": "OpenSees MEFI RW-A20 · Confined Concrete02",
+      "parameters_si": {
+        "fpc": -53780000,
+        "epsc0": -0.00397,
+        "fpcu": -9420000,
+        "epsU": -0.047,
+        "lambda": 0.1,
+        "ft": 2130000,
+        "Ets": 1827120000
+      },
+      "verified_parameters": [
+        "fpc",
+        "epsc0",
+        "fpcu",
+        "epsU",
+        "lambda",
+        "ft",
+        "Ets"
+      ],
+      "applicability": [
+        "RW-A20-P10-S38 reinforced-concrete wall validation model",
+        "Confined boundary concrete used by the MEFI/RCLMS example",
+        "OpenSees Concrete02"
+      ],
+      "limitations": [
+        "Specimen-specific validation material set; not a generic confined-concrete class.",
+        "Stress values are converted from the official N-mm-MPa example to Pa for FEWIZ SI storage."
+      ],
+      "primary_reference": {
+        "type": "journal",
+        "title": "Membrane fiber element for reinforced concrete walls – the benefits of macro and micro modeling approaches",
+        "authors": "Carlos N. López; Fabián Rojas; Leonardo M. Massone",
+        "journal": "Engineering Structures",
+        "volume_issue": "254",
+        "article": "113819",
+        "year": 2022,
+        "doi": "10.1016/j.engstruct.2021.113819"
+      },
+      "parameter_evidence": {
+        "type": "official_documentation_example",
+        "title": "MEFI Element — RW-A20-P10-S38 pushover example",
+        "author": "Carlos López Olea / OpenSees",
+        "institution": "OpenSees Documentation",
+        "year": 2024,
+        "url": "https://opensees.github.io/OpenSeesDocumentation/user/manual/model/elements/MEFI.html",
+        "location": "RW-A20-P10-S38 pushover example, material-definition block — Concrete02 tag 5 (confined concrete)",
+        "relationship": "The official example directly specifies fpc=-53.78 MPa, epsc0=-0.00397, fpcu=-9.42 MPa, epsU=-0.047, lambda=0.1, ft=2.13 MPa and Ets=1827.12 MPa."
+      },
+      "verification": {
+        "status": "verified",
+        "doi_verified": true,
+        "parameter_location_identified": true,
+        "units_checked": true
       }
     }
   ]
