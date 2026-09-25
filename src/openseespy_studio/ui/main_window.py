@@ -103,7 +103,11 @@ from ..mass_source import apply_mass_source, evaluate_mass_source
 from ..moment_curvature import build_moment_curvature_project
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
 from ..test_column import build_test_column
-from ..rc_wall import build_rc_wall, build_rc_wall_macro_2d
+from ..rc_wall import (
+    build_rc_wall,
+    build_rc_wall_macro_2d,
+    build_rc_wall_macro_3d,
+)
 from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
@@ -5091,8 +5095,14 @@ class MainWindow(QMainWindow):
             if issue.severity == "ERROR"
         }
         try:
-            if str(spec.formulation) == "MEFI":
+            formulation = str(spec.formulation)
+            if formulation == "MEFI":
                 result = build_rc_wall(
+                    self.project,
+                    spec,
+                )
+            elif formulation == "MVLEM_3D":
+                result = build_rc_wall_macro_3d(
                     self.project,
                     spec,
                 )
@@ -5132,10 +5142,9 @@ class MainWindow(QMainWindow):
             # entities are really present in the live Project model.  This
             # turns any silent/partial RC-wall generation into a visible
             # error before the wizard workflow continues.
-            formulation = str(spec.formulation)
             expected_node_count = (
                 2 * (int(spec.vertical_elements) + 1)
-                if formulation == "MEFI"
+                if formulation in {"MEFI", "MVLEM_3D"}
                 else int(spec.vertical_elements) + 1
             )
             expected_element_count = int(spec.vertical_elements)
