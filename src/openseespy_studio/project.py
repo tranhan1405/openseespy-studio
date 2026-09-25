@@ -1577,10 +1577,10 @@ class SectionData:
     fibers: list[FiberData] = field(default_factory=list)
     material_tag: int | None = None
     fiber_components: list[FiberComponentData] = field(default_factory=list)
-    horizontal_fibers: list[FiberData] = field(default_factory=list)
     display_geometry: dict[str, Any] = field(default_factory=dict)
     nd_material_tag: int | None = None
     shell_layers: list[ShellLayerData] = field(default_factory=list)
+    horizontal_fibers: list[FiberData] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Section tag")
@@ -1690,10 +1690,15 @@ class SectionData:
             for fiber in self.horizontal_fibers
         ]
         if self.section_type == "Elastic":
-            for key in ("E", "A", "Iz", "Iy", "G", "J", "Avy", "Avz"):
+            for key in ("E", "A", "Iz", "Avy", "Avz"):
                 if self.parameters[key] <= 0.0:
                     raise ValueError(
                         f"Elastic section parameter {key} must be positive."
+                    )
+            for key in ("Iy", "G", "J"):
+                if self.parameters[key] < 0.0:
+                    raise ValueError(
+                        f"Elastic section parameter {key} cannot be negative."
                     )
         if self.section_type == "FiberInt":
             for key in ("nStrip1", "nStrip2", "nStrip3"):
@@ -8925,6 +8930,32 @@ class ProjectDatabase:
                 )
             if (
                 section is not None
+                and element.element_type == "ElasticTimoshenkoBeam"
+                and section.section_type == "Elastic"
+            ):
+                resolved = section.resolved_elastic_parameters(
+                    self.materials
+                )
+                required = (
+                    ("E", "G", "A", "Iz", "Avy")
+                    if int(self.model.ndm) == 2
+                    else (
+                        "E", "G", "A", "J", "Iy", "Iz", "Avy", "Avz"
+                    )
+                )
+                invalid = [
+                    key
+                    for key in required
+                    if float(resolved.get(key, 0.0)) <= 0.0
+                ]
+                if invalid:
+                    raise ValueError(
+                        f"ElasticTimoshenkoBeam element {element_tag} "
+                        "requires positive Elastic section parameter(s): "
+                        + ", ".join(invalid)
+                    )
+            if (
+                section is not None
                 and element.element_type == "dispBeamColumnInt"
                 and section.section_type != "FiberInt"
             ):
@@ -9970,8 +10001,9 @@ class ProjectDatabase:
             ]
             if incompatible:
                 raise ValueError(
-                    "Section/Fiber recorders require forceBeamColumn, "
-                    "dispBeamColumn, or dispBeamColumnInt element tag(s): "
+                    "Section/Fiber recorders require forceBeamColumn or "
+                    "dispBeamColumn element tag(s), including "
+                    "dispBeamColumnInt: "
                     + ", ".join(map(str, incompatible))
                 )
             too_short = [

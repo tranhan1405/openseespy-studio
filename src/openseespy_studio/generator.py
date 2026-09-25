@@ -5749,6 +5749,25 @@ def to_openseespy(
                 units,
             )
             if e.element_type == "ElasticTimoshenkoBeam":
+                required = (
+                    ("E", "G", "A", "Iz", "Avy")
+                    if int(model.ndm) == 2
+                    else (
+                        "E", "G", "A", "J", "Iy", "Iz", "Avy", "Avz"
+                    )
+                )
+                invalid = [
+                    key for key in required
+                    if float(p.get(key, 0.0)) <= 0.0
+                ]
+                if invalid:
+                    lines.append(
+                        f"# ERROR: ElasticTimoshenkoBeam element {tag} "
+                        "requires positive Elastic section parameter(s): "
+                        + ", ".join(invalid)
+                        + "; element not generated."
+                    )
+                    continue
                 if int(model.ndm) == 2:
                     args = (
                         "ops.element('ElasticTimoshenkoBeam', "
