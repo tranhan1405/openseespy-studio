@@ -1880,6 +1880,28 @@ def tree_selection_drives_fe_navigation(
     )
 
 
+def element_tree_icon_name(element_type: str) -> str:
+    """Return the FEWIZ icon stem for an OpenSees element formulation."""
+    name = str(element_type).lower()
+    if "catenary" in name or "cable" in name:
+        return "link"
+    if "bearing" in name:
+        return "spring"
+    if "truss" in name:
+        return "truss"
+    if "shell" in name:
+        return "shell-element"
+    if "mvlem" in name:
+        return "wall-macro"
+    if "brick" in name:
+        return "solid-brick"
+    if "quad" in name:
+        return "continuum-quad"
+    if any(token in name for token in ("beam", "column")):
+        return "frame"
+    return "element"
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -5669,43 +5691,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{element_type} ({type_counts[element_type]})"
             ])
-            element_type_lower = element_type.lower()
-            element_icon = (
-                "link"
-                if "catenary" in element_type_lower
-                else (
-                    "spring"
-                    if "bearing" in element_type_lower
-                    else (
-                        "truss"
-                        if "truss" in element_type_lower
-                        else (
-                    "shell-element"
-                    if "shell" in element_type_lower
-                    else (
-                        "wall-macro"
-                        if "mvlem" in element_type_lower
-                        else (
-                            "solid-brick"
-                            if "brick" in element_type_lower
-                            else (
-                                "continuum-quad"
-                                if "quad" in element_type_lower
-                                else (
-                                    "frame"
-                                    if any(
-                                        token in element_type_lower
-                                        for token in ("beam", "column")
-                                    )
-                                    else "element"
-                                )
-                            )
-                        )
-                        )
-                        )
-                    )
-                )
-            )
+            element_icon = element_tree_icon_name(element_type)
             item.setIcon(0, studio_icon(element_icon))
             item.setData(
                 0,
@@ -5940,41 +5926,7 @@ class MainWindow(QMainWindow):
         for tag in sorted(self.model.elements):
             element = self.model.elements[tag]
             item = QTreeWidgetItem([f"Element {tag}"])
-            element_type_lower = element.element_type.lower()
-            element_icon = (
-                "link"
-                if "catenary" in element_type_lower
-                else (
-                    "spring"
-                    if "bearing" in element_type_lower
-                    else (
-                        "truss"
-                        if "truss" in element_type_lower
-                        else (
-                    "shell-element"
-                    if "shell" in element_type_lower
-                    else (
-                        "wall-macro"
-                        if "mvlem" in element_type_lower
-                        else (
-                            "solid-brick"
-                            if "brick" in element_type_lower
-                            else (
-                                "continuum-quad"
-                                if "quad" in element_type_lower
-                                else (
-                                    "frame"
-                                    if any(
-                                        token in element_type_lower
-                                        for token in ("beam", "column")
-                                    )
-                                    else "element"
-                                )
-                            )
-                        )
-                    )
-                )
-            )
+            element_icon = element_tree_icon_name(element.element_type)
             item.setIcon(0, studio_icon(element_icon))
             item.setData(0, Qt.UserRole, ("element", tag))
             type_items.get(element.element_type, elements).addChild(item)
