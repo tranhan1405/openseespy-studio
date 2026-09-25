@@ -21,6 +21,7 @@ from .project import (
     AnalysisSettingsData,
     ProjectDatabase,
     SHELL_SECTION_TYPES,
+    MEMBRANE_SECTION_TYPES,
     resolve_transformation_vecxz,
 )
 from .units import UnitSystem
@@ -828,7 +829,9 @@ def _element_geometry_checks(
                             "Assign an existing section.",
                         )
                     )
-                elif section.section_type in SHELL_SECTION_TYPES:
+                elif section.section_type in (
+                    SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES
+                ):
                     issues.append(
                         ValidationIssue(
                             "ERROR",
