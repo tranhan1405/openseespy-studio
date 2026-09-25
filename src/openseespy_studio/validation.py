@@ -793,19 +793,16 @@ def _element_geometry_checks(
             continue
 
         if element.element_type in CABLE_ELEMENT_TYPES:
-            if (
-                int(model.ndm) != 3
-                or int(model.ndf) not in {3, 6}
-            ):
+            if (int(model.ndm), int(model.ndf)) != (3, 3):
                 issues.append(
                     ValidationIssue(
                         "ERROR",
                         "Cable formulation",
-                        f"CatenaryCable element {tag} requires ndm=3 with "
-                        f"ndf=3 or 6; got ndm={model.ndm}, ndf={model.ndf}.",
+                        f"CatenaryCable element {tag} requires ndm=3/ndf=3; "
+                        f"got ndm={model.ndm}, ndf={model.ndf}.",
                         "element",
                         tag,
-                        "Use a 3D model with 3 or 6 DOF per node.",
+                        "Use a 3D model with 3 translational DOF per node.",
                     )
                 )
             continue
