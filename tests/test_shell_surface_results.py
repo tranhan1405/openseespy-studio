@@ -113,6 +113,20 @@ def test_managed_surface_principal_strain_location_round_trips():
     )
 
 
+def test_shell_deformation_rejects_unknown_surface_location():
+    project = _project()
+    result = SolutionResultData(
+        1,
+        1,
+        "Bad location",
+        "ShellDeformation",
+        surface_scope=[1],
+        settings={"component": "E1", "location": "outside"},
+    )
+    with pytest.raises(ValueError, match="location"):
+        project.add_solution_result(result)
+
+
 def test_managed_surface_shell_displacement_round_trips():
     project = _project()
     result = SolutionResultData(
