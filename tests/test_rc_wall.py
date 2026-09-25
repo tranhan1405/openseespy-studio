@@ -704,6 +704,38 @@ def test_rc_wall_wizard_hybrid_mode_roundtrip():
         _APP.processEvents()
 
 
+def test_rc_wall_wizard_pages_are_vertically_scrollable():
+    project = ProjectDatabase()
+    dialog = RCWallWizard(project)
+    try:
+        scrolls = (
+            dialog.geometry_scroll,
+            dialog.concrete_scroll,
+            dialog.reinforcement_scroll,
+            dialog.preview_scroll,
+        )
+        for scroll in scrolls:
+            assert scroll.widgetResizable()
+            assert (
+                scroll.horizontalScrollBarPolicy()
+                == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            assert (
+                scroll.verticalScrollBarPolicy()
+                == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            )
+            assert scroll.widget() is not None
+
+        dialog.reinforcement_scroll.verticalScrollBar().setValue(10)
+        dialog.setCurrentId(2)
+        _APP.processEvents()
+        assert dialog.reinforcement_scroll.verticalScrollBar().value() == 0
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        _APP.processEvents()
+
+
 def test_rc_wall_final_page_previews_objects_before_accept():
     project = ProjectDatabase()
     project.units = {
