@@ -3743,7 +3743,7 @@ def test_frame_wizard_macro_joint_models_build_in_real_opensees(
         assert "ops.element('beamColumnJoint'" in source
     else:
         assert "Krawinkler panel-zone macro" in source
-        assert "'-dir', 3" in source
+        assert "'-dir', 6" in source
 
     target = tmp_path / f"frame-wizard-{joint_model}.py"
     target.write_text(
