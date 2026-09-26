@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
     QWizardPage,
 )
 
+from ..frame_setup import prepare_frame_grid
 from ..generator import (
     FrameGridSpec,
     frame_brace_element_count,
@@ -4359,11 +4361,28 @@ class FrameWizard(QWizard):
         loading_layout.addWidget(self.review_loading)
         layout.addWidget(loading_group)
 
+        self.review_build = QLabel()
+        self.review_build.setWordWrap(True)
+        build_group = QGroupBox("Generation dry-run")
+        build_layout = QVBoxLayout(build_group)
+        build_layout.addWidget(self.review_build)
+        layout.addWidget(build_group)
+
         self.review_impact = QLabel()
         self.review_impact.setWordWrap(True)
         self.review_impact.setObjectName("frame-wizard-review-impact")
         self.review_impact.setStyleSheet("padding:8px;")
         layout.addWidget(self.review_impact)
+
+        self.review_replace_ack = QCheckBox(
+            "I understand that Generate Model will replace the current FE "
+            "domain and model-linked objects."
+        )
+        self.review_replace_ack.setObjectName(
+            "frame-wizard-review-replace-ack"
+        )
+        self.review_replace_ack.toggled.connect(self._update_review_page)
+        layout.addWidget(self.review_replace_ack)
 
         self.review_validation_status = QLabel()
         self.review_validation_status.setWordWrap(True)
@@ -4383,7 +4402,11 @@ class FrameWizard(QWizard):
         if int(page_id) == int(self.review_page_id):
             self._update_review_page()
 
-    def _review_validation_errors(self) -> list[str]:
+    def _review_validation_errors(
+        self,
+        *,
+        include_replacement_ack: bool = True,
+    ) -> list[str]:
         errors: list[str] = []
         checks = (
             self._member_validation_error,
@@ -4405,7 +4428,49 @@ class FrameWizard(QWizard):
                 error = str(exc).strip()
             if error and error not in errors:
                 errors.append(error)
+
+        if include_replacement_ack:
+            replacing = bool(
+                self.project.model.nodes or self.project.model.elements
+            )
+            if (
+                replacing
+                and hasattr(self, "review_replace_ack")
+                and not self.review_replace_ack.isChecked()
+            ):
+                errors.append(
+                    "Confirm replacement of the current FE domain before "
+                    "generating the model."
+                )
         return errors
+
+    def _review_dry_run(
+        self,
+        spec: FrameGridSpec,
+    ) -> tuple[dict[str, int | float], int]:
+        preview_project = ProjectDatabase.from_dict(
+            self.project.to_dict()
+        )
+        preview_spec = replace(spec)
+        created_transformations = prepare_frame_grid(
+            preview_project,
+            preview_spec,
+        )
+        result = generate_frame_project(
+            preview_project,
+            preview_spec,
+        )
+        result = dict(result)
+        result["final_nodes"] = len(preview_project.model.nodes)
+        result["final_elements"] = len(preview_project.model.elements)
+        result["final_constraints"] = len(preview_project.constraints)
+        result["final_connections"] = len(preview_project.connections)
+        result["final_load_patterns"] = len(preview_project.load_patterns)
+        result["final_element_loads"] = len(preview_project.element_loads)
+        result["final_mass_sources"] = len(preview_project.mass_sources)
+        result["final_analyses"] = len(preview_project.analyses)
+        result["final_results"] = len(preview_project.solution_results)
+        return result, len(created_transformations)
 
     def _update_review_page(self, *_args) -> None:
         if not hasattr(self, "review_geometry"):
@@ -4525,13 +4590,16 @@ class FrameWizard(QWizard):
 
         existing_nodes = len(self.project.model.nodes)
         existing_elements = len(self.project.model.elements)
-        if existing_nodes or existing_elements:
+        replacing = bool(existing_nodes or existing_elements)
+        self.review_replace_ack.setVisible(replacing)
+        if replacing:
             self.review_impact.setText(
                 "<b>Replacement mode</b><br>"
                 f"The current FE domain contains {existing_nodes} node(s) and "
                 f"{existing_elements} element(s). Generate Model will replace "
-                "model-linked FE objects. Material and section libraries are "
-                "preserved."
+                "Sketch/Geometry-linked FE nodes/elements, loads, constraints, "
+                "connections, recorders, analyses and result requests. "
+                "Material, nDMaterial and section libraries are preserved."
             )
         else:
             self.review_impact.setText(
@@ -4539,6 +4607,49 @@ class FrameWizard(QWizard):
                 "The active FE domain is empty. Generate Model will create "
                 "this frame as the new FE model."
             )
+
+        definition_errors = self._review_validation_errors(
+            include_replacement_ack=False
+        )
+        if definition_errors:
+            self.review_build.setText(
+                "<b>Dry-run unavailable</b><br>"
+                "Resolve the model-definition issues below before FEWIZ can "
+                "simulate the final generation result."
+            )
+        else:
+            try:
+                dry_run, transformation_count = self._review_dry_run(spec)
+                build_bits = [
+                    f"{int(dry_run.get('final_nodes', 0))} node(s)",
+                    f"{int(dry_run.get('final_elements', 0))} FE element(s)",
+                    f"{int(dry_run.get('final_connections', 0))} connection(s)",
+                    f"{int(dry_run.get('final_constraints', 0))} constraint(s)",
+                ]
+                second_bits = [
+                    f"{int(dry_run.get('final_load_patterns', 0))} load pattern(s)",
+                    f"{int(dry_run.get('final_element_loads', 0))} element load(s)",
+                    f"{int(dry_run.get('final_mass_sources', 0))} mass source(s)",
+                    f"{int(dry_run.get('final_analyses', 0))} analysis object(s)",
+                    f"{int(dry_run.get('final_results', 0))} result request(s)",
+                ]
+                self.review_build.setText(
+                    "<b>Dry-run passed</b><br>"
+                    + " · ".join(build_bits)
+                    + "<br>"
+                    + " · ".join(second_bits)
+                    + (
+                        f"<br>{transformation_count} geometric "
+                        "transformation(s) will be auto-created."
+                        if transformation_count
+                        else "<br>No new geometric transformations are needed."
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                definition_errors.append(str(exc))
+                self.review_build.setText(
+                    "<b>Dry-run failed</b><br>" + str(exc)
+                )
 
         errors = self._review_validation_errors()
         finish = self.button(QWizard.FinishButton)
