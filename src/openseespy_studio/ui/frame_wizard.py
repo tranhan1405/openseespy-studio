@@ -30,6 +30,8 @@ from ..generator import (
     frame_diaphragm_levels,
     frame_floor_levels,
     frame_foundation_count,
+    frame_foundation_profile_assignments,
+    frame_foundation_profiles,
     frame_grid_coordinates,
     frame_slab_count,
     frame_joint_connection_count,
@@ -1952,8 +1954,8 @@ class FrameWizard(QWizard):
         page = QWizardPage()
         page.setTitle("Foundation & Base Springs")
         page.setSubTitle(
-            "Keep direct fixed/pinned supports or connect every column base "
-            "to a coincident fixed ground node through zeroLength springs."
+            "Use direct support, one uniform spring profile, or assign "
+            "equivalent footing / pile-group / soil spring profiles per base."
         )
 
         scroll = QScrollArea()
@@ -1970,17 +1972,25 @@ class FrameWizard(QWizard):
             "Direct",
         )
         self.foundation_mode.addItem(
-            "Elastic foundation springs · zeroLength to fixed ground",
+            "Equivalent foundation springs · zeroLength to fixed ground",
             "Springs",
+        )
+        self.foundation_assignment_mode = QComboBox()
+        self.foundation_assignment_mode.addItem(
+            "Uniform · Profile A at every base",
+            "Uniform",
+        )
+        self.foundation_assignment_mode.addItem(
+            "Per-base · assign A / B / C by column base",
+            "PerBase",
         )
 
         mode_group = QGroupBox("Foundation model")
         mode_form = QFormLayout(mode_group)
         mode_form.addRow("Base model:", self.foundation_mode)
+        mode_form.addRow("Assignment:", self.foundation_assignment_mode)
         layout.addWidget(mode_group)
 
-        spring_group = QGroupBox("Spring materials by global DOF")
-        spring_form = QFormLayout(spring_group)
         self.foundation_dof_labels = (
             "UX · global X translation",
             "UY · global Y translation",
@@ -1989,31 +1999,72 @@ class FrameWizard(QWizard):
             "RY · rotation about global Y",
             "RZ · rotation about global Z",
         )
-        self.foundation_materials: list[QComboBox] = []
-        for label in self.foundation_dof_labels:
-            combo = QComboBox()
-            self.foundation_materials.append(combo)
-            spring_form.addRow(label + ":", combo)
-
-        spring_hint = QLabel(
-            "Choose a uniaxial material to make that DOF flexible/nonlinear. "
-            "“Rigid transfer” means the structural base DOF is tied to the "
-            "fixed ground node with equalDOF. In the standard planar frame "
-            "only UX, UZ and RY are active; UY, RX and RZ remain restrained "
-            "out of plane."
+        self.foundation_profile_names = (
+            "A · Isolated footing equivalent",
+            "B · Pile-group equivalent",
+            "C · Custom soil spring group",
         )
-        spring_hint.setWordWrap(True)
-        spring_form.addRow(spring_hint)
+        self.foundation_profile_materials: list[list[QComboBox]] = []
+        self.foundation_profile_tabs = QTabWidget()
+        for profile_name in self.foundation_profile_names:
+            tab = QWidget()
+            form = QFormLayout(tab)
+            materials: list[QComboBox] = []
+            for label in self.foundation_dof_labels:
+                combo = QComboBox()
+                materials.append(combo)
+                form.addRow(label + ":", combo)
+            hint = QLabel(
+                "Positive uniaxial material = flexible/nonlinear spring DOF. "
+                "Rigid transfer = equalDOF to the coincident fixed ground "
+                "node. The profile name describes the equivalent macro-model; "
+                "the actual response comes from the selected project materials."
+            )
+            hint.setWordWrap(True)
+            form.addRow(hint)
+            self.foundation_profile_materials.append(materials)
+            self.foundation_profile_tabs.addTab(tab, profile_name)
+
+        # Backward-compatible alias used by the first Foundation stage/tests.
+        self.foundation_materials = self.foundation_profile_materials[0]
+
+        spring_group = QGroupBox("Equivalent spring profiles")
+        spring_layout = QVBoxLayout(spring_group)
+        spring_layout.addWidget(self.foundation_profile_tabs)
         layout.addWidget(spring_group)
         self.foundation_spring_group = spring_group
 
+        self.foundation_base_table = QTableWidget(0, 4)
+        self.foundation_base_table.setHorizontalHeaderLabels(
+            ["Base", "Grid", "Coordinates", "Profile"]
+        )
+        self.foundation_base_table.horizontalHeader().setStretchLastSection(True)
+        self.foundation_base_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.foundation_base_table.setSelectionMode(
+            QAbstractItemView.NoSelection
+        )
+        self.foundation_base_table.setMinimumHeight(180)
+        self.foundation_base_table.setMaximumHeight(300)
+        assignment_group = QGroupBox("Per-base profile assignment")
+        assignment_layout = QVBoxLayout(assignment_group)
+        assignment_layout.addWidget(self.foundation_base_table)
+        assignment_hint = QLabel(
+            "Rows are ordered X-fast, then Y. Profile A/B/C may therefore be "
+            "used for edge/interior footings, pile-supported columns, or local "
+            "soil zones without duplicating the frame geometry."
+        )
+        assignment_hint.setWordWrap(True)
+        assignment_layout.addWidget(assignment_hint)
+        layout.addWidget(assignment_group)
+        self.foundation_assignment_group = assignment_group
+
         note = QLabel(
-            "This first Foundation stage applies the same spring law to every "
-            "column base. FEWIZ creates one coincident fixed ground node per "
-            "base and one zeroLength connection. Native 2D macro-joint frames "
-            "retain direct fixed/pinned support in this stage. Individual "
-            "footings, pile/soil groups and per-column assignments are reserved "
-            "for the next Foundation stage."
+            "These are equivalent foundation macro-springs, not explicit "
+            "footing solids or pile beam elements. FEWIZ creates one fixed "
+            "ground node and one zeroLength connection per column base. "
+            "Native 2D macro-joint frames retain direct fixed/pinned support."
         )
         note.setWordWrap(True)
         note.setStyleSheet("padding:8px;")
@@ -2039,15 +2090,22 @@ class FrameWizard(QWizard):
         self.foundation_page_id = self.addPage(page)
 
         self._populate_foundation_materials()
+        self._refresh_foundation_base_table()
+
         self.foundation_mode.currentIndexChanged.connect(
             self._foundation_control_changed
         )
-        for combo in self.foundation_materials:
-            combo.currentIndexChanged.connect(
-                self._foundation_control_changed
-            )
-        self.dimension.currentIndexChanged.connect(
+        self.foundation_assignment_mode.currentIndexChanged.connect(
             self._foundation_control_changed
+        )
+        for materials in self.foundation_profile_materials:
+            for combo in materials:
+                combo.currentIndexChanged.connect(
+                    self._foundation_control_changed
+                )
+
+        self.dimension.currentIndexChanged.connect(
+            self._foundation_geometry_changed
         )
         self.joint_model.currentIndexChanged.connect(
             self._foundation_control_changed
@@ -2055,23 +2113,42 @@ class FrameWizard(QWizard):
         self.create_columns.toggled.connect(
             self._foundation_control_changed
         )
+        for spin in (self.x_bays, self.y_bays):
+            spin.valueChanged.connect(self._foundation_geometry_changed)
+        for spin in (
+            self.x_spacing,
+            self.y_spacing,
+            self.origin_x,
+            self.origin_y,
+        ):
+            spin.valueChanged.connect(self._foundation_geometry_changed)
+        self.spacing_mode.currentIndexChanged.connect(
+            self._foundation_geometry_changed
+        )
+        self.x_spacing_editor.connect_value_changed(
+            self._foundation_geometry_changed
+        )
+        self.y_spacing_editor.connect_value_changed(
+            self._foundation_geometry_changed
+        )
 
     def _populate_foundation_materials(self) -> None:
-        for combo in self.foundation_materials:
-            previous = combo.currentData()
-            combo.blockSignals(True)
-            combo.clear()
-            combo.addItem("Rigid transfer · no spring", 0)
-            for tag, material in sorted(self.project.materials.items()):
-                combo.addItem(
-                    f"{tag} · {material.name} [{material.material_type}]",
-                    int(tag),
-                )
-            if previous is not None:
-                index = combo.findData(previous)
-                if index >= 0:
-                    combo.setCurrentIndex(index)
-            combo.blockSignals(False)
+        for materials in self.foundation_profile_materials:
+            for combo in materials:
+                previous = combo.currentData()
+                combo.blockSignals(True)
+                combo.clear()
+                combo.addItem("Rigid transfer · no spring", 0)
+                for tag, material in sorted(self.project.materials.items()):
+                    combo.addItem(
+                        f"{tag} · {material.name} [{material.material_type}]",
+                        int(tag),
+                    )
+                if previous is not None:
+                    index = combo.findData(previous)
+                    if index >= 0:
+                        combo.setCurrentIndex(index)
+                combo.blockSignals(False)
 
     def _foundation_active_dofs(self) -> tuple[int, ...]:
         return (
@@ -2079,6 +2156,103 @@ class FrameWizard(QWizard):
             if self.dimension.currentData() == "2D"
             else (1, 2, 3, 4, 5, 6)
         )
+
+    def _foundation_profile_tags(self) -> tuple[tuple[int, ...], ...]:
+        if not hasattr(self, "foundation_profile_materials"):
+            return ()
+        return tuple(
+            tuple(int(combo.currentData() or 0) for combo in materials)
+            for materials in self.foundation_profile_materials
+        )
+
+    def _foundation_base_profile_indices(self) -> tuple[int, ...]:
+        if not hasattr(self, "foundation_base_table"):
+            return ()
+        values: list[int] = []
+        for row in range(self.foundation_base_table.rowCount()):
+            combo = self.foundation_base_table.cellWidget(row, 3)
+            if isinstance(combo, QComboBox):
+                values.append(int(combo.currentData() or 0))
+        return tuple(values)
+
+    def _foundation_geometry_changed(self, *_args) -> None:
+        self._refresh_foundation_base_table()
+        self._foundation_control_changed()
+
+    def _refresh_foundation_base_table(self, *_args) -> None:
+        if not hasattr(self, "foundation_base_table"):
+            return
+
+        old_assignments = self._foundation_base_profile_indices()
+        dimension = str(self.dimension.currentData() or "2D")
+        try:
+            spec = self.spec()
+            x_coordinates, y_coordinates, _ = frame_grid_coordinates(spec)
+        except (TypeError, ValueError):
+            x_coordinates = [
+                float(self.origin_x.value())
+                + index * float(self.x_spacing.value())
+                for index in range(int(self.x_bays.value()) + 1)
+            ]
+            y_coordinates = (
+                [0.0]
+                if dimension == "2D"
+                else [
+                    float(self.origin_y.value())
+                    + index * float(self.y_spacing.value())
+                    for index in range(int(self.y_bays.value()) + 1)
+                ]
+            )
+
+        rows: list[tuple[str, str, str]] = []
+        if dimension == "2D":
+            for i, x in enumerate(x_coordinates):
+                rows.append(
+                    (
+                        f"B{i + 1}",
+                        f"X{i + 1}",
+                        f"({x:g}, 0)",
+                    )
+                )
+        else:
+            number = 1
+            for j, y in enumerate(y_coordinates):
+                for i, x in enumerate(x_coordinates):
+                    rows.append(
+                        (
+                            f"B{number}",
+                            f"X{i + 1} / Y{j + 1}",
+                            f"({x:g}, {y:g})",
+                        )
+                    )
+                    number += 1
+
+        table = self.foundation_base_table
+        table.setRowCount(len(rows))
+        for row, (base_name, grid_name, coordinate_text) in enumerate(rows):
+            for column, text_value in enumerate(
+                (base_name, grid_name, coordinate_text)
+            ):
+                item = QTableWidgetItem(text_value)
+                item.setFlags(Qt.ItemIsEnabled)
+                table.setItem(row, column, item)
+
+            combo = QComboBox()
+            for index, profile_name in enumerate(self.foundation_profile_names):
+                combo.addItem(profile_name, index)
+            previous = (
+                old_assignments[row]
+                if row < len(old_assignments)
+                else 0
+            )
+            profile_index = combo.findData(previous)
+            combo.setCurrentIndex(profile_index if profile_index >= 0 else 0)
+            combo.currentIndexChanged.connect(
+                self._foundation_control_changed
+            )
+            table.setCellWidget(row, 3, combo)
+
+        self._sync_foundation_controls()
 
     def _foundation_control_changed(self, *_args) -> None:
         self._sync_foundation_controls()
@@ -2089,13 +2263,28 @@ class FrameWizard(QWizard):
         if not hasattr(self, "foundation_mode"):
             return
         spring_mode = self.foundation_mode.currentData() == "Springs"
+        per_base = (
+            self.foundation_assignment_mode.currentData() == "PerBase"
+        )
         active_dofs = set(self._foundation_active_dofs())
-        self.foundation_spring_group.setEnabled(spring_mode)
-        for dof, combo in enumerate(self.foundation_materials, start=1):
-            combo.setEnabled(spring_mode and dof in active_dofs)
 
-        # The direct restraint selector is irrelevant once the support is
-        # replaced by ground-node springs.
+        self.foundation_spring_group.setEnabled(spring_mode)
+        self.foundation_assignment_mode.setEnabled(spring_mode)
+        self.foundation_assignment_group.setEnabled(spring_mode and per_base)
+        for tab_index, materials in enumerate(
+            self.foundation_profile_materials
+        ):
+            self.foundation_profile_tabs.setTabEnabled(
+                tab_index,
+                spring_mode and (tab_index == 0 or per_base),
+            )
+            for dof, combo in enumerate(materials, start=1):
+                combo.setEnabled(
+                    spring_mode
+                    and (tab_index == 0 or per_base)
+                    and dof in active_dofs
+                )
+
         if spring_mode:
             self.base_support.setEnabled(False)
         else:
@@ -2104,14 +2293,13 @@ class FrameWizard(QWizard):
             )
 
     def _foundation_material_tags(self) -> tuple[int, ...]:
-        return tuple(
-            int(combo.currentData() or 0)
-            for combo in self.foundation_materials
-        )
+        profiles = self._foundation_profile_tags()
+        return profiles[0] if profiles else (0, 0, 0, 0, 0, 0)
 
     def _foundation_validation_error(self) -> str:
         try:
-            validate_frame_grid_spec(self.spec())
+            spec = self.spec()
+            validate_frame_grid_spec(spec)
         except (TypeError, ValueError) as exc:
             return str(exc)
 
@@ -2119,13 +2307,21 @@ class FrameWizard(QWizard):
             return ""
 
         active = set(self._foundation_active_dofs())
+        profiles = frame_foundation_profiles(spec)
+        assignments = frame_foundation_profile_assignments(spec)
+        used_profiles = sorted(set(assignments))
         missing = sorted({
-            tag
+            int(tag)
+            for profile_index in used_profiles
             for dof, tag in enumerate(
-                self._foundation_material_tags(),
+                profiles[profile_index],
                 start=1,
             )
-            if dof in active and tag > 0 and tag not in self.project.materials
+            if (
+                dof in active
+                and int(tag) > 0
+                and int(tag) not in self.project.materials
+            )
         })
         if missing:
             return (
@@ -2150,22 +2346,38 @@ class FrameWizard(QWizard):
         if spec.foundation_mode == "Springs":
             active = self._foundation_active_dofs()
             names = ("UX", "UY", "UZ", "RX", "RY", "RZ")
-            flexible = [
-                names[dof - 1]
-                for dof in active
-                if int(spec.foundation_material_tags[dof - 1]) > 0
-            ]
-            rigid = [
-                names[dof - 1]
-                for dof in active
-                if int(spec.foundation_material_tags[dof - 1]) == 0
-            ]
+            profiles = frame_foundation_profiles(spec)
+            assignments = frame_foundation_profile_assignments(spec)
+            usage = {
+                index: assignments.count(index)
+                for index in sorted(set(assignments))
+            }
+            rows: list[str] = []
+            for profile_index, base_count in usage.items():
+                profile = profiles[profile_index]
+                flexible = [
+                    names[dof - 1]
+                    for dof in active
+                    if int(profile[dof - 1]) > 0
+                ]
+                rigid = [
+                    names[dof - 1]
+                    for dof in active
+                    if int(profile[dof - 1]) == 0
+                ]
+                label = chr(ord("A") + profile_index)
+                rows.append(
+                    f"Profile {label}: {base_count} base(s) · spring "
+                    f"{', '.join(flexible) or 'none'} · rigid "
+                    f"{', '.join(rigid) or 'none'}"
+                )
+
             self.foundation_summary.setText(
                 "<b>Foundation spring summary</b><br>"
                 f"Column bases: {count} · zeroLength connections: {count} · "
                 f"fixed ground nodes: {count}<br>"
-                f"Spring DOFs: {', '.join(flexible) or 'none'}<br>"
-                f"Rigid-transfer DOFs: {', '.join(rigid) or 'none'}"
+                f"Assignment: {spec.foundation_assignment_mode}<br>"
+                + "<br>".join(rows)
             )
         else:
             support = (
@@ -2193,8 +2405,8 @@ class FrameWizard(QWizard):
         else:
             self.foundation_validation_status.setText(
                 "<b>Foundation definition ready</b><br>"
-                "Base support topology and assigned uniaxial spring materials "
-                "are consistent with the frame definition."
+                "Equivalent foundation profiles, per-base assignments and "
+                "uniaxial spring materials are consistent with the frame."
             )
             if (
                 finish is not None
@@ -2885,6 +3097,24 @@ class FrameWizard(QWizard):
                 if hasattr(self, "foundation_materials")
                 else (0, 0, 0, 0, 0, 0)
             ),
+            foundation_assignment_mode=(
+                str(
+                    self.foundation_assignment_mode.currentData()
+                    or "Uniform"
+                )
+                if hasattr(self, "foundation_assignment_mode")
+                else "Uniform"
+            ),
+            foundation_profile_material_tags=(
+                self._foundation_profile_tags()
+                if hasattr(self, "foundation_profile_materials")
+                else ()
+            ),
+            foundation_base_profile_indices=(
+                self._foundation_base_profile_indices()
+                if hasattr(self, "foundation_base_table")
+                else ()
+            ),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
                 self.base_support.currentData() or "Fixed"
@@ -3068,5 +3298,6 @@ class FrameWizard(QWizard):
             self._update_diaphragm_summary()
         elif page_id == self.foundation_page_id:
             self._populate_foundation_materials()
+            self._refresh_foundation_base_table()
             self._sync_foundation_controls()
             self._update_foundation_summary()
