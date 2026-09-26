@@ -5677,6 +5677,14 @@ class MainWindow(QMainWindow):
                 f" · {diaphragm_count} rigid floor diaphragm(s)"
             )
 
+        slab_floors = int(joint_result.get("slab_floors", 0))
+        slab_elements = int(joint_result.get("slab_elements", 0))
+        if slab_floors:
+            message += (
+                f" · {slab_floors} shell slab floor(s)"
+                f" / {slab_elements} shell element(s)"
+            )
+
         self._refresh_all(message)
         self.frame_grid_panel.set_assignment_tags(
             column_section_tag=spec.column_section_tag,
