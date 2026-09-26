@@ -13,6 +13,11 @@ from PySide6.QtWidgets import QApplication, QComboBox
 from openseespy_studio.frame_setup import prepare_frame_grid
 from openseespy_studio.generator import (
     FrameGridSpec,
+    frame_brace_element_count,
+    frame_brace_panel_count,
+    frame_brace_storeys,
+    frame_brace_x_bays,
+    frame_brace_y_grid_lines,
     frame_diaphragm_count,
     frame_diaphragm_levels,
     frame_floor_levels,
@@ -333,6 +338,7 @@ def test_frame_wizard_member_page_filters_sections_by_formulation():
             wizard.joints_page_id,
             wizard.floors_page_id,
             wizard.foundation_page_id,
+            wizard.bracing_page_id,
         ]
         assert wizard.column_section.findData(1) >= 0
         assert wizard.column_section.findData(2) < 0
@@ -2082,3 +2088,289 @@ def test_frame_foundation_profile_tabs_have_equivalent_preset_names():
         wizard.close()
         wizard.deleteLater()
         _APP.processEvents()
+
+
+def _brace_project() -> ProjectDatabase:
+    project = _member_project()
+    project.add_material(
+        MaterialData(
+            tag=81,
+            name="Brace elastic",
+            material_type="Elastic",
+            parameters={"E": 2.0e11},
+            source={
+                "response_quantity": "stress_strain",
+                "parameter_dimensions": {"E": "stress"},
+            },
+        )
+    )
+    return project
+
+
+def test_frame_wizard_bracing_page_maps_scope_and_element_settings():
+    wizard = FrameWizard(_brace_project())
+    try:
+        assert wizard.brace_mode.currentData() == "None"
+        wizard.brace_mode.setCurrentIndex(
+            wizard.brace_mode.findData("Truss")
+        )
+        wizard.brace_material.setCurrentIndex(
+            wizard.brace_material.findData(81)
+        )
+        wizard.brace_pattern.setCurrentIndex(
+            wizard.brace_pattern.findData("X")
+        )
+        wizard.brace_element_type.setCurrentIndex(
+            wizard.brace_element_type.findData("corotTruss")
+        )
+        wizard.brace_area.setValue(0.012)
+        wizard.brace_mass_per_length.setValue(2.5)
+        wizard.brace_do_rayleigh.setChecked(True)
+
+        # Default tables select every X bay/storey. Keep only X2 / S2.
+        for row in range(wizard.brace_x_table.rowCount()):
+            wizard.brace_x_table.item(row, 1).setCheckState(
+                Qt.Checked if row == 1 else Qt.Unchecked
+            )
+        for row in range(wizard.brace_storey_table.rowCount()):
+            wizard.brace_storey_table.item(row, 1).setCheckState(
+                Qt.Checked if row == 1 else Qt.Unchecked
+            )
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.brace_mode == "Truss"
+        assert spec.brace_pattern == "X"
+        assert spec.brace_element_type == "corotTruss"
+        assert spec.brace_material_tag == 81
+        assert spec.brace_area == pytest.approx(0.012)
+        assert spec.brace_mass_per_length == pytest.approx(2.5)
+        assert spec.brace_do_rayleigh
+        assert spec.brace_x_bays == (1,)
+        assert spec.brace_storeys == (2,)
+        assert frame_brace_panel_count(spec) == 1
+        assert frame_brace_element_count(spec) == 2
+        assert "panels: 1" in wizard.brace_summary.text()
+        assert "brace elements: 2" in wizard.brace_summary.text()
+        assert wizard.bracing_scroll.widgetResizable()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_brace_scope_helpers_repeat_across_exterior_3d_planes():
+    spec = FrameGridSpec(
+        nx=3,
+        ny=2,
+        nz=3,
+        planar_2d=False,
+        brace_mode="Truss",
+        brace_material_tag=81,
+        brace_x_bays=(0, 2),
+        brace_storeys=(1, 3),
+        brace_y_plane_scope="Exterior",
+    )
+    assert frame_brace_x_bays(spec) == (0, 2)
+    assert frame_brace_storeys(spec) == (1, 3)
+    assert frame_brace_y_grid_lines(spec) == (0, 2)
+    assert frame_brace_panel_count(spec) == 8
+    assert frame_brace_element_count(spec) == 16
+
+
+def test_generate_frame_x_bracing_connects_existing_grid_nodes():
+    project = _brace_project()
+    spec = FrameGridSpec(
+        nx=2,
+        ny=1,
+        nz=2,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        brace_mode="Truss",
+        brace_pattern="X",
+        brace_element_type="truss",
+        brace_material_tag=81,
+        brace_area=0.01,
+        brace_x_bays=(0,),
+        brace_storeys=(1,),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["brace_panels"] == 1
+    assert result["brace_elements"] == 2
+    assert result["brace_midpoint_nodes"] == 0
+    assert result["brace_member_splits"] == 0
+
+    braces = [
+        element
+        for element in project.model.elements.values()
+        if element.group.startswith("brace-x:")
+    ]
+    assert len(braces) == 2
+    assert all(element.element_type == "truss" for element in braces)
+    assert all(element.truss_material_tag == 81 for element in braces)
+    assert all(element.truss_area == pytest.approx(0.01) for element in braces)
+
+
+def test_generate_frame_upper_chevron_splits_beam_conformingly():
+    project = _brace_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=6.0,
+        dz=4.0,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        brace_mode="Truss",
+        brace_pattern="VUpper",
+        brace_material_tag=81,
+        brace_area=0.01,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["brace_panels"] == 1
+    assert result["brace_elements"] == 2
+    assert result["brace_midpoint_nodes"] == 1
+    assert result["brace_member_splits"] == 1
+
+    midpoint = [
+        (tag, node)
+        for tag, node in project.model.nodes.items()
+        if node.xyz == pytest.approx((3.0, 0.0, 4.0))
+    ]
+    assert len(midpoint) == 1
+    midpoint_tag = midpoint[0][0]
+
+    beam_segments = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "beam-2d"
+    ]
+    assert len(beam_segments) == 2
+    assert sum(midpoint_tag in element.node_tags() for element in beam_segments) == 2
+
+    braces = [
+        element
+        for element in project.model.elements.values()
+        if element.group.startswith("brace-x:")
+    ]
+    assert len(braces) == 2
+    assert all(midpoint_tag in element.node_tags() for element in braces)
+
+
+def test_generate_frame_k_bracing_splits_left_column_conformingly():
+    project = _brace_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=6.0,
+        dz=4.0,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        brace_mode="Truss",
+        brace_pattern="KLeft",
+        brace_material_tag=81,
+        brace_area=0.01,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["brace_elements"] == 2
+    assert result["brace_midpoint_nodes"] == 1
+    assert result["brace_member_splits"] == 1
+
+    midpoint_tags = [
+        tag
+        for tag, node in project.model.nodes.items()
+        if node.xyz == pytest.approx((0.0, 0.0, 2.0))
+    ]
+    assert len(midpoint_tags) == 1
+    midpoint_tag = midpoint_tags[0]
+
+    left_column_segments = [
+        element
+        for element in project.model.elements.values()
+        if (
+            element.group == "column-2d"
+            and midpoint_tag in element.node_tags()
+        )
+    ]
+    assert len(left_column_segments) == 2
+
+
+def test_frame_lower_chevron_excludes_first_storey():
+    bad = FrameGridSpec(
+        nx=1,
+        nz=2,
+        planar_2d=True,
+        brace_mode="Truss",
+        brace_pattern="VLower",
+        brace_material_tag=81,
+        brace_storeys=(1, 2),
+    )
+    with pytest.raises(ValueError, match="cannot use storey 1"):
+        validate_frame_grid_spec(bad)
+
+    good = FrameGridSpec(
+        nx=1,
+        nz=2,
+        planar_2d=True,
+        brace_mode="Truss",
+        brace_pattern="VLower",
+        brace_material_tag=81,
+        brace_storeys=(2,),
+    )
+    validate_frame_grid_spec(good)
+
+
+def test_frame_bracing_rejects_macro_joint_core_and_missing_material():
+    macro = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        joint_model="Joint2D",
+        joint_material_tag=9,
+        brace_mode="Truss",
+        brace_material_tag=81,
+    )
+    with pytest.raises(ValueError, match="macro-joint"):
+        validate_frame_grid_spec(macro)
+
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        brace_mode="Truss",
+        brace_material_tag=999,
+    )
+    prepare_frame_grid(project, spec)
+    with pytest.raises(ValueError, match="does not exist"):
+        generate_frame_project(project, spec)
+
+
+def test_main_window_frame_wizard_reports_bracing_generation():
+    source = inspect.getsource(MainWindow._generate_frame_grid)
+    assert '"brace_panels"' in source
+    assert '"brace_elements"' in source
+    assert "braced panel(s)" in source
