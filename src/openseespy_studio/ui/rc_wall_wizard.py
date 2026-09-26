@@ -2873,7 +2873,7 @@ class RCWallWizard(QWizard):
                         if self.macro_web_fsam.currentData() is None
                         else "Dependencies: reuse selected FSAM pair<br>"
                     )
-                    "Fiber mapping: Boundary | Web … Web | Boundary"
+                    + "Fiber mapping: Boundary | Web … Web | Boundary"
                 )
             else:
                 material_text = (
@@ -2890,7 +2890,7 @@ class RCWallWizard(QWizard):
                         if self.macro_shear_material.currentData() is None
                         else ""
                     )
-                    f"CoR c = {self.macro_center_ratio.value():g} · "
+                    + f"CoR c = {self.macro_center_ratio.value():g} · "
                     f"density = {self.macro_density.value():g}"
                     + (
                         f"<br>ThickMod = {self.macro_thick_mod.value():g} · "
