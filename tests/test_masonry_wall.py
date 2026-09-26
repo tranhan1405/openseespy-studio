@@ -62,7 +62,7 @@ def test_masonry_material_exports_native_opensees_command():
 
     assert command.startswith("ops.uniaxialMaterial('Masonry', 1,")
     assert "-5000" in command
-    assert "2500000" in command
+    assert "2.5e+06" in command
 
 
 def test_equivalent_strut_masonry_builder_creates_crossed_diagonals():
