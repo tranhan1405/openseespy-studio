@@ -3763,26 +3763,21 @@ class MainWindow(QMainWindow):
 
         add_group(
             home,
-            "FE Model",
-            large=("node",),
-            small=(
-                "catenary_cable",
-                "elastomeric_bearing",
-                "friction_bearing",
-                "lead_rubber_x",
-                "triple_friction_pendulum",
-                "contact_element",
-                "shell_input",
-                "continuum_quad",
-                "solid_brick",
-                "wall_macro_element",
-                "rc_wall_wizard",
-                "masonry_wall_wizard",
-                "frame_wizard",
-            ),
-            widgets=(frame_button, truss_button),
+            "OpenSees I/O",
+            small=("import_py", "export_py"),
         )
         add_group(
+            home,
+            "Wizards",
+            large=(
+                "frame_wizard",
+                "rc_wall_wizard",
+                "masonry_wall_wizard",
+            ),
+        )
+        add_group(
+            home,
+            "Modify",        add_group(
             home,
             "Modify",
             large=("move",),
@@ -3871,7 +3866,7 @@ class MainWindow(QMainWindow):
         geometry_page.finish()
         geometry_index = self.ribbon_tabs.addTab(
             geometry_page,
-            "Sketch",
+            "Geometry",
         )
         self.ribbon_tabs.tabBar().setTabTextColor(
             geometry_index,
@@ -3879,6 +3874,28 @@ class MainWindow(QMainWindow):
         )
 
         model_page = RibbonPage()
+        add_group(
+            model_page,
+            "Create",
+            large=("node",),
+            widgets=(frame_button, truss_button),
+        )
+        add_group(
+            model_page,
+            "Advanced Elements",
+            small=(
+                "catenary_cable",
+                "shell_input",
+                "continuum_quad",
+                "solid_brick",
+                "wall_macro_element",
+                "elastomeric_bearing",
+                "friction_bearing",
+                "lead_rubber_x",
+                "triple_friction_pendulum",
+                "contact_element",
+            ),
+        )
         add_group(
             model_page,
             "Definition",
@@ -3898,31 +3915,42 @@ class MainWindow(QMainWindow):
             large=("assign_section",),
             small=("assign_transformation", "element_formulation"),
         )
+        model_page.finish()
+        self.ribbon_tabs.addTab(model_page, "Model")
+
+        loads_page = RibbonPage()
         add_group(
-            model_page,
-            "Supports",
+            loads_page,
+            "Boundary",
             large=("support",),
-            small=("clear_support", "constraint", "connection"),
+            small=(
+                "clear_support",
+                "constraint",
+                "connection",
+                "prescribed_displacement",
+            ),
         )
         add_group(
-            model_page,
-            "Loads",
+            loads_page,
+            "Loading",
             large=("load_pattern",),
             small=(
-                "mass",
-                "mass_source",
                 "time_series",
                 "ground_motion",
                 "nodal_load",
-                "prescribed_displacement",
                 "beam_load",
                 "shell_pressure",
             ),
         )
-        model_page.finish()
-        self.ribbon_tabs.addTab(model_page, "Model")
+        add_group(
+            loads_page,
+            "Mass",
+            small=("mass", "mass_source"),
+        )
+        loads_page.finish()
+        self.ribbon_tabs.addTab(loads_page, "Loads")
 
-        analysis_page = RibbonPage()
+        analysis_page = RibbonPage()        analysis_page = RibbonPage()
         add_group(
             analysis_page,
             "Analysis Wizard",
@@ -3995,11 +4023,7 @@ class MainWindow(QMainWindow):
 
         add_group(
             analysis_page,
-            "Research",
-            large=("moment_curvature",),
-            small=("hinge_backbone", "calibration", "ai_assistant"),
-        )
-        add_group(
+            "Post-processing",        add_group(
             analysis_page,
             "Post-processing",
             large=("plot",),
@@ -4053,11 +4077,27 @@ class MainWindow(QMainWindow):
             small=("iso", "xy", "xz", "yz"),
         )
         result_page.finish()
-        result_index = self.ribbon_tabs.addTab(result_page, "Result")
+        result_index = self.ribbon_tabs.addTab(result_page, "Results")
         self.ribbon_tabs.tabBar().setTabTextColor(
             result_index,
             QColor("#1768ad"),
         )
+
+        tools_page = RibbonPage()
+        add_group(
+            tools_page,
+            "Research",
+            large=("moment_curvature",),
+            small=("hinge_backbone", "calibration"),
+        )
+        add_group(
+            tools_page,
+            "Assist",
+            large=("ai_assistant",),
+            small=("measure_distance", "clear_measurements"),
+        )
+        tools_page.finish()
+        self.ribbon_tabs.addTab(tools_page, "Tools")
 
         self.model_representation_combo = QComboBox()
         self.model_representation_combo.setFixedWidth(132)
@@ -6091,7 +6131,7 @@ class MainWindow(QMainWindow):
         else:
             self._tree_surface_items.clear()
 
-        root = QTreeWidgetItem(["OpenSees Model"])
+        root = QTreeWidgetItem(["FEWIZ Project"])
         root.setIcon(0, studio_icon("model-root"))
         root.setData(0, Qt.UserRole, ("model_root", None))
         root.setExpanded(True)
@@ -6159,7 +6199,7 @@ class MainWindow(QMainWindow):
         mesh_root.setIcon(0, studio_icon("mesh-root"))
         mesh_root.setData(0, Qt.UserRole, ("mesh_root", None))
         mesh_root.setExpanded(True)
-        root.addChild(mesh_root)
+        geometry.addChild(mesh_root)
 
         line_meshes = QTreeWidgetItem([
             f"Line Meshes ({len(self.project.lines)})"
@@ -6180,12 +6220,12 @@ class MainWindow(QMainWindow):
         mesh_root.addChild(surface_meshes)
 
         # Geometry defines topology, Mesh stores discretization/FE recipes,
-        # and generated OpenSees entities live only under FE Model.
+        # and generated solver entities live under Model.
         fe_model = QTreeWidgetItem([
             (
-                "FE Model · Frame Wizard Managed"
+                "Model · Frame Wizard Managed"
                 if self.project.frame_wizard_recipe
-                else "FE Model"
+                else "Model"
             )
         ])
         fe_model.setIcon(0, studio_icon("fe-model"))
@@ -6522,7 +6562,7 @@ class MainWindow(QMainWindow):
             connection_groups[connection.connection_type].addChild(item)
 
         # MPC-style kinematic relationships belong to the FE model rather
-        # than Loads & BCs. Supports/fixities remain in Loads & BCs.
+        # than Model. Supports/fixities remain under Boundary Conditions.
         constraints_root = QTreeWidgetItem([
             f"Constraints ({len(self.project.constraints)})"
         ])
@@ -6638,7 +6678,7 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("set", name))
             named_sets.addChild(item)
 
-        properties_root = QTreeWidgetItem(["Properties"])
+        properties_root = QTreeWidgetItem(["Definitions"])
         properties_root.setIcon(0, studio_icon("properties"))
         properties_root.setData(
             0,
@@ -6646,7 +6686,7 @@ class MainWindow(QMainWindow):
             ("properties_root", None),
         )
         properties_root.setExpanded(True)
-        root.addChild(properties_root)
+        fe_model.addChild(properties_root)
 
         materials_root = QTreeWidgetItem([
             f"Materials ({len(self.project.materials)})"
@@ -6754,17 +6794,7 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("transformation", tag))
             transformations_root.addChild(item)
 
-        loads_bc_root = QTreeWidgetItem(["Loads & BCs"])
-        loads_bc_root.setIcon(0, studio_icon("loads-bcs"))
-        loads_bc_root.setData(
-            0,
-            Qt.UserRole,
-            ("loads_bc_root", None),
-        )
-        loads_bc_root.setExpanded(True)
-        root.addChild(loads_bc_root)
-
-        constrained_nodes = {
+        constrained_nodes = {        constrained_nodes = {
             tag: classify_fixity(
                 node.fixity,
                 ndm=self.model.ndm,
@@ -6778,7 +6808,7 @@ class MainWindow(QMainWindow):
         boundary_root.setIcon(0, studio_icon("boundary-root"))
         boundary_root.setData(0, Qt.UserRole, ("boundary_root", None))
         boundary_root.setExpanded(True)
-        loads_bc_root.addChild(boundary_root)
+        root.addChild(boundary_root)
 
         grouped: dict[str, list[int]] = {}
         for tag, support_type in constrained_nodes.items():
@@ -6816,11 +6846,11 @@ class MainWindow(QMainWindow):
                 node_item.setData(0, Qt.UserRole, ("node", tag))
                 group_item.addChild(node_item)
 
-        loading_root = QTreeWidgetItem(["Loading"])
+        loading_root = QTreeWidgetItem(["Loads"])
         loading_root.setIcon(0, studio_icon("loading"))
         loading_root.setData(0, Qt.UserRole, ("loading_root", None))
         loading_root.setExpanded(True)
-        loads_bc_root.addChild(loading_root)
+        root.addChild(loading_root)
 
         ground_motion_patterns = {
             tag: pattern
@@ -7168,7 +7198,7 @@ class MainWindow(QMainWindow):
             recorders.addChild(item)
         root.addChild(analysis)
 
-        results = QTreeWidgetItem([f"Results / Jobs ({len(self._jobs)})"])
+        results = QTreeWidgetItem([f"Solution / Jobs ({len(self._jobs)})"])
         results.setIcon(0, studio_icon("jobs-root"))
         results.setData(0, Qt.UserRole, ("jobs_root", None))
         results.setExpanded(True)
