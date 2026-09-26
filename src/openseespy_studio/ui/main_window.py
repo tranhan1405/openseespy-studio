@@ -74,7 +74,7 @@ from ..analysis_templates import (
     default_control_node,
 )
 from ..frame_setup import prepare_frame_grid
-from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, to_openseespy
+from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, generate_frame_project, to_openseespy
 from ..importer import import_openseespy_source
 from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
@@ -5615,12 +5615,11 @@ class MainWindow(QMainWindow):
                 self.project,
                 spec,
             )
-            # Frame Grid is a replacement-geometry command.  Clear every
-            # object whose meaning depends on old node/element tags before
-            # generating the new model so reused IDs cannot silently rebind
-            # old loads, constraints, recorders, or analyses.
-            self.project.clear_model_linked_data()
-            generate_frame_grid(self.model, spec)
+            # Frame Grid is a replacement-geometry command.  The project
+            # generator clears model-linked objects, creates the member grid,
+            # then applies any Frame Wizard joint topology (duplicate nodes,
+            # equalDOF ties and connection springs).
+            joint_result = generate_frame_project(self.project, spec)
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
@@ -5654,6 +5653,14 @@ class MainWindow(QMainWindow):
                     f"Generated {spec.nx} × {spec.ny} bay, "
                     f"{spec.nz}-storey frame"
                 )
+            )
+
+        joint_connections = int(
+            joint_result.get("joint_connections", 0)
+        )
+        if joint_connections:
+            message += (
+                f" · {joint_connections} semi-rigid joint spring(s)"
             )
 
         self._refresh_all(message)
