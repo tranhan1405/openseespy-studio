@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QScrollArea
 
 from openseespy_studio.generator import material_to_openseespy, to_openseespy
 from openseespy_studio.importer import import_openseespy_source
@@ -427,4 +429,43 @@ def test_masonpan12_material_retag_updates_element_and_delete_is_guarded():
     assert element.special_parameters["mat_1"] == replacement_tag
     assert element.special_parameters["mat_2"] == lateral_tag
     project.validate_element_state(element.tag)
+
+def test_masonry_wall_wizard_all_pages_scroll_and_geometry_preview_is_live():
+    wizard = MasonryWallWizard(ProjectDatabase())
+    try:
+        scrolls = (
+            wizard.geometry_scroll,
+            wizard.material_scroll,
+            wizard.formulation_scroll,
+            wizard.preview_scroll,
+        )
+        assert all(isinstance(scroll, QScrollArea) for scroll in scrolls)
+        assert all(scroll.widgetResizable() for scroll in scrolls)
+        assert all(
+            scroll.horizontalScrollBarPolicy()
+            == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            for scroll in scrolls
+        )
+        assert all(
+            scroll.verticalScrollBarPolicy()
+            == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            for scroll in scrolls
+        )
+        assert wizard.geometry_preview.objectName() == (
+            "masonry-wall-geometry-preview"
+        )
+        assert wizard.geometry_preview.formulation == "EquivalentStrut"
+        assert wizard.geometry_preview.crossed is True
+
+        wizard.crossed_struts.setChecked(False)
+        assert wizard.geometry_preview.crossed is False
+
+        wizard.formulation.setCurrentIndex(
+            wizard.formulation.findData("MasonPan12")
+        )
+        assert wizard.geometry_preview.formulation == "MasonPan12"
+        assert wizard.preview.formulation == "MasonPan12"
+    finally:
+        wizard.close()
+        wizard.deleteLater()
 
