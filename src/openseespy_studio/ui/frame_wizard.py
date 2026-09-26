@@ -1062,6 +1062,7 @@ class FrameWizard(QWizard):
         self._build_mass_page()
         self._build_review_page()
         self.setButtonText(QWizard.FinishButton, "Generate Model")
+        self.currentIdChanged.connect(self._review_page_changed)
         self._sync_dimension()
         self._sync_spacing_mode()
         self._sync_member_controls()
@@ -4378,6 +4379,10 @@ class FrameWizard(QWizard):
         self.review_scroll = scroll
         self.review_page_id = self.addPage(page)
 
+    def _review_page_changed(self, page_id: int) -> None:
+        if int(page_id) == int(self.review_page_id):
+            self._update_review_page()
+
     def _review_validation_errors(self) -> list[str]:
         errors: list[str] = []
         checks = (
@@ -5671,6 +5676,9 @@ class FrameWizard(QWizard):
                         for error in errors[:6]
                     )
                 )
+                finish = self.button(QWizard.FinishButton)
+                if finish is not None:
+                    finish.setEnabled(False)
                 return False
         return True
 
