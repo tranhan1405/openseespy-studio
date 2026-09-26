@@ -26,6 +26,11 @@ from PySide6.QtWidgets import (
 
 from ..generator import (
     FrameGridSpec,
+    frame_brace_element_count,
+    frame_brace_panel_count,
+    frame_brace_storeys,
+    frame_brace_x_bays,
+    frame_brace_y_grid_lines,
     frame_diaphragm_count,
     frame_diaphragm_levels,
     frame_floor_levels,
@@ -142,6 +147,11 @@ class FramePreview(QWidget):
         self.slab_divisions_y = 1
         self.foundation_mode = "Direct"
         self.foundation_base_profiles: tuple[int, ...] = ()
+        self.brace_mode = "None"
+        self.brace_pattern = "X"
+        self.brace_x_bays: tuple[int, ...] = ()
+        self.brace_storeys: tuple[int, ...] = ()
+        self.brace_y_plane_scope = "All"
         self.setMinimumHeight(285)
 
     def set_frame(
@@ -164,6 +174,11 @@ class FramePreview(QWidget):
         slab_divisions_y: int = 1,
         foundation_mode: str = "Direct",
         foundation_base_profiles: tuple[int, ...] = (),
+        brace_mode: str = "None",
+        brace_pattern: str = "X",
+        brace_x_bays: tuple[int, ...] = (),
+        brace_storeys: tuple[int, ...] = (),
+        brace_y_plane_scope: str = "All",
     ) -> None:
         self.dimension = str(dimension)
         self.x_coordinates = list(x_coordinates)
@@ -186,6 +201,11 @@ class FramePreview(QWidget):
         self.foundation_base_profiles = tuple(
             int(value) for value in foundation_base_profiles
         )
+        self.brace_mode = str(brace_mode)
+        self.brace_pattern = str(brace_pattern)
+        self.brace_x_bays = tuple(int(value) for value in brace_x_bays)
+        self.brace_storeys = tuple(int(value) for value in brace_storeys)
+        self.brace_y_plane_scope = str(brace_y_plane_scope)
         self.update()
 
     @staticmethod
@@ -531,6 +551,96 @@ class FramePreview(QWidget):
                             ),
                         )
 
+        if self.brace_mode == "Truss":
+            brace_pen = QPen(self.palette().highlight().color())
+            brace_pen.setWidthF(2.0)
+            painter.setPen(brace_pen)
+
+            x_bays = (
+                self.brace_x_bays
+                if self.brace_x_bays
+                else tuple(range(len(self.x_coordinates) - 1))
+            )
+            storeys = (
+                self.brace_storeys
+                if self.brace_storeys
+                else tuple(range(1, len(self.z_coordinates)))
+            )
+            if self.dimension == "2D":
+                y_lines = (0,)
+            else:
+                ny = len(self.y_coordinates) - 1
+                if self.brace_y_plane_scope == "YMin":
+                    y_lines = (0,)
+                elif self.brace_y_plane_scope == "YMax":
+                    y_lines = (ny,)
+                elif self.brace_y_plane_scope == "Exterior":
+                    y_lines = (0,) if ny == 0 else (0, ny)
+                else:
+                    y_lines = tuple(range(ny + 1))
+
+            def project_xyz(x: float, y: float, z: float) -> QPointF:
+                if self.dimension == "2D":
+                    return map_point(QPointF(x, z))
+                return map_point(self._project_3d(x, y, z))
+
+            for storey in storeys:
+                if storey <= 0 or storey >= len(self.z_coordinates):
+                    continue
+                lower = storey - 1
+                upper = storey
+                for j in y_lines:
+                    if j < 0 or j >= len(self.y_coordinates):
+                        continue
+                    for bay in x_bays:
+                        if bay < 0 or bay + 1 >= len(self.x_coordinates):
+                            continue
+                        bl = p(bay, j, lower)
+                        br = p(bay + 1, j, lower)
+                        tl = p(bay, j, upper)
+                        tr = p(bay + 1, j, upper)
+                        mid_x = 0.5 * (
+                            self.x_coordinates[bay]
+                            + self.x_coordinates[bay + 1]
+                        )
+                        mid_z = 0.5 * (
+                            self.z_coordinates[lower]
+                            + self.z_coordinates[upper]
+                        )
+                        y_value = self.y_coordinates[j]
+
+                        if self.brace_pattern == "DiagonalForward":
+                            painter.drawLine(bl, tr)
+                        elif self.brace_pattern == "DiagonalBackward":
+                            painter.drawLine(br, tl)
+                        elif self.brace_pattern == "X":
+                            painter.drawLine(bl, tr)
+                            painter.drawLine(br, tl)
+                        elif self.brace_pattern == "VUpper":
+                            mid = project_xyz(
+                                mid_x,
+                                y_value,
+                                self.z_coordinates[upper],
+                            )
+                            painter.drawLine(bl, mid)
+                            painter.drawLine(br, mid)
+                        elif self.brace_pattern == "VLower":
+                            mid = project_xyz(
+                                mid_x,
+                                y_value,
+                                self.z_coordinates[lower],
+                            )
+                            painter.drawLine(tl, mid)
+                            painter.drawLine(tr, mid)
+                        elif self.brace_pattern == "KLeft":
+                            mid = project_xyz(
+                                self.x_coordinates[bay],
+                                y_value,
+                                mid_z,
+                            )
+                            painter.drawLine(mid, br)
+                            painter.drawLine(mid, tr)
+
         if self.foundation_mode == "Springs":
             spring_pen = QPen(self.palette().highlight().color())
             spring_pen.setWidthF(1.5)
@@ -664,17 +774,20 @@ class FrameWizard(QWizard):
         self._build_joints_page()
         self._build_floors_page()
         self._build_foundation_page()
+        self._build_bracing_page()
         self._sync_dimension()
         self._sync_spacing_mode()
         self._sync_member_controls()
         self._sync_joint_controls()
         self._sync_diaphragm_controls()
         self._sync_foundation_controls()
+        self._sync_brace_controls()
         self._update_preview()
         self._update_member_summary()
         self._update_joint_summary()
         self._update_diaphragm_summary()
         self._update_foundation_summary()
+        self._update_brace_summary()
 
     @staticmethod
     def _spin(value: int, lo: int = 1, hi: int = 50) -> QSpinBox:
@@ -2427,6 +2540,409 @@ class FrameWizard(QWizard):
             ):
                 finish.setEnabled(True)
 
+    def _build_bracing_page(self) -> None:
+        page = QWizardPage()
+        page.setTitle("Bracing")
+        page.setSubTitle(
+            "Add axial truss braces in X-Z frame planes. This first stage "
+            "supports diagonal, X, chevron and K layouts with explicit "
+            "material, area and panel scope."
+        )
+
+        scroll = QScrollArea()
+        scroll.setObjectName("frame-wizard-bracing-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+
+        self.brace_mode = QComboBox()
+        self.brace_mode.addItem("None · moment frame only", "None")
+        self.brace_mode.addItem(
+            "Truss bracing · explicit axial elements",
+            "Truss",
+        )
+
+        self.brace_pattern = QComboBox()
+        for label, value in (
+            ("Single diagonal /", "DiagonalForward"),
+            ("Single diagonal \\", "DiagonalBackward"),
+            ("X bracing", "X"),
+            ("Chevron · meet upper beam midpoint", "VUpper"),
+            ("Chevron · meet lower beam midpoint", "VLower"),
+            ("K bracing · left-column midpoint", "KLeft"),
+        ):
+            self.brace_pattern.addItem(label, value)
+        self.brace_pattern.setCurrentIndex(
+            self.brace_pattern.findData("X")
+        )
+
+        self.brace_element_type = QComboBox()
+        self.brace_element_type.addItem("Truss · linear geometry", "truss")
+        self.brace_element_type.addItem(
+            "corotTruss · corotational geometry",
+            "corotTruss",
+        )
+        self.brace_material = QComboBox()
+        self.brace_area = self._positive(
+            self.units.length_from_m(0.1) ** 2
+        )
+        self.brace_mass_per_length = self._nonnegative(0.0)
+        self.brace_do_rayleigh = QCheckBox(
+            "Include brace element in Rayleigh damping"
+        )
+
+        model_group = QGroupBox("Brace element")
+        model_form = QFormLayout(model_group)
+        model_form.addRow("Bracing:", self.brace_mode)
+        model_form.addRow("Pattern:", self.brace_pattern)
+        model_form.addRow("Element formulation:", self.brace_element_type)
+        model_form.addRow("Uniaxial material:", self.brace_material)
+        model_form.addRow(
+            f"Area [{self.units.length}²]:",
+            self.brace_area,
+        )
+        model_form.addRow(
+            f"Mass / length [{self.units.mass_label}/{self.units.length}]:",
+            self.brace_mass_per_length,
+        )
+        model_form.addRow("", self.brace_do_rayleigh)
+        layout.addWidget(model_group)
+        self.brace_model_group = model_group
+
+        self.brace_x_table = QTableWidget(0, 2)
+        self.brace_x_table.setHorizontalHeaderLabels(
+            ["X bay", "Brace"]
+        )
+        self.brace_x_table.horizontalHeader().setStretchLastSection(True)
+        self.brace_x_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.brace_x_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.brace_x_table.setMinimumHeight(150)
+        self.brace_x_table.setMaximumHeight(230)
+
+        self.brace_storey_table = QTableWidget(0, 2)
+        self.brace_storey_table.setHorizontalHeaderLabels(
+            ["Storey", "Brace"]
+        )
+        self.brace_storey_table.horizontalHeader().setStretchLastSection(True)
+        self.brace_storey_table.setSelectionMode(
+            QAbstractItemView.NoSelection
+        )
+        self.brace_storey_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.brace_storey_table.setMinimumHeight(150)
+        self.brace_storey_table.setMaximumHeight(230)
+
+        scope_tabs = QTabWidget()
+        scope_tabs.addTab(self.brace_x_table, "X Bays")
+        scope_tabs.addTab(self.brace_storey_table, "Storeys")
+
+        self.brace_y_plane_scope = QComboBox()
+        self.brace_y_plane_scope.addItem(
+            "All X-Z grid planes",
+            "All",
+        )
+        self.brace_y_plane_scope.addItem(
+            "Exterior Y-min / Y-max planes",
+            "Exterior",
+        )
+        self.brace_y_plane_scope.addItem("Y-min plane only", "YMin")
+        self.brace_y_plane_scope.addItem("Y-max plane only", "YMax")
+
+        scope_group = QGroupBox("Brace panel scope")
+        scope_layout = QVBoxLayout(scope_group)
+        scope_layout.addWidget(scope_tabs)
+        scope_form = QFormLayout()
+        scope_form.addRow("3D Y-plane scope:", self.brace_y_plane_scope)
+        scope_layout.addLayout(scope_form)
+        scope_hint = QLabel(
+            "Selected X bays and storeys are repeated in the chosen X-Z "
+            "planes. In 2D the Y-plane control is ignored."
+        )
+        scope_hint.setWordWrap(True)
+        scope_layout.addWidget(scope_hint)
+        layout.addWidget(scope_group)
+        self.brace_scope_group = scope_group
+
+        note = QLabel(
+            "X and single-diagonal layouts connect existing grid joints. "
+            "Chevron patterns insert a conforming beam-midpoint node; K "
+            "bracing inserts a conforming column-midpoint node. Midpoint "
+            "patterns currently require elasticBeamColumn members. Y-Z plane "
+            "bracing and per-panel pattern assignment belong to the second "
+            "Bracing stage."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("padding:8px;")
+        layout.addWidget(note)
+
+        self.brace_summary = QLabel()
+        self.brace_summary.setWordWrap(True)
+        self.brace_summary.setStyleSheet("padding:8px;")
+        layout.addWidget(self.brace_summary)
+
+        self.brace_validation_status = QLabel()
+        self.brace_validation_status.setWordWrap(True)
+        self.brace_validation_status.setObjectName(
+            "frame-wizard-brace-validation-status"
+        )
+        self.brace_validation_status.setStyleSheet("padding:8px;")
+        layout.addWidget(self.brace_validation_status)
+        layout.addStretch(1)
+
+        outer = QVBoxLayout(page)
+        outer.addWidget(scroll)
+        self.bracing_scroll = scroll
+        self.bracing_page_id = self.addPage(page)
+
+        self._populate_brace_materials()
+        self._refresh_brace_scope_tables()
+
+        for combo in (
+            self.brace_mode,
+            self.brace_pattern,
+            self.brace_element_type,
+            self.brace_material,
+            self.brace_y_plane_scope,
+        ):
+            combo.currentIndexChanged.connect(self._brace_control_changed)
+        for spin in (self.brace_area, self.brace_mass_per_length):
+            spin.valueChanged.connect(self._brace_control_changed)
+        self.brace_do_rayleigh.toggled.connect(self._brace_control_changed)
+        self.brace_x_table.itemChanged.connect(self._brace_control_changed)
+        self.brace_storey_table.itemChanged.connect(
+            self._brace_control_changed
+        )
+
+        for widget in (
+            self.dimension,
+            self.x_bays,
+            self.y_bays,
+            self.storeys,
+        ):
+            if isinstance(widget, QComboBox):
+                widget.currentIndexChanged.connect(
+                    self._brace_geometry_changed
+                )
+            else:
+                widget.valueChanged.connect(self._brace_geometry_changed)
+        self.create_columns.toggled.connect(self._brace_control_changed)
+        self.create_beams_x.toggled.connect(self._brace_control_changed)
+        self.joint_model.currentIndexChanged.connect(
+            self._brace_control_changed
+        )
+        self.beam_formulation.currentIndexChanged.connect(
+            self._brace_control_changed
+        )
+        self.column_formulation.currentIndexChanged.connect(
+            self._brace_control_changed
+        )
+
+    def _populate_brace_materials(self) -> None:
+        previous = self.brace_material.currentData()
+        self.brace_material.blockSignals(True)
+        self.brace_material.clear()
+        self.brace_material.addItem("Select material…", None)
+        for tag, material in sorted(self.project.materials.items()):
+            self.brace_material.addItem(
+                f"{tag} · {material.name} [{material.material_type}]",
+                int(tag),
+            )
+        if previous is not None:
+            index = self.brace_material.findData(previous)
+            if index >= 0:
+                self.brace_material.setCurrentIndex(index)
+        self.brace_material.blockSignals(False)
+
+    def _selected_brace_x_bays(self) -> tuple[int, ...]:
+        if not hasattr(self, "brace_x_table"):
+            return ()
+        values: list[int] = []
+        for row in range(self.brace_x_table.rowCount()):
+            item = self.brace_x_table.item(row, 1)
+            if item is not None and item.checkState() == Qt.Checked:
+                values.append(row)
+        return tuple(values)
+
+    def _selected_brace_storeys(self) -> tuple[int, ...]:
+        if not hasattr(self, "brace_storey_table"):
+            return ()
+        values: list[int] = []
+        for row in range(self.brace_storey_table.rowCount()):
+            item = self.brace_storey_table.item(row, 1)
+            if item is not None and item.checkState() == Qt.Checked:
+                values.append(row + 1)
+        return tuple(values)
+
+    def _refresh_brace_scope_tables(self, *_args) -> None:
+        if not hasattr(self, "brace_x_table"):
+            return
+        old_x = set(self._selected_brace_x_bays())
+        old_storeys = set(self._selected_brace_storeys())
+        had_x = self.brace_x_table.rowCount() > 0
+        had_storeys = self.brace_storey_table.rowCount() > 0
+
+        self.brace_x_table.blockSignals(True)
+        self.brace_x_table.setRowCount(int(self.x_bays.value()))
+        for row in range(self.brace_x_table.rowCount()):
+            label = QTableWidgetItem(f"X{row + 1}")
+            label.setFlags(Qt.ItemIsEnabled)
+            self.brace_x_table.setItem(row, 0, label)
+            check = QTableWidgetItem("Enabled")
+            check.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+            check.setCheckState(
+                Qt.Checked
+                if (not had_x or row in old_x)
+                else Qt.Unchecked
+            )
+            self.brace_x_table.setItem(row, 1, check)
+        self.brace_x_table.blockSignals(False)
+
+        self.brace_storey_table.blockSignals(True)
+        self.brace_storey_table.setRowCount(int(self.storeys.value()))
+        for row in range(self.brace_storey_table.rowCount()):
+            storey = row + 1
+            label = QTableWidgetItem(f"S{storey}")
+            label.setFlags(Qt.ItemIsEnabled)
+            self.brace_storey_table.setItem(row, 0, label)
+            check = QTableWidgetItem("Enabled")
+            check.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+            check.setCheckState(
+                Qt.Checked
+                if (not had_storeys or storey in old_storeys)
+                else Qt.Unchecked
+            )
+            self.brace_storey_table.setItem(row, 1, check)
+        self.brace_storey_table.blockSignals(False)
+
+        self._sync_brace_controls()
+        self._update_brace_summary()
+        self._update_preview()
+
+    def _brace_geometry_changed(self, *_args) -> None:
+        self._refresh_brace_scope_tables()
+
+    def _brace_control_changed(self, *_args) -> None:
+        # Lower-beam chevrons cannot occupy S1 because there is no base beam.
+        if (
+            hasattr(self, "brace_pattern")
+            and self.brace_pattern.currentData() == "VLower"
+            and hasattr(self, "brace_storey_table")
+            and self.brace_storey_table.rowCount() > 0
+        ):
+            first = self.brace_storey_table.item(0, 1)
+            if first is not None and first.checkState() == Qt.Checked:
+                self.brace_storey_table.blockSignals(True)
+                first.setCheckState(Qt.Unchecked)
+                self.brace_storey_table.blockSignals(False)
+        self._sync_brace_controls()
+        self._update_brace_summary()
+        self._update_preview()
+
+    def _sync_brace_controls(self, *_args) -> None:
+        if not hasattr(self, "brace_mode"):
+            return
+        active = self.brace_mode.currentData() == "Truss"
+        self.brace_model_group.setEnabled(True)
+        for widget in (
+            self.brace_pattern,
+            self.brace_element_type,
+            self.brace_material,
+            self.brace_area,
+            self.brace_mass_per_length,
+            self.brace_do_rayleigh,
+        ):
+            widget.setEnabled(active)
+        self.brace_scope_group.setEnabled(active)
+        self.brace_y_plane_scope.setEnabled(
+            active and self.dimension.currentData() == "3D"
+        )
+
+    def _brace_validation_error(self) -> str:
+        try:
+            spec = self.spec()
+            validate_frame_grid_spec(spec)
+        except (TypeError, ValueError) as exc:
+            return str(exc)
+
+        if spec.brace_mode != "Truss":
+            return ""
+        if not self._selected_brace_x_bays():
+            return "Select at least one X bay for bracing."
+        if not self._selected_brace_storeys():
+            return "Select at least one storey for bracing."
+        tag = self.brace_material.currentData()
+        if tag is None:
+            return "Select a uniaxial material for the brace."
+        if int(tag) not in self.project.materials:
+            return f"Brace material {int(tag)} no longer exists."
+        return ""
+
+    def _update_brace_summary(self, *_args) -> None:
+        if not hasattr(self, "brace_summary"):
+            return
+        self._sync_brace_controls()
+        try:
+            spec = self.spec()
+            panels = frame_brace_panel_count(spec)
+            elements = frame_brace_element_count(spec)
+            error = self._brace_validation_error()
+        except (TypeError, ValueError) as exc:
+            spec = self.spec()
+            panels = 0
+            elements = 0
+            error = str(exc)
+
+        if spec.brace_mode == "Truss":
+            pattern_names = {
+                "DiagonalForward": "Single diagonal /",
+                "DiagonalBackward": "Single diagonal \\",
+                "X": "X",
+                "VUpper": "Chevron → upper beam midpoint",
+                "VLower": "Chevron → lower beam midpoint",
+                "KLeft": "K → left-column midpoint",
+            }
+            self.brace_summary.setText(
+                "<b>Bracing summary</b><br>"
+                f"Pattern: {pattern_names.get(spec.brace_pattern, spec.brace_pattern)}"
+                f" · panels: {panels} · brace elements: {elements}<br>"
+                f"{spec.brace_element_type} · area={spec.brace_area:g} "
+                f"{self.units.length}² · material "
+                f"{spec.brace_material_tag}<br>"
+                f"X bays: {', '.join(str(value + 1) for value in frame_brace_x_bays(spec))}"
+                f" · storeys: {', '.join(map(str, frame_brace_storeys(spec)))}"
+                + (
+                    f" · Y planes: {len(frame_brace_y_grid_lines(spec))}"
+                    if not spec.planar_2d
+                    else ""
+                )
+            )
+        else:
+            self.brace_summary.setText(
+                "<b>Bracing summary</b><br>"
+                "No explicit brace elements will be generated."
+            )
+
+        finish = self.button(QWizard.FinishButton)
+        if error:
+            self.brace_validation_status.setText(
+                "<b>Bracing definition needs attention</b><br>" + error
+            )
+            if finish is not None and self.currentId() == self.bracing_page_id:
+                finish.setEnabled(False)
+        else:
+            self.brace_validation_status.setText(
+                "<b>Bracing definition ready</b><br>"
+                "Brace material, topology and selected X-Z panels are "
+                "consistent with the frame."
+            )
+            if finish is not None and self.currentId() == self.bracing_page_id:
+                finish.setEnabled(True)
+
     @staticmethod
     def _section_is_compatible(
         section_type: str,
@@ -2887,6 +3403,9 @@ class FrameWizard(QWizard):
         if hasattr(self, "foundation_mode"):
             self._sync_foundation_controls()
             self._update_foundation_summary()
+        if hasattr(self, "brace_mode"):
+            self._sync_brace_controls()
+            self._update_brace_summary()
         self._update_preview()
         self._update_member_summary()
 
@@ -3128,6 +3647,59 @@ class FrameWizard(QWizard):
                 if hasattr(self, "foundation_base_table")
                 else ()
             ),
+            brace_mode=(
+                str(self.brace_mode.currentData() or "None")
+                if hasattr(self, "brace_mode")
+                else "None"
+            ),
+            brace_pattern=(
+                str(self.brace_pattern.currentData() or "X")
+                if hasattr(self, "brace_pattern")
+                else "X"
+            ),
+            brace_element_type=(
+                str(self.brace_element_type.currentData() or "truss")
+                if hasattr(self, "brace_element_type")
+                else "truss"
+            ),
+            brace_material_tag=(
+                int(self.brace_material.currentData())
+                if (
+                    hasattr(self, "brace_material")
+                    and self.brace_material.currentData() is not None
+                )
+                else None
+            ),
+            brace_area=(
+                float(self.brace_area.value())
+                if hasattr(self, "brace_area")
+                else 0.01
+            ),
+            brace_mass_per_length=(
+                float(self.brace_mass_per_length.value())
+                if hasattr(self, "brace_mass_per_length")
+                else 0.0
+            ),
+            brace_do_rayleigh=(
+                bool(self.brace_do_rayleigh.isChecked())
+                if hasattr(self, "brace_do_rayleigh")
+                else False
+            ),
+            brace_x_bays=(
+                self._selected_brace_x_bays()
+                if hasattr(self, "brace_x_table")
+                else ()
+            ),
+            brace_storeys=(
+                self._selected_brace_storeys()
+                if hasattr(self, "brace_storey_table")
+                else ()
+            ),
+            brace_y_plane_scope=(
+                str(self.brace_y_plane_scope.currentData() or "All")
+                if hasattr(self, "brace_y_plane_scope")
+                else "All"
+            ),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
                 self.base_support.currentData() or "Fixed"
@@ -3207,6 +3779,11 @@ class FrameWizard(QWizard):
             foundation_base_profiles=(
                 frame_foundation_profile_assignments(spec)
             ),
+            brace_mode=spec.brace_mode,
+            brace_pattern=spec.brace_pattern,
+            brace_x_bays=spec.brace_x_bays,
+            brace_storeys=spec.brace_storeys,
+            brace_y_plane_scope=spec.brace_y_plane_scope,
         )
 
         counts = self._object_counts(spec)
@@ -3295,6 +3872,13 @@ class FrameWizard(QWizard):
                     "<b>Foundation definition needs attention</b><br>" + error
                 )
                 return False
+        if self.currentId() == self.bracing_page_id:
+            error = self._brace_validation_error()
+            if error:
+                self.brace_validation_status.setText(
+                    "<b>Bracing definition needs attention</b><br>" + error
+                )
+                return False
         return True
 
     def initializePage(self, page_id: int) -> None:  # noqa: N802
@@ -3317,3 +3901,8 @@ class FrameWizard(QWizard):
             self._refresh_foundation_base_table()
             self._sync_foundation_controls()
             self._update_foundation_summary()
+        elif page_id == self.bracing_page_id:
+            self._populate_brace_materials()
+            self._refresh_brace_scope_tables()
+            self._sync_brace_controls()
+            self._update_brace_summary()
