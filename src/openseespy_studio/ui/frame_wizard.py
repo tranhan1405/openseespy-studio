@@ -125,6 +125,8 @@ class FramePreview(QWidget):
         self.create_beams_y = False
         self.joint_model = "None"
         self.joint_scope = "all"
+        self.joint_panel_width = 0.40
+        self.joint_panel_height = 0.50
         self.setMinimumHeight(285)
 
     def set_frame(
@@ -139,6 +141,8 @@ class FramePreview(QWidget):
         create_beams_y: bool,
         joint_model: str = "None",
         joint_scope: str = "all",
+        joint_panel_width: float = 0.40,
+        joint_panel_height: float = 0.50,
     ) -> None:
         self.dimension = str(dimension)
         self.x_coordinates = list(x_coordinates)
@@ -149,6 +153,8 @@ class FramePreview(QWidget):
         self.create_beams_y = bool(create_beams_y)
         self.joint_model = str(joint_model)
         self.joint_scope = str(joint_scope)
+        self.joint_panel_width = float(joint_panel_width)
+        self.joint_panel_height = float(joint_panel_height)
         self.update()
 
     @staticmethod
@@ -256,10 +262,10 @@ class FramePreview(QWidget):
         for point in raw_points:
             painter.drawPoint(map_point(point))
 
-        if self.joint_model == "ZeroLength":
-            spring_pen = QPen(self.palette().highlight().color())
-            spring_pen.setWidthF(1.4)
-            painter.setPen(spring_pen)
+        if self.joint_model != "None":
+            joint_pen = QPen(self.palette().highlight().color())
+            joint_pen.setWidthF(1.4)
+            painter.setPen(joint_pen)
             if self.dimension == "2D":
                 x_indices = list(range(len(self.x_coordinates)))
                 if self.joint_scope == "interior":
@@ -269,19 +275,57 @@ class FramePreview(QWidget):
                 for k in range(1, len(self.z_coordinates)):
                     for i in x_indices:
                         point = p(i, k)
-                        painter.drawEllipse(
-                            QRectF(
-                                point.x() - 5.0,
-                                point.y() - 5.0,
-                                10.0,
-                                10.0,
+                        if self.joint_model == "ZeroLength":
+                            painter.drawEllipse(
+                                QRectF(
+                                    point.x() - 5.0,
+                                    point.y() - 5.0,
+                                    10.0,
+                                    10.0,
+                                )
                             )
-                        )
-                        painter.drawLine(
-                            QPointF(point.x() - 8.0, point.y()),
-                            QPointF(point.x() + 8.0, point.y()),
-                        )
-            else:
+                            painter.drawLine(
+                                QPointF(point.x() - 8.0, point.y()),
+                                QPointF(point.x() + 8.0, point.y()),
+                            )
+                        else:
+                            panel_w = max(
+                                8.0,
+                                self.joint_panel_width * scale,
+                            )
+                            panel_h = max(
+                                8.0,
+                                self.joint_panel_height * scale,
+                            )
+                            painter.drawRect(
+                                QRectF(
+                                    point.x() - 0.5 * panel_w,
+                                    point.y() - 0.5 * panel_h,
+                                    panel_w,
+                                    panel_h,
+                                )
+                            )
+                            painter.drawLine(
+                                QPointF(
+                                    point.x() - 0.5 * panel_w,
+                                    point.y(),
+                                ),
+                                QPointF(
+                                    point.x() + 0.5 * panel_w,
+                                    point.y(),
+                                ),
+                            )
+                            painter.drawLine(
+                                QPointF(
+                                    point.x(),
+                                    point.y() - 0.5 * panel_h,
+                                ),
+                                QPointF(
+                                    point.x(),
+                                    point.y() + 0.5 * panel_h,
+                                ),
+                            )
+            elif self.joint_model == "ZeroLength":
                 x_indices = list(range(len(self.x_coordinates)))
                 y_indices = list(range(len(self.y_coordinates)))
                 if self.joint_scope == "interior":
@@ -879,9 +923,8 @@ class FrameWizard(QWizard):
         page = QWizardPage()
         page.setTitle("Beam–Column Joints")
         page.setSubTitle(
-            "Define explicit beam-to-column rotational connection behaviour. "
-            "This phase implements generated zeroLength springs with automatic "
-            "node duplication and DOF tying."
+            "Define rigid, semi-rigid, RC joint-panel, or panel-zone "
+            "behaviour at frame intersections."
         )
 
         scroll = QScrollArea()
@@ -901,6 +944,18 @@ class FrameWizard(QWizard):
             "Semi-rigid rotational spring · zeroLength",
             "ZeroLength",
         )
+        self.joint_model.addItem(
+            "Joint2D · panel shear + interface springs",
+            "Joint2D",
+        )
+        self.joint_model.addItem(
+            "RC BeamColumnJoint · 13 component materials",
+            "BeamColumnJoint",
+        )
+        self.joint_model.addItem(
+            "Krawinkler panel zone · rigid boundary + shear spring",
+            "KrawinklerPanelZone",
+        )
 
         self.joint_material = QComboBox()
         self.joint_scope = QComboBox()
@@ -911,22 +966,111 @@ class FrameWizard(QWizard):
         )
 
         model_box = QGroupBox("Joint model")
-        form = QFormLayout(model_box)
-        form.addRow("Connection model:", self.joint_model)
-        form.addRow("Rotational material:", self.joint_material)
-        form.addRow("Apply to:", self.joint_scope)
+        model_form = QFormLayout(model_box)
+        model_form.addRow("Connection model:", self.joint_model)
+        model_form.addRow("Spring / panel material:", self.joint_material)
+        model_form.addRow("Apply to:", self.joint_scope)
         layout.addWidget(model_box)
 
+        self.joint_panel_width = self._positive(
+            self.units.length_from_m(0.40)
+        )
+        self.joint_panel_height = self._positive(
+            self.units.length_from_m(0.50)
+        )
+        panel_group = QGroupBox("Joint-core geometry")
+        panel_form = QFormLayout(panel_group)
+        panel_form.addRow(
+            f"Panel width [{self.units.length}]:",
+            self.joint_panel_width,
+        )
+        panel_form.addRow(
+            f"Panel height [{self.units.length}]:",
+            self.joint_panel_height,
+        )
+        panel_hint = QLabel(
+            "Macro models use a native 2D/3DOF core. FEWIZ shortens adjacent "
+            "beam/column centerlines to four external nodes ordered "
+            "Left → Top → Right → Bottom."
+        )
+        panel_hint.setWordWrap(True)
+        panel_form.addRow(panel_hint)
+        layout.addWidget(panel_group)
+        self.joint_panel_group = panel_group
+
+        joint2d_group = QGroupBox("Joint2D interface and panel response")
+        joint2d_form = QFormLayout(joint2d_group)
+        self.joint_interface_materials: list[QComboBox] = []
+        for index in range(4):
+            combo = QComboBox()
+            self.joint_interface_materials.append(combo)
+            joint2d_form.addRow(
+                f"Interface Mat{index + 1}:",
+                combo,
+            )
+        self.joint_large_disp = QComboBox()
+        self.joint_large_disp.addItem("0 · small deformation", 0)
+        self.joint_large_disp.addItem("1 · large deformation", 1)
+        self.joint_large_disp.addItem(
+            "2 · large deformation + length correction",
+            2,
+        )
+        joint2d_form.addRow("Large displacement:", self.joint_large_disp)
+        layout.addWidget(joint2d_group)
+        self.joint2d_group = joint2d_group
+
+        bcj_group = QGroupBox("BeamColumnJoint · 13 component materials")
+        bcj_form = QFormLayout(bcj_group)
+        self.bcj_labels = (
+            "N1 bar-slip left",
+            "N1 bar-slip right",
+            "N1 interface shear",
+            "N2 bar-slip bottom",
+            "N2 bar-slip top",
+            "N2 interface shear",
+            "N3 bar-slip left",
+            "N3 bar-slip right",
+            "N3 interface shear",
+            "N4 bar-slip bottom",
+            "N4 bar-slip top",
+            "N4 interface shear",
+            "Shear panel",
+        )
+        self.bcj_materials: list[QComboBox] = []
+        for index, label in enumerate(self.bcj_labels):
+            combo = QComboBox()
+            self.bcj_materials.append(combo)
+            bcj_form.addRow(f"Mat{index + 1} · {label}:", combo)
+        self.bcj_height_factor = self._positive(1.0)
+        self.bcj_width_factor = self._positive(1.0)
+        bcj_form.addRow("Effective height factor:", self.bcj_height_factor)
+        bcj_form.addRow("Effective width factor:", self.bcj_width_factor)
+        layout.addWidget(bcj_group)
+        self.bcj_group = bcj_group
+
+        kraw_group = QGroupBox("Krawinkler stiff panel-boundary members")
+        kraw_form = QFormLayout(kraw_group)
+        self.kraw_rigid_a = self._nonnegative(0.0)
+        self.kraw_rigid_e = self._nonnegative(0.0)
+        self.kraw_rigid_i = self._nonnegative(0.0)
+        kraw_form.addRow("Rigid-link A:", self.kraw_rigid_a)
+        kraw_form.addRow("Rigid-link E:", self.kraw_rigid_e)
+        kraw_form.addRow("Rigid-link Iz:", self.kraw_rigid_i)
+        kraw_hint = QLabel(
+            "Enter deliberately stiff elastic-member properties in the "
+            "active project unit system. The selected panel material supplies "
+            "the nonlinear rotational/shear spring."
+        )
+        kraw_hint.setWordWrap(True)
+        kraw_form.addRow(kraw_hint)
+        layout.addWidget(kraw_group)
+        self.kraw_group = kraw_group
+
         note = QLabel(
-            "zeroLength mode keeps the column/grid node as the retained node, "
-            "creates one coincident beam-side node per active beam family, "
-            "rewires the beam members, ties every non-spring DOF with equalDOF, "
-            "and inserts the rotational spring. For X beams the spring acts "
-            "about global Y; for Y beams it acts about global X. "
-            "Joint2D, BeamColumnJoint and the Krawinkler panel-zone macro are "
-            "reserved for the second half of Task 3 because they require a "
-            "dedicated 2D joint-core topology rather than FEWIZ's current "
-            "3D/6DOF planar-frame convention."
+            "zeroLength keeps FEWIZ's 3D/6DOF planar convention. Joint2D, "
+            "BeamColumnJoint and Krawinkler use a native 2D/3DOF joint-core "
+            "model so OpenSees node order, rotational DOF and panel topology "
+            "remain consistent."
         )
         note.setWordWrap(True)
         note.setStyleSheet("padding:8px;")
@@ -952,15 +1096,27 @@ class FrameWizard(QWizard):
         self.joints_page_id = self.addPage(page)
 
         self._populate_joint_materials()
-        self.joint_model.currentIndexChanged.connect(
-            self._sync_joint_controls
-        )
-        self.joint_material.currentIndexChanged.connect(
-            self._update_joint_summary
-        )
-        self.joint_scope.currentIndexChanged.connect(
-            self._update_joint_summary
-        )
+        for combo in (
+            self.joint_model,
+            self.joint_material,
+            self.joint_scope,
+            self.joint_large_disp,
+            *self.joint_interface_materials,
+            *self.bcj_materials,
+        ):
+            combo.currentIndexChanged.connect(
+                self._joint_control_changed
+            )
+        for spin in (
+            self.joint_panel_width,
+            self.joint_panel_height,
+            self.bcj_height_factor,
+            self.bcj_width_factor,
+            self.kraw_rigid_a,
+            self.kraw_rigid_e,
+            self.kraw_rigid_i,
+        ):
+            spin.valueChanged.connect(self._joint_control_changed)
 
         for widget in (
             self.dimension,
@@ -970,54 +1126,135 @@ class FrameWizard(QWizard):
         ):
             if isinstance(widget, QComboBox):
                 widget.currentIndexChanged.connect(
-                    self._update_joint_summary
+                    self._joint_control_changed
                 )
             else:
-                widget.valueChanged.connect(self._update_joint_summary)
+                widget.valueChanged.connect(
+                    self._joint_control_changed
+                )
         for checkbox in (
             self.create_columns,
             self.create_beams_x,
             self.create_beams_y,
         ):
-            checkbox.toggled.connect(self._update_joint_summary)
+            checkbox.toggled.connect(self._joint_control_changed)
 
-    def _populate_joint_materials(self) -> None:
-        previous = self.joint_material.currentData()
-        self.joint_material.blockSignals(True)
-        self.joint_material.clear()
-        self.joint_material.addItem("Select rotational material…", None)
-        for tag, material in sorted(self.project.materials.items()):
-            self.joint_material.addItem(
+    @staticmethod
+    def _set_material_combo_items(
+        combo: QComboBox,
+        materials,
+        *,
+        allow_rigid_zero: bool = False,
+        allow_none: bool = True,
+    ) -> None:
+        previous = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        if allow_rigid_zero:
+            combo.addItem("Rigid interface (0)", 0)
+        elif allow_none:
+            combo.addItem("Select material…", None)
+        for tag, material in sorted(materials.items()):
+            combo.addItem(
                 f"{tag} · {material.name} [{material.material_type}]",
                 int(tag),
             )
         if previous is not None:
-            index = self.joint_material.findData(previous)
+            index = combo.findData(previous)
             if index >= 0:
-                self.joint_material.setCurrentIndex(index)
-        self.joint_material.blockSignals(False)
+                combo.setCurrentIndex(index)
+        combo.blockSignals(False)
 
-    def _sync_joint_controls(self, *_args) -> None:
-        active = self.joint_model.currentData() == "ZeroLength"
-        self.joint_material.setEnabled(active)
-        self.joint_scope.setEnabled(active)
+    def _populate_joint_materials(self) -> None:
+        self._set_material_combo_items(
+            self.joint_material,
+            self.project.materials,
+        )
+        for combo in self.joint_interface_materials:
+            self._set_material_combo_items(
+                combo,
+                self.project.materials,
+                allow_rigid_zero=True,
+                allow_none=False,
+            )
+        for combo in self.bcj_materials:
+            self._set_material_combo_items(
+                combo,
+                self.project.materials,
+            )
+
+    def _joint_control_changed(self, *_args) -> None:
+        self._sync_joint_controls()
         self._update_joint_summary()
         self._update_preview()
+
+    def _sync_joint_controls(self, *_args) -> None:
+        model = str(self.joint_model.currentData() or "None")
+        active = model != "None"
+        macro = model in {
+            "Joint2D",
+            "BeamColumnJoint",
+            "KrawinklerPanelZone",
+        }
+        self.joint_scope.setEnabled(active)
+        self.joint_material.setEnabled(
+            model in {
+                "ZeroLength",
+                "Joint2D",
+                "KrawinklerPanelZone",
+            }
+        )
+        self.joint_panel_group.setVisible(macro)
+        self.joint2d_group.setVisible(model == "Joint2D")
+        self.bcj_group.setVisible(model == "BeamColumnJoint")
+        self.kraw_group.setVisible(model == "KrawinklerPanelZone")
+
+    def _joint_material_tags(self) -> set[int]:
+        model = str(self.joint_model.currentData() or "None")
+        tags: set[int] = set()
+        if model in {
+            "ZeroLength",
+            "Joint2D",
+            "KrawinklerPanelZone",
+        }:
+            value = self.joint_material.currentData()
+            if value is not None:
+                tags.add(int(value))
+        if model == "Joint2D":
+            tags.update(
+                int(combo.currentData())
+                for combo in self.joint_interface_materials
+                if combo.currentData() not in {None, 0}
+            )
+        if model == "BeamColumnJoint":
+            tags.update(
+                int(combo.currentData())
+                for combo in self.bcj_materials
+                if combo.currentData() is not None
+            )
+        return tags
 
     def _joint_validation_error(self) -> str:
         try:
             validate_frame_grid_spec(self.spec())
         except (TypeError, ValueError) as exc:
             return str(exc)
-        if self.joint_model.currentData() == "ZeroLength":
-            tag = self.joint_material.currentData()
-            if tag is None:
-                return "Select a rotational uniaxial material for the joint."
-            if int(tag) not in self.project.materials:
-                return f"Joint material tag {int(tag)} no longer exists."
+        missing = sorted(
+            tag
+            for tag in self._joint_material_tags()
+            if tag not in self.project.materials
+        )
+        if missing:
+            return (
+                "Joint material tag(s) no longer exist: "
+                + ", ".join(map(str, missing))
+            )
         return ""
 
     def _update_joint_summary(self, *_args) -> None:
+        if not hasattr(self, "joint_summary"):
+            return
+        self._sync_joint_controls()
         try:
             spec = self.spec()
             count = frame_joint_connection_count(spec)
@@ -1040,6 +1277,19 @@ class FrameWizard(QWizard):
                 f"equalDOF ties: {count}<br>"
                 "Columns remain attached to the original grid nodes."
             )
+        elif spec.joint_model in {
+            "Joint2D",
+            "BeamColumnJoint",
+            "KrawinklerPanelZone",
+        }:
+            self.joint_summary.setText(
+                "<b>Joint-core generation summary</b><br>"
+                f"Joint cores: {count} · external panel nodes: {4 * count}<br>"
+                f"Panel size: {spec.joint_panel_width:g} × "
+                f"{spec.joint_panel_height:g} {self.units.length}<br>"
+                "Adjacent beam/column members terminate at Left / Top / "
+                "Right / Bottom external nodes; export uses native 2D/3DOF."
+            )
         else:
             self.joint_summary.setText(
                 "<b>Joint generation summary</b><br>"
@@ -1047,16 +1297,21 @@ class FrameWizard(QWizard):
                 "MPC ties or connection elements will be generated."
             )
 
+        finish = self.button(QWizard.FinishButton)
         if error:
             self.joint_validation_status.setText(
                 "<b>Joint definition needs attention</b><br>" + error
             )
+            if finish is not None and self.currentId() == self.joints_page_id:
+                finish.setEnabled(False)
         else:
             self.joint_validation_status.setText(
                 "<b>Joint definition ready</b><br>"
-                "The selected joint topology is consistent with the frame "
-                "geometry and member families."
+                "The selected joint topology, materials and panel geometry "
+                "are consistent with the frame definition."
             )
+            if finish is not None and self.currentId() == self.joints_page_id:
+                finish.setEnabled(True)
 
     def apply_to_project(self) -> dict[str, int]:
         """Generate the current Frame Wizard definition into the project."""
@@ -1508,6 +1763,9 @@ class FrameWizard(QWizard):
             self.create_beams_y.setChecked(True)
         self.base_support.setEnabled(not is_3d)
         self._sync_member_controls()
+        if hasattr(self, "joint_model"):
+            self._sync_joint_controls()
+            self._update_joint_summary()
         self._update_preview()
         self._update_member_summary()
 
@@ -1677,6 +1935,28 @@ class FrameWizard(QWizard):
             joint_scope=str(
                 self.joint_scope.currentData() or "all"
             ),
+            joint_panel_width=float(self.joint_panel_width.value()),
+            joint_panel_height=float(self.joint_panel_height.value()),
+            joint_interface_material_tags=tuple(
+                int(combo.currentData() or 0)
+                for combo in self.joint_interface_materials
+            ),
+            joint_large_disp=int(
+                self.joint_large_disp.currentData() or 0
+            ),
+            joint_component_material_tags=tuple(
+                (
+                    int(combo.currentData())
+                    if combo.currentData() is not None
+                    else 0
+                )
+                for combo in self.bcj_materials
+            ),
+            joint_height_factor=float(self.bcj_height_factor.value()),
+            joint_width_factor=float(self.bcj_width_factor.value()),
+            joint_rigid_a=float(self.kraw_rigid_a.value()),
+            joint_rigid_e=float(self.kraw_rigid_e.value()),
+            joint_rigid_i=float(self.kraw_rigid_i.value()),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
                 self.base_support.currentData() or "Fixed"
@@ -1746,6 +2026,8 @@ class FrameWizard(QWizard):
             create_beams_y=spec.create_beams_y,
             joint_model=spec.joint_model,
             joint_scope=spec.joint_scope,
+            joint_panel_width=spec.joint_panel_width,
+            joint_panel_height=spec.joint_panel_height,
         )
 
         counts = self._object_counts(spec)
