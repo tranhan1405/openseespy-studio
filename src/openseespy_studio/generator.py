@@ -17,6 +17,7 @@ from .model import (
     CONTINUUM_QUAD_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
     FRICTION_BEARING_ELEMENT_TYPES,
+    MASONRY_PANEL_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
@@ -5984,6 +5985,25 @@ def to_openseespy(
                     f"'{e.continuum_type}', "
                     f"{e.continuum_material_tag})"
                 )
+            continue
+
+        if e.element_type in MASONRY_PANEL_ELEMENT_TYPES:
+            node_tags = e.node_tags()
+            if len(node_tags) != 12:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} requires "
+                    "twelve nodes; element not generated."
+                )
+                continue
+            p = e.special_parameters
+            node_args = ", ".join(str(int(value)) for value in node_tags)
+            lines.append(
+                "ops.element('MasonPan12', "
+                f"{tag}, {node_args}, "
+                f"{int(p['mat_1'])}, {int(p['mat_2'])}, "
+                f"{float(p['thick']):g}, {float(p['w_tot']):g}, "
+                f"{float(p['w_1']):g})"
+            )
             continue
 
         if e.element_type in SOLID_ELEMENT_TYPES:
