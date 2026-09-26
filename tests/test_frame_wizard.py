@@ -359,7 +359,7 @@ def test_frame_wizard_member_page_requires_sections_when_members_exist():
 
         assert wizard.currentId() == wizard.members_page_id
         assert not wizard.validateCurrentPage()
-        assert "require a compatible section" in (
+        assert "require a compatible primary section" in (
             wizard.member_validation_status.text()
         )
     finally:
