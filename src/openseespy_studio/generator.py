@@ -909,6 +909,10 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                     "Planar Frame Wizard models have no Y-direction beams."
                 )
         if bool(spec.load_beam_udl):
+            if all(abs(value) <= 1.0e-15 for value in udl_vector):
+                raise ValueError(
+                    "Frame Wizard beam UDL vector cannot be zero."
+                )
             if beam_scope in {"X", "Both"} and not bool(spec.create_beams_x):
                 raise ValueError(
                     "X beam UDL requires X-direction beams."
