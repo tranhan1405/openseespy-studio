@@ -141,6 +141,7 @@ class FramePreview(QWidget):
         self.slab_divisions_x = 1
         self.slab_divisions_y = 1
         self.foundation_mode = "Direct"
+        self.foundation_base_profiles: tuple[int, ...] = ()
         self.setMinimumHeight(285)
 
     def set_frame(
@@ -162,6 +163,7 @@ class FramePreview(QWidget):
         slab_divisions_x: int = 1,
         slab_divisions_y: int = 1,
         foundation_mode: str = "Direct",
+        foundation_base_profiles: tuple[int, ...] = (),
     ) -> None:
         self.dimension = str(dimension)
         self.x_coordinates = list(x_coordinates)
@@ -181,6 +183,9 @@ class FramePreview(QWidget):
         self.slab_divisions_x = max(1, int(slab_divisions_x))
         self.slab_divisions_y = max(1, int(slab_divisions_y))
         self.foundation_mode = str(foundation_mode)
+        self.foundation_base_profiles = tuple(
+            int(value) for value in foundation_base_profiles
+        )
         self.update()
 
     @staticmethod
@@ -544,7 +549,7 @@ class FramePreview(QWidget):
                     for i in range(len(self.x_coordinates))
                 ]
 
-            for point in base_points:
+            for base_index, point in enumerate(base_points):
                 painter.drawEllipse(
                     QRectF(
                         point.x() - 3.0,
@@ -570,6 +575,14 @@ class FramePreview(QWidget):
                     QPointF(point.x() - 6.0, point.y() + 19.0),
                     QPointF(point.x() + 6.0, point.y() + 19.0),
                 )
+                if base_index < len(self.foundation_base_profiles):
+                    profile_index = self.foundation_base_profiles[base_index]
+                    profile_label = chr(ord("A") + profile_index)
+                    painter.drawText(
+                        int(point.x() + 7.0),
+                        int(point.y() + 16.0),
+                        profile_label,
+                    )
 
         painter.setPen(self.palette().text().color())
 
@@ -3191,6 +3204,9 @@ class FrameWizard(QWizard):
             slab_divisions_x=spec.slab_divisions_x,
             slab_divisions_y=spec.slab_divisions_y,
             foundation_mode=spec.foundation_mode,
+            foundation_base_profiles=(
+                frame_foundation_profile_assignments(spec)
+            ),
         )
 
         counts = self._object_counts(spec)
