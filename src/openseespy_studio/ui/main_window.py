@@ -243,6 +243,7 @@ from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
 from .rc_wall_wizard import RCWallWizard
 from .masonry_wall_wizard import MasonryWallWizard
+from .frame_wizard import FrameWizard
 from .rclms_section_dialog import RCLMSSectionDialog
 from .icons import create_visual_icon, studio_icon
 from .results_panel import ResultsPanel
@@ -2756,6 +2757,13 @@ class MainWindow(QMainWindow):
             "Build a masonry/infill panel with equivalent struts or MasonPan12",
         )
         self._make_action(
+            "frame_wizard",
+            "Frame Wizard",
+            "frame-grid",
+            self._show_frame_wizard,
+            "Build a regular 2D or 3D frame with live grid preview",
+        )
+        self._make_action(
             "frame_2d",
             "2D Frame",
             "frame-2d",
@@ -3179,6 +3187,7 @@ class MainWindow(QMainWindow):
             self.actions["column_1d"],
             self.actions["rc_wall_wizard"],
             self.actions["masonry_wall_wizard"],
+            self.actions["frame_wizard"],
             self.actions["frame_2d"],
             self.actions["grid"],
             self.actions["extrude"],
@@ -3764,6 +3773,7 @@ class MainWindow(QMainWindow):
                 "wall_macro_element",
                 "rc_wall_wizard",
                 "masonry_wall_wizard",
+                "frame_wizard",
             ),
             widgets=(frame_button, truss_button),
         )
@@ -5548,6 +5558,35 @@ class MainWindow(QMainWindow):
             self.viewport.set_view("yz")
         else:
             self.viewport.set_view("iso")
+
+    def _show_frame_wizard(
+        self,
+        checked: bool = False,
+    ) -> None:
+        del checked
+        dialog = FrameWizard(self.project, parent=self)
+        if not dialog.exec():
+            return
+
+        spec = dialog.spec()
+        if self.model.nodes or self.model.elements:
+            answer = QMessageBox.question(
+                self,
+                "Replace Current FE Model",
+                (
+                    "Frame Wizard currently uses replacement mode in this "
+                    "first implementation phase.\n\n"
+                    "Existing FE geometry and model-linked objects will be "
+                    "cleared. Material and section libraries are preserved.\n\n"
+                    "Continue and generate the frame?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        self._generate_frame_grid(spec)
 
     def _open_frame_grid(self, *, planar_2d: bool) -> None:
         self.frame_grid_panel.set_planar_2d(planar_2d)
