@@ -5722,6 +5722,18 @@ class MainWindow(QMainWindow):
                 f" / {floor_area_loads} floor-area beam load(s)"
             )
 
+        mass_sources = int(joint_result.get("mass_sources", 0))
+        if mass_sources:
+            mass_nodes = int(joint_result.get("mass_nodes", 0))
+            generated_mass = float(
+                joint_result.get("generated_nodal_mass", 0.0)
+            )
+            message += (
+                f" · {mass_sources} seismic Mass Source"
+                f" / {mass_nodes} mass node(s)"
+                f" / generated nodal mass={generated_mass:.6g}"
+            )
+
         self._refresh_all(message)
         self.frame_grid_panel.set_assignment_tags(
             column_section_tag=spec.column_section_tag,
