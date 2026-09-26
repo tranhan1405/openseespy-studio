@@ -43,6 +43,7 @@ from ..generator import (
     frame_grid_coordinates,
     frame_slab_count,
     frame_joint_connection_count,
+    frame_load_storeys,
     generate_frame_project,
     validate_frame_grid_spec,
 )
@@ -161,6 +162,10 @@ class FramePreview(QWidget):
         self.brace_panel_patterns: tuple[
             tuple[str, int, int, int, str], ...
         ] = ()
+        self.load_mode = "None"
+        self.load_beam_udl = False
+        self.load_beam_scope = "Both"
+        self.load_storeys: tuple[int, ...] = ()
         self.setMinimumHeight(285)
 
     def set_frame(
@@ -194,6 +199,10 @@ class FramePreview(QWidget):
         brace_panel_patterns: tuple[
             tuple[str, int, int, int, str], ...
         ] = (),
+        load_mode: str = "None",
+        load_beam_udl: bool = False,
+        load_beam_scope: str = "Both",
+        load_storeys: tuple[int, ...] = (),
     ) -> None:
         self.dimension = str(dimension)
         self.x_coordinates = list(x_coordinates)
@@ -234,6 +243,10 @@ class FramePreview(QWidget):
             )
             for axis, plane, bay, storey, pattern in brace_panel_patterns
         )
+        self.load_mode = str(load_mode)
+        self.load_beam_udl = bool(load_beam_udl)
+        self.load_beam_scope = str(load_beam_scope)
+        self.load_storeys = tuple(int(value) for value in load_storeys)
         self.update()
 
     @staticmethod
@@ -798,6 +811,100 @@ class FramePreview(QWidget):
                                 ),
                             )
 
+        if self.load_mode == "Static":
+            load_pen = QPen(self.palette().highlight().color())
+            load_pen.setWidthF(1.4)
+            painter.setPen(load_pen)
+
+            # A compact gravity marker communicates automatic self-weight.
+            painter.drawText(
+                int(rect.left() + 4),
+                int(rect.top() + 14),
+                "LOAD ↓",
+            )
+
+            if self.load_beam_udl:
+                selected_storeys = (
+                    self.load_storeys
+                    if self.load_storeys
+                    else tuple(range(1, len(self.z_coordinates)))
+                )
+                scope = self.load_beam_scope
+
+                def arrow_at(point: QPointF) -> None:
+                    length = 13.0
+                    tip = QPointF(point.x(), point.y() + length)
+                    painter.drawLine(point, tip)
+                    painter.drawLine(
+                        tip,
+                        QPointF(tip.x() - 3.5, tip.y() - 4.0),
+                    )
+                    painter.drawLine(
+                        tip,
+                        QPointF(tip.x() + 3.5, tip.y() - 4.0),
+                    )
+
+                for storey in selected_storeys:
+                    if (
+                        storey <= 0
+                        or storey >= len(self.z_coordinates)
+                    ):
+                        continue
+                    z_value = self.z_coordinates[storey]
+
+                    if scope in {"X", "Both"}:
+                        if self.dimension == "2D":
+                            for bay in range(len(self.x_coordinates) - 1):
+                                x_mid = 0.5 * (
+                                    self.x_coordinates[bay]
+                                    + self.x_coordinates[bay + 1]
+                                )
+                                arrow_at(
+                                    map_point(QPointF(x_mid, z_value))
+                                )
+                        else:
+                            for j, y_value in enumerate(self.y_coordinates):
+                                del j
+                                for bay in range(
+                                    len(self.x_coordinates) - 1
+                                ):
+                                    x_mid = 0.5 * (
+                                        self.x_coordinates[bay]
+                                        + self.x_coordinates[bay + 1]
+                                    )
+                                    arrow_at(
+                                        map_point(
+                                            self._project_3d(
+                                                x_mid,
+                                                y_value,
+                                                z_value,
+                                            )
+                                        )
+                                    )
+
+                    if (
+                        self.dimension == "3D"
+                        and scope in {"Y", "Both"}
+                    ):
+                        for i, x_value in enumerate(self.x_coordinates):
+                            del i
+                            for bay in range(
+                                len(self.y_coordinates) - 1
+                            ):
+                                y_mid = 0.5 * (
+                                    self.y_coordinates[bay]
+                                    + self.y_coordinates[bay + 1]
+                                )
+                                arrow_at(
+                                    map_point(
+                                        self._project_3d(
+                                            x_value,
+                                            y_mid,
+                                            z_value,
+                                        )
+                                    )
+                                )
+
         if self.foundation_mode == "Springs":
             spring_pen = QPen(self.palette().highlight().color())
             spring_pen.setWidthF(1.5)
@@ -932,6 +1039,7 @@ class FrameWizard(QWizard):
         self._build_floors_page()
         self._build_foundation_page()
         self._build_bracing_page()
+        self._build_loads_page()
         self._sync_dimension()
         self._sync_spacing_mode()
         self._sync_member_controls()
@@ -939,12 +1047,14 @@ class FrameWizard(QWizard):
         self._sync_diaphragm_controls()
         self._sync_foundation_controls()
         self._sync_brace_controls()
+        self._sync_load_controls()
         self._update_preview()
         self._update_member_summary()
         self._update_joint_summary()
         self._update_diaphragm_summary()
         self._update_foundation_summary()
         self._update_brace_summary()
+        self._update_load_summary()
 
     @staticmethod
     def _spin(value: int, lo: int = 1, hi: int = 50) -> QSpinBox:
@@ -3381,6 +3491,406 @@ class FrameWizard(QWizard):
             if finish is not None and self.currentId() == self.bracing_page_id:
                 finish.setEnabled(True)
 
+    def _build_loads_page(self) -> None:
+        page = QWizardPage()
+        page.setTitle("Loads & Gravity")
+        page.setSubTitle(
+            "Create one static Plain load pattern after final frame topology "
+            "is generated. Add automatic member self-weight and/or beam UDL."
+        )
+
+        scroll = QScrollArea()
+        scroll.setObjectName("frame-wizard-loads-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+
+        self.load_mode = QComboBox()
+        self.load_mode.addItem("None · no automatic loads", "None")
+        self.load_mode.addItem(
+            "Static gravity / beam load pattern",
+            "Static",
+        )
+
+        mode_group = QGroupBox("Automatic load pattern")
+        mode_form = QFormLayout(mode_group)
+        mode_form.addRow("Load generation:", self.load_mode)
+        layout.addWidget(mode_group)
+
+        self.load_self_weight = QCheckBox(
+            "Generate automatic self-weight on frame columns and beams"
+        )
+        self.load_self_weight_density = self._nonnegative(0.0)
+        self.load_self_weight_density.setDecimals(3)
+
+        self_weight_group = QGroupBox("Member self-weight")
+        self_weight_form = QFormLayout(self_weight_group)
+        self_weight_form.addRow("", self.load_self_weight)
+        self_weight_form.addRow(
+            (
+                "Density override "
+                f"[{self.units.mass_label}/{self.units.length}³]:"
+            ),
+            self.load_self_weight_density,
+        )
+        self_weight_hint = QLabel(
+            "Density override 0 uses the material density linked to each "
+            "Elastic section. Automatic self-weight currently applies only "
+            "to Elastic frame sections with valid geometric transformations."
+        )
+        self_weight_hint.setWordWrap(True)
+        self_weight_form.addRow(self_weight_hint)
+        layout.addWidget(self_weight_group)
+        self.load_self_weight_group = self_weight_group
+
+        self.load_beam_udl = QCheckBox(
+            "Generate uniform distributed load on selected beam families"
+        )
+        self.load_beam_udl_coordinate = QComboBox()
+        self.load_beam_udl_coordinate.addItem("Global X/Y/Z", "global")
+        self.load_beam_udl_coordinate.addItem("Beam local x/y/z", "local")
+        self.load_beam_scope = QComboBox()
+        self.load_beam_scope.addItem("X-direction beams", "X")
+        self.load_beam_scope.addItem("Y-direction beams", "Y")
+        self.load_beam_scope.addItem("Both X and Y beams", "Both")
+        self.load_beam_scope.setCurrentIndex(
+            self.load_beam_scope.findData("Both")
+        )
+
+        self.load_udl_x = self._coordinate(0.0)
+        self.load_udl_y = self._coordinate(0.0)
+        self.load_udl_z = self._coordinate(-10.0)
+
+        udl_group = QGroupBox("Beam uniform distributed load")
+        udl_form = QFormLayout(udl_group)
+        udl_form.addRow("", self.load_beam_udl)
+        udl_form.addRow("Coordinate system:", self.load_beam_udl_coordinate)
+        udl_form.addRow("Beam family:", self.load_beam_scope)
+        udl_form.addRow(
+            f"Component X/x [{self.units.force}/{self.units.length}]:",
+            self.load_udl_x,
+        )
+        udl_form.addRow(
+            f"Component Y/y [{self.units.force}/{self.units.length}]:",
+            self.load_udl_y,
+        )
+        udl_form.addRow(
+            f"Component Z/z [{self.units.force}/{self.units.length}]:",
+            self.load_udl_z,
+        )
+        udl_hint = QLabel(
+            "For Global coordinates, the vector is resolved into each beam's "
+            "local axes at export. For Local coordinates, x/y/z are the "
+            "OpenSees beam local axes."
+        )
+        udl_hint.setWordWrap(True)
+        udl_form.addRow(udl_hint)
+        layout.addWidget(udl_group)
+        self.load_udl_group = udl_group
+
+        self.load_storey_table = QTableWidget(0, 2)
+        self.load_storey_table.setHorizontalHeaderLabels(
+            ["Storey", "Beam UDL"]
+        )
+        self.load_storey_table.horizontalHeader().setStretchLastSection(True)
+        self.load_storey_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.load_storey_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.load_storey_table.setMinimumHeight(170)
+        self.load_storey_table.setMaximumHeight(260)
+
+        scope_group = QGroupBox("Beam UDL storey scope")
+        scope_layout = QVBoxLayout(scope_group)
+        scope_layout.addWidget(self.load_storey_table)
+        scope_hint = QLabel(
+            "Self-weight always follows all generated frame columns/beams. "
+            "The storey selection applies only to beam UDL."
+        )
+        scope_hint.setWordWrap(True)
+        scope_layout.addWidget(scope_hint)
+        layout.addWidget(scope_group)
+        self.load_scope_group = scope_group
+
+        note = QLabel(
+            "Loads are generated after shell-mesh refinement, Chevron/K member "
+            "splitting, joint processing and foundation generation. Therefore "
+            "the load objects target the final FE member tags rather than the "
+            "pre-Wizard topology."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("padding:8px;")
+        layout.addWidget(note)
+
+        self.load_summary = QLabel()
+        self.load_summary.setWordWrap(True)
+        self.load_summary.setStyleSheet("padding:8px;")
+        layout.addWidget(self.load_summary)
+
+        self.load_validation_status = QLabel()
+        self.load_validation_status.setWordWrap(True)
+        self.load_validation_status.setObjectName(
+            "frame-wizard-load-validation-status"
+        )
+        self.load_validation_status.setStyleSheet("padding:8px;")
+        layout.addWidget(self.load_validation_status)
+        layout.addStretch(1)
+
+        outer = QVBoxLayout(page)
+        outer.addWidget(scroll)
+        self.loads_scroll = scroll
+        self.loads_page_id = self.addPage(page)
+
+        self._refresh_load_storeys()
+
+        self.load_mode.currentIndexChanged.connect(
+            self._load_control_changed
+        )
+        self.load_self_weight.toggled.connect(self._load_control_changed)
+        self.load_beam_udl.toggled.connect(self._load_control_changed)
+        for combo in (
+            self.load_beam_udl_coordinate,
+            self.load_beam_scope,
+        ):
+            combo.currentIndexChanged.connect(self._load_control_changed)
+        for spin in (
+            self.load_self_weight_density,
+            self.load_udl_x,
+            self.load_udl_y,
+            self.load_udl_z,
+        ):
+            spin.valueChanged.connect(self._load_control_changed)
+        self.load_storey_table.itemChanged.connect(
+            self._load_control_changed
+        )
+
+        self.storeys.valueChanged.connect(self._refresh_load_storeys)
+        self.dimension.currentIndexChanged.connect(
+            self._load_geometry_changed
+        )
+        self.create_columns.toggled.connect(self._load_control_changed)
+        self.create_beams_x.toggled.connect(self._load_control_changed)
+        self.create_beams_y.toggled.connect(self._load_control_changed)
+        self.joint_model.currentIndexChanged.connect(
+            self._load_control_changed
+        )
+        self.column_section.currentIndexChanged.connect(
+            self._load_control_changed
+        )
+        self.beam_section.currentIndexChanged.connect(
+            self._load_control_changed
+        )
+
+    def _selected_load_storeys(self) -> tuple[int, ...]:
+        if not hasattr(self, "load_storey_table"):
+            return ()
+        values: list[int] = []
+        for row in range(self.load_storey_table.rowCount()):
+            item = self.load_storey_table.item(row, 1)
+            if item is not None and item.checkState() == Qt.Checked:
+                values.append(row + 1)
+        return tuple(values)
+
+    def _refresh_load_storeys(self, *_args) -> None:
+        if not hasattr(self, "load_storey_table"):
+            return
+        selected = set(self._selected_load_storeys())
+        had_rows = self.load_storey_table.rowCount() > 0
+        table = self.load_storey_table
+        table.blockSignals(True)
+        table.setRowCount(int(self.storeys.value()))
+        for row in range(table.rowCount()):
+            storey = row + 1
+            label = QTableWidgetItem(f"S{storey}")
+            label.setFlags(Qt.ItemIsEnabled)
+            table.setItem(row, 0, label)
+            check = QTableWidgetItem("Enabled")
+            check.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+            check.setCheckState(
+                Qt.Checked
+                if (not had_rows or storey in selected)
+                else Qt.Unchecked
+            )
+            table.setItem(row, 1, check)
+        table.blockSignals(False)
+        self._sync_load_controls()
+        self._update_load_summary()
+        self._update_preview()
+
+    def _load_geometry_changed(self, *_args) -> None:
+        if (
+            hasattr(self, "load_beam_scope")
+            and self.dimension.currentData() == "2D"
+            and self.load_beam_scope.currentData() != "X"
+        ):
+            self.load_beam_scope.blockSignals(True)
+            self.load_beam_scope.setCurrentIndex(
+                self.load_beam_scope.findData("X")
+            )
+            self.load_beam_scope.blockSignals(False)
+        self._load_control_changed()
+
+    def _load_control_changed(self, *_args) -> None:
+        self._sync_load_controls()
+        self._update_load_summary()
+        self._update_preview()
+
+    def _sync_load_controls(self, *_args) -> None:
+        if not hasattr(self, "load_mode"):
+            return
+        active = self.load_mode.currentData() == "Static"
+        self.load_self_weight_group.setEnabled(active)
+        self.load_udl_group.setEnabled(active)
+        self.load_scope_group.setEnabled(
+            active and self.load_beam_udl.isChecked()
+        )
+        self.load_self_weight_density.setEnabled(
+            active and self.load_self_weight.isChecked()
+        )
+
+        udl_active = active and self.load_beam_udl.isChecked()
+        for widget in (
+            self.load_beam_udl_coordinate,
+            self.load_beam_scope,
+            self.load_udl_x,
+            self.load_udl_y,
+            self.load_udl_z,
+        ):
+            widget.setEnabled(udl_active)
+        self.load_beam_scope.setEnabled(
+            udl_active and self.dimension.currentData() == "3D"
+        )
+        if (
+            self.dimension.currentData() == "2D"
+            and self.load_beam_scope.currentData() != "X"
+        ):
+            self.load_beam_scope.blockSignals(True)
+            self.load_beam_scope.setCurrentIndex(
+                self.load_beam_scope.findData("X")
+            )
+            self.load_beam_scope.blockSignals(False)
+
+    def _self_weight_section_error(
+        self,
+        section_tag: int | None,
+        label: str,
+        density_override: float,
+    ) -> str:
+        if section_tag is None:
+            return f"{label} section is not assigned."
+        section = self.project.sections.get(int(section_tag))
+        if section is None:
+            return f"{label} section {section_tag} does not exist."
+        if section.section_type != "Elastic":
+            return (
+                f"Automatic self-weight requires Elastic {label.lower()} "
+                f"section; {section.name} is {section.section_type}."
+            )
+        if density_override > 0.0:
+            return ""
+        if section.material_tag is None:
+            return (
+                f"{label} section {section.tag} has no linked material "
+                "density. Enter a density override."
+            )
+        material = self.project.materials.get(int(section.material_tag))
+        if material is None or float(material.density) <= 0.0:
+            return (
+                f"{label} section {section.tag} needs positive linked material "
+                "density or a density override."
+            )
+        return ""
+
+    def _load_validation_error(self) -> str:
+        try:
+            spec = self.spec()
+            validate_frame_grid_spec(spec)
+        except (TypeError, ValueError) as exc:
+            return str(exc)
+
+        if spec.load_mode != "Static":
+            return ""
+        if spec.load_beam_udl and not self._selected_load_storeys():
+            return "Select at least one storey for beam UDL."
+
+        if spec.load_self_weight:
+            density = float(spec.load_self_weight_density)
+            if spec.create_columns:
+                error = self._self_weight_section_error(
+                    spec.column_section_tag,
+                    "Column",
+                    density,
+                )
+                if error:
+                    return error
+            if spec.create_beams_x or spec.create_beams_y:
+                error = self._self_weight_section_error(
+                    spec.beam_section_tag,
+                    "Beam",
+                    density,
+                )
+                if error:
+                    return error
+        return ""
+
+    def _update_load_summary(self, *_args) -> None:
+        if not hasattr(self, "load_summary"):
+            return
+        self._sync_load_controls()
+        try:
+            spec = self.spec()
+            error = self._load_validation_error()
+        except (TypeError, ValueError) as exc:
+            spec = self.spec()
+            error = str(exc)
+
+        if spec.load_mode == "Static":
+            parts: list[str] = []
+            if spec.load_self_weight:
+                density_text = (
+                    f"override {spec.load_self_weight_density:g}"
+                    if spec.load_self_weight_density > 0.0
+                    else "linked material density"
+                )
+                parts.append("Self-weight · " + density_text)
+            if spec.load_beam_udl:
+                vector = spec.load_beam_udl_vector
+                parts.append(
+                    "Beam UDL "
+                    f"({vector[0]:g}, {vector[1]:g}, {vector[2]:g}) "
+                    f"{spec.load_beam_udl_coordinate_system} · "
+                    f"{spec.load_beam_scope} beams · storeys "
+                    + ", ".join(map(str, frame_load_storeys(spec)))
+                )
+            self.load_summary.setText(
+                "<b>Automatic load summary</b><br>"
+                "One Linear time series + one Plain pattern<br>"
+                + "<br>".join(parts)
+            )
+        else:
+            self.load_summary.setText(
+                "<b>Automatic load summary</b><br>"
+                "No automatic load pattern will be generated."
+            )
+
+        finish = self.button(QWizard.FinishButton)
+        if error:
+            self.load_validation_status.setText(
+                "<b>Load definition needs attention</b><br>" + error
+            )
+            if finish is not None and self.currentId() == self.loads_page_id:
+                finish.setEnabled(False)
+        else:
+            self.load_validation_status.setText(
+                "<b>Load definition ready</b><br>"
+                "Automatic static loads are consistent with the final frame "
+                "topology."
+            )
+            if finish is not None and self.currentId() == self.loads_page_id:
+                finish.setEnabled(True)
+
     @staticmethod
     def _section_is_compatible(
         section_type: str,
@@ -3844,6 +4354,9 @@ class FrameWizard(QWizard):
         if hasattr(self, "brace_mode"):
             self._sync_brace_controls()
             self._update_brace_summary()
+        if hasattr(self, "load_mode"):
+            self._sync_load_controls()
+            self._update_load_summary()
         self._update_preview()
         self._update_member_summary()
 
@@ -4163,6 +4676,53 @@ class FrameWizard(QWizard):
                 if hasattr(self, "brace_response_preset")
                 else "Standard"
             ),
+            load_mode=(
+                str(self.load_mode.currentData() or "None")
+                if hasattr(self, "load_mode")
+                else "None"
+            ),
+            load_self_weight=(
+                bool(self.load_self_weight.isChecked())
+                if hasattr(self, "load_self_weight")
+                else False
+            ),
+            load_self_weight_density=(
+                float(self.load_self_weight_density.value())
+                if hasattr(self, "load_self_weight_density")
+                else 0.0
+            ),
+            load_beam_udl=(
+                bool(self.load_beam_udl.isChecked())
+                if hasattr(self, "load_beam_udl")
+                else False
+            ),
+            load_beam_udl_coordinate_system=(
+                str(
+                    self.load_beam_udl_coordinate.currentData()
+                    or "global"
+                )
+                if hasattr(self, "load_beam_udl_coordinate")
+                else "global"
+            ),
+            load_beam_udl_vector=(
+                (
+                    float(self.load_udl_x.value()),
+                    float(self.load_udl_y.value()),
+                    float(self.load_udl_z.value()),
+                )
+                if hasattr(self, "load_udl_x")
+                else (0.0, 0.0, -10.0)
+            ),
+            load_beam_scope=(
+                str(self.load_beam_scope.currentData() or "Both")
+                if hasattr(self, "load_beam_scope")
+                else "Both"
+            ),
+            load_storeys=(
+                self._selected_load_storeys()
+                if hasattr(self, "load_storey_table")
+                else ()
+            ),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
                 self.base_support.currentData() or "Fixed"
@@ -4251,6 +4811,10 @@ class FrameWizard(QWizard):
             brace_y_plane_scope=spec.brace_y_plane_scope,
             brace_x_plane_scope=spec.brace_x_plane_scope,
             brace_panel_patterns=spec.brace_panel_patterns,
+            load_mode=spec.load_mode,
+            load_beam_udl=spec.load_beam_udl,
+            load_beam_scope=spec.load_beam_scope,
+            load_storeys=spec.load_storeys,
         )
 
         counts = self._object_counts(spec)
@@ -4346,6 +4910,13 @@ class FrameWizard(QWizard):
                     "<b>Bracing definition needs attention</b><br>" + error
                 )
                 return False
+        if self.currentId() == self.loads_page_id:
+            error = self._load_validation_error()
+            if error:
+                self.load_validation_status.setText(
+                    "<b>Load definition needs attention</b><br>" + error
+                )
+                return False
         return True
 
     def initializePage(self, page_id: int) -> None:  # noqa: N802
@@ -4374,3 +4945,7 @@ class FrameWizard(QWizard):
             self._refresh_brace_panel_table()
             self._sync_brace_controls()
             self._update_brace_summary()
+        elif page_id == self.loads_page_id:
+            self._refresh_load_storeys()
+            self._sync_load_controls()
+            self._update_load_summary()
