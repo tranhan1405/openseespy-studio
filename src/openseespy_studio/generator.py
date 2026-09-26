@@ -3031,7 +3031,7 @@ def apply_frame_foundation_springs(
     }
 
 
-def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
+def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int | float]:
     """Replace model-linked project data with one Frame Wizard model."""
     validate_frame_grid_spec(spec)
     project.clear_model_linked_data()
