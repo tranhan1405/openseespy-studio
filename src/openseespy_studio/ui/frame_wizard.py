@@ -4762,10 +4762,74 @@ class FrameWizard(QWizard):
         return result
 
     def _write_user_presets(self, presets: dict[str, dict]) -> None:
-        self._preset_settings().setValue(
+        settings = self._preset_settings()
+        settings.setValue(
             "frame_wizard/presets_json",
             json.dumps(presets, sort_keys=True),
         )
+        settings.sync()
+
+    def _recent_preset_tokens(self) -> list[str]:
+        raw = self._preset_settings().value(
+            "frame_wizard/recent_presets_json",
+            "[]",
+        )
+        try:
+            values = json.loads(str(raw or "[]"))
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(values, list):
+            return []
+        result: list[str] = []
+        for value in values:
+            token = str(value)
+            if token and token not in result:
+                result.append(token)
+        return result[:5]
+
+    def _write_recent_preset_tokens(self, values: list[str]) -> None:
+        settings = self._preset_settings()
+        settings.setValue(
+            "frame_wizard/recent_presets_json",
+            json.dumps(list(values)[:5]),
+        )
+        settings.sync()
+
+    def _preset_for_token(
+        self,
+        token,
+    ) -> tuple[str, dict, bool] | None:
+        if not token:
+            return None
+        value = str(token)
+        if value.startswith("builtin:"):
+            name = value.split(":", 1)[1]
+            preset = BUILTIN_FRAME_PRESETS.get(name)
+            return (
+                (name, preset, False)
+                if isinstance(preset, dict)
+                else None
+            )
+        if value.startswith("user:"):
+            name = value.split(":", 1)[1]
+            preset = self._user_presets().get(name)
+            return (
+                (name, preset, True)
+                if isinstance(preset, dict)
+                else None
+            )
+        return None
+
+    def _remember_recent_preset(self, token: str) -> None:
+        if self._preset_for_token(token) is None:
+            return
+        values = [
+            value
+            for value in self._recent_preset_tokens()
+            if value != str(token)
+        ]
+        values.insert(0, str(token))
+        self._write_recent_preset_tokens(values[:5])
 
     def _refresh_preset_combo(self) -> None:
         if not hasattr(self, "preset_combo"):
@@ -4773,19 +4837,81 @@ class FrameWizard(QWizard):
         previous = self.preset_combo.currentData()
         self.preset_combo.blockSignals(True)
         self.preset_combo.clear()
+
+        recent = [
+            token
+            for token in self._recent_preset_tokens()
+            if self._preset_for_token(token) is not None
+        ]
+        if recent:
+            self.preset_combo.addItem("Recent presets", None)
+            for token in recent:
+                resolved = self._preset_for_token(token)
+                if resolved is not None:
+                    name, _, is_user = resolved
+                    suffix = "User" if is_user else "Built-in"
+                    self.preset_combo.addItem(
+                        f"  {name} · {suffix}",
+                        token,
+                    )
+
         self.preset_combo.addItem("Built-in presets", None)
         for name in BUILTIN_FRAME_PRESETS:
-            self.preset_combo.addItem(f"  {name}", f"builtin:{name}")
+            self.preset_combo.addItem(
+                f"  {name}",
+                f"builtin:{name}",
+            )
+
         users = self._user_presets()
         if users:
             self.preset_combo.addItem("User presets", None)
             for name in sorted(users):
-                self.preset_combo.addItem(f"  {name}", f"user:{name}")
+                self.preset_combo.addItem(
+                    f"  {name}",
+                    f"user:{name}",
+                )
+
         index = self.preset_combo.findData(previous)
         if index < 0:
-            index = 1 if self.preset_combo.count() > 1 else 0
+            index = next(
+                (
+                    row
+                    for row in range(self.preset_combo.count())
+                    if self.preset_combo.itemData(row) is not None
+                ),
+                0,
+            )
         self.preset_combo.setCurrentIndex(index)
         self.preset_combo.blockSignals(False)
+        self._sync_preset_library_controls()
+
+    def _sync_preset_library_controls(self, *_args) -> None:
+        if not hasattr(self, "preset_combo"):
+            return
+        resolved = self._preset_for_token(
+            self.preset_combo.currentData()
+        )
+        selectable = resolved is not None
+        is_user = bool(resolved and resolved[2])
+        for name in (
+            "preset_load",
+            "preset_duplicate",
+            "preset_export",
+        ):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setEnabled(selectable)
+        for name in ("preset_rename", "preset_delete"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setEnabled(selectable and is_user)
+
+    def _select_preset_token(self, token: str) -> None:
+        self._refresh_preset_combo()
+        index = self.preset_combo.findData(str(token))
+        if index >= 0:
+            self.preset_combo.setCurrentIndex(index)
+        self._sync_preset_library_controls()
 
     def _store_user_preset(
         self,
@@ -4801,11 +4927,10 @@ class FrameWizard(QWizard):
             name=preset_name,
         )
         self._write_user_presets(presets)
+        token = f"user:{preset_name}"
         self.active_preset_name = preset_name
-        self._refresh_preset_combo()
-        index = self.preset_combo.findData(f"user:{preset_name}")
-        if index >= 0:
-            self.preset_combo.setCurrentIndex(index)
+        self._remember_recent_preset(token)
+        self._select_preset_token(token)
         self.preset_status.setText(
             f"Saved user preset <b>{preset_name}</b>."
         )
@@ -4829,6 +4954,300 @@ class FrameWizard(QWizard):
         except (TypeError, ValueError) as exc:
             self.preset_status.setText(
                 "<b>Preset not saved</b><br>" + str(exc)
+            )
+
+    def _rename_user_preset(
+        self,
+        old_name: str,
+        new_name: str,
+    ) -> str:
+        old = str(old_name).strip()
+        new = str(new_name).strip()
+        if not new:
+            raise ValueError("Preset name cannot be empty.")
+        presets = self._user_presets()
+        if old not in presets:
+            raise ValueError(f"User preset {old!r} does not exist.")
+        if new != old and new in presets:
+            raise ValueError(f"User preset {new!r} already exists.")
+
+        preset = presets.pop(old)
+        spec = frame_spec_from_preset(preset)
+        presets[new] = frame_spec_to_preset(
+            spec,
+            name=new,
+            description=str(preset.get("description", "")),
+        )
+        self._write_user_presets(presets)
+
+        old_token = f"user:{old}"
+        new_token = f"user:{new}"
+        recent = [
+            new_token if token == old_token else token
+            for token in self._recent_preset_tokens()
+        ]
+        self._write_recent_preset_tokens(
+            list(dict.fromkeys(recent))[:5]
+        )
+        if self.active_preset_name == old:
+            self.active_preset_name = new
+        self._select_preset_token(new_token)
+        self._update_review_page()
+        return new
+
+    def _rename_selected_preset(self, *_args) -> None:
+        resolved = self._preset_for_token(
+            self.preset_combo.currentData()
+        )
+        if resolved is None or not resolved[2]:
+            return
+        old_name = resolved[0]
+        new_name, accepted = QInputDialog.getText(
+            self,
+            "Rename Frame Wizard Preset",
+            "New name:",
+            text=old_name,
+        )
+        if not accepted:
+            return
+        try:
+            renamed = self._rename_user_preset(
+                old_name,
+                new_name,
+            )
+            self.preset_status.setText(
+                f"Renamed preset to <b>{renamed}</b>."
+            )
+        except (TypeError, ValueError) as exc:
+            self.preset_status.setText(
+                "<b>Preset not renamed</b><br>" + str(exc)
+            )
+
+    def _duplicate_preset(
+        self,
+        token: str,
+        new_name: str | None = None,
+    ) -> str:
+        resolved = self._preset_for_token(token)
+        if resolved is None:
+            raise ValueError("Select a preset to duplicate.")
+        source_name, preset, _ = resolved
+        existing = set(BUILTIN_FRAME_PRESETS) | set(
+            self._user_presets()
+        )
+        desired = (
+            str(new_name).strip()
+            if new_name is not None
+            else f"{source_name} Copy"
+        )
+        if not desired:
+            raise ValueError("Preset name cannot be empty.")
+        if new_name is None:
+            desired = unique_frame_preset_name(
+                desired,
+                existing,
+            )
+        elif desired in existing:
+            raise ValueError(
+                f"Preset {desired!r} already exists."
+            )
+
+        spec = frame_spec_from_preset(preset)
+        presets = self._user_presets()
+        presets[desired] = frame_spec_to_preset(
+            spec,
+            name=desired,
+            description=str(preset.get("description", "")),
+        )
+        self._write_user_presets(presets)
+        target = f"user:{desired}"
+        self._remember_recent_preset(target)
+        self.active_preset_name = desired
+        self._select_preset_token(target)
+        self._update_review_page()
+        return desired
+
+    def _duplicate_selected_preset(self, *_args) -> None:
+        token = self.preset_combo.currentData()
+        resolved = self._preset_for_token(token)
+        if resolved is None:
+            return
+        source_name = resolved[0]
+        existing = set(BUILTIN_FRAME_PRESETS) | set(
+            self._user_presets()
+        )
+        default_name = unique_frame_preset_name(
+            f"{source_name} Copy",
+            existing,
+        )
+        name, accepted = QInputDialog.getText(
+            self,
+            "Duplicate Frame Wizard Preset",
+            "New preset name:",
+            text=default_name,
+        )
+        if not accepted:
+            return
+        try:
+            duplicated = self._duplicate_preset(
+                str(token),
+                str(name),
+            )
+            self.preset_status.setText(
+                f"Duplicated as <b>{duplicated}</b>."
+            )
+        except (TypeError, ValueError) as exc:
+            self.preset_status.setText(
+                "<b>Preset not duplicated</b><br>" + str(exc)
+            )
+
+    def _delete_user_preset(self, name: str) -> None:
+        preset_name = str(name).strip()
+        presets = self._user_presets()
+        if preset_name not in presets:
+            raise ValueError(
+                f"User preset {preset_name!r} does not exist."
+            )
+        del presets[preset_name]
+        self._write_user_presets(presets)
+        token = f"user:{preset_name}"
+        self._write_recent_preset_tokens([
+            value
+            for value in self._recent_preset_tokens()
+            if value != token
+        ])
+        if self.active_preset_name == preset_name:
+            self.active_preset_name = "Custom"
+        self._refresh_preset_combo()
+        self._update_review_page()
+
+    def _delete_selected_preset(self, *_args) -> None:
+        resolved = self._preset_for_token(
+            self.preset_combo.currentData()
+        )
+        if resolved is None or not resolved[2]:
+            return
+        name = resolved[0]
+        answer = QMessageBox.question(
+            self,
+            "Delete Frame Wizard Preset",
+            f"Delete user preset '{name}'?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            self._delete_user_preset(name)
+            self.preset_status.setText(
+                f"Deleted user preset <b>{name}</b>."
+            )
+        except (TypeError, ValueError) as exc:
+            self.preset_status.setText(
+                "<b>Preset not deleted</b><br>" + str(exc)
+            )
+
+    def _export_preset_to_path(
+        self,
+        token: str,
+        path: str,
+    ) -> str:
+        resolved = self._preset_for_token(token)
+        if resolved is None:
+            raise ValueError("Select a preset to export.")
+        name, preset, _ = resolved
+        target = str(path).strip()
+        if not target:
+            raise ValueError("Preset export path cannot be empty.")
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write(frame_preset_to_json(preset))
+        return name
+
+    def _export_selected_preset_json(self, *_args) -> None:
+        token = self.preset_combo.currentData()
+        resolved = self._preset_for_token(token)
+        if resolved is None:
+            return
+        name = resolved[0]
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Frame Wizard Preset",
+            f"{name}.fewiz-frame.json",
+            "FEWIZ Frame Preset (*.json);;JSON Files (*.json)",
+        )
+        if not path:
+            return
+        try:
+            exported = self._export_preset_to_path(
+                str(token),
+                path,
+            )
+            self.preset_status.setText(
+                f"Exported <b>{exported}</b> to JSON."
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            self.preset_status.setText(
+                "<b>Preset not exported</b><br>" + str(exc)
+            )
+
+    def _import_preset_from_path(self, path: str) -> str:
+        source = str(path).strip()
+        if not source:
+            raise ValueError("Preset import path cannot be empty.")
+        with open(source, "r", encoding="utf-8") as handle:
+            preset = frame_preset_from_json(handle.read())
+
+        users = self._user_presets()
+        name = unique_frame_preset_name(
+            str(preset["name"]),
+            set(BUILTIN_FRAME_PRESETS) | set(users),
+        )
+        spec = frame_spec_from_preset(preset)
+        users[name] = frame_spec_to_preset(
+            spec,
+            name=name,
+            description=str(preset.get("description", "")),
+        )
+        self._write_user_presets(users)
+        token = f"user:{name}"
+        self._remember_recent_preset(token)
+        self.active_preset_name = name
+        self._select_preset_token(token)
+        self._update_review_page()
+        return name
+
+    def _import_preset_json(self, *_args) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Frame Wizard Preset",
+            "",
+            "FEWIZ Frame Preset (*.json);;JSON Files (*.json)",
+        )
+        if not path:
+            return
+        try:
+            name = self._import_preset_from_path(path)
+            resolved = self._preset_for_token(f"user:{name}")
+            issues: list[str] = []
+            if resolved is not None:
+                issues = frame_preset_dependency_issues(
+                    self.project,
+                    frame_spec_from_preset(resolved[1]),
+                )
+            self.preset_status.setText(
+                f"Imported <b>{name}</b>."
+                + (
+                    "<br>"
+                    + "<br>".join(
+                        f"• {item}" for item in issues[:5]
+                    )
+                    if issues
+                    else ""
+                )
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            self.preset_status.setText(
+                "<b>Preset not imported</b><br>" + str(exc)
             )
 
     @staticmethod
