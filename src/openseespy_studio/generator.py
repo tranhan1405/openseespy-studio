@@ -129,6 +129,9 @@ class FrameGridSpec:
     load_beam_udl_vector: tuple[float, float, float] = (0.0, 0.0, -10.0)
     load_beam_scope: str = "Both"
     load_storeys: tuple[int, ...] = ()
+    load_floor_area: bool = False
+    load_floor_area_pressure: float = 0.0
+    load_floor_area_direction: str = "X"
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -890,6 +893,16 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
             "Frame Wizard self-weight density override must be finite and "
             "non-negative."
         )
+    floor_pressure = float(spec.load_floor_area_pressure)
+    if not math.isfinite(floor_pressure) or floor_pressure < 0.0:
+        raise ValueError(
+            "Frame Wizard floor area pressure must be finite and non-negative."
+        )
+    floor_direction = str(spec.load_floor_area_direction or "X")
+    if floor_direction not in {"X", "Y"}:
+        raise ValueError(
+            "Frame Wizard floor area load direction must be X or Y."
+        )
     if load_mode == "Static":
         if joint_model in macro_joint_models:
             raise ValueError(
@@ -897,10 +910,14 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                 "3D/6DOF frame backend; native 2D macro-joint cores are not "
                 "combined with automatic loads yet."
             )
-        if not bool(spec.load_self_weight) and not bool(spec.load_beam_udl):
+        if (
+            not bool(spec.load_self_weight)
+            and not bool(spec.load_beam_udl)
+            and not bool(spec.load_floor_area)
+        ):
             raise ValueError(
-                "Frame Wizard static load mode requires self-weight and/or "
-                "beam UDL."
+                "Frame Wizard static load mode requires self-weight, beam UDL "
+                "and/or floor area load."
             )
         beam_scope = str(spec.load_beam_scope)
         if spec.planar_2d and beam_scope in {"Y", "Both"}:
@@ -924,6 +941,24 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
             ):
                 raise ValueError(
                     "Y beam UDL requires Y-direction beams."
+                )
+        if bool(spec.load_floor_area):
+            if spec.planar_2d:
+                raise ValueError(
+                    "Floor area load tributary distribution requires a 3D "
+                    "Frame Wizard model."
+                )
+            if floor_pressure <= 0.0:
+                raise ValueError(
+                    "Frame Wizard floor area pressure must be positive."
+                )
+            if floor_direction == "X" and not bool(spec.create_beams_x):
+                raise ValueError(
+                    "Floor area load to X beams requires X-direction beams."
+                )
+            if floor_direction == "Y" and not bool(spec.create_beams_y):
+                raise ValueError(
+                    "Floor area load to Y beams requires Y-direction beams."
                 )
 
     frame_grid_coordinates(spec)
@@ -2435,6 +2470,75 @@ def _frame_beam_udl_targets(
     return targets
 
 
+def _frame_tributary_width(
+    coordinates: list[float],
+    index: int,
+) -> float:
+    if len(coordinates) < 2:
+        return 0.0
+    index = int(index)
+    if index <= 0:
+        return 0.5 * float(coordinates[1] - coordinates[0])
+    if index >= len(coordinates) - 1:
+        return 0.5 * float(coordinates[-1] - coordinates[-2])
+    return 0.5 * float(
+        coordinates[index + 1] - coordinates[index - 1]
+    )
+
+
+def _frame_floor_area_load_targets(
+    model: StructuralModel,
+    spec: FrameGridSpec,
+) -> list[tuple[object, float]]:
+    if not bool(spec.load_floor_area) or spec.planar_2d:
+        return []
+
+    x_coordinates, y_coordinates, z_coordinates = frame_grid_coordinates(spec)
+    scale = max(
+        x_coordinates[-1] - x_coordinates[0],
+        y_coordinates[-1] - y_coordinates[0],
+        z_coordinates[-1] - z_coordinates[0],
+        1.0,
+    )
+    tolerance = 1.0e-9 * scale
+    selected_storeys = set(frame_load_storeys(spec))
+    direction = str(spec.load_floor_area_direction or "X")
+    group = "beam-x" if direction == "X" else "beam-y"
+    transverse = y_coordinates if direction == "X" else x_coordinates
+
+    targets: list[tuple[object, float]] = []
+    for element in model.elements.values():
+        if element.group != group:
+            continue
+        storey = _frame_element_storey(
+            model,
+            element,
+            z_coordinates,
+            tolerance=tolerance,
+        )
+        if storey not in selected_storeys:
+            continue
+        node_i = model.nodes.get(int(element.i))
+        node_j = model.nodes.get(int(element.j))
+        if node_i is None or node_j is None:
+            continue
+        coordinate = (
+            0.5 * (float(node_i.xyz[1]) + float(node_j.xyz[1]))
+            if direction == "X"
+            else 0.5 * (float(node_i.xyz[0]) + float(node_j.xyz[0]))
+        )
+        grid_index = min(
+            range(len(transverse)),
+            key=lambda idx: abs(float(transverse[idx]) - coordinate),
+        )
+        if abs(float(transverse[grid_index]) - coordinate) > tolerance:
+            continue
+        width = _frame_tributary_width(transverse, grid_index)
+        if width > 0.0:
+            targets.append((element, width))
+    return targets
+
+
 def _preflight_frame_self_weight(
     project,
     spec: FrameGridSpec,
@@ -2490,6 +2594,7 @@ def apply_frame_static_loads(
             "load_patterns": 0,
             "self_weight_loads": 0,
             "beam_udl_loads": 0,
+            "floor_area_loads": 0,
         }
 
     model = project.model
@@ -2503,6 +2608,7 @@ def apply_frame_static_loads(
         if bool(spec.load_beam_udl)
         else []
     )
+    floor_area_targets = _frame_floor_area_load_targets(model, spec)
     if self_weight_targets:
         _preflight_frame_self_weight(
             project,
@@ -2576,10 +2682,34 @@ def apply_frame_static_loads(
         next_load_tag += 1
         udl_count += 1
 
+    floor_area_count = 0
+    floor_pressure = float(spec.load_floor_area_pressure)
+    for element, tributary_width in sorted(
+        floor_area_targets,
+        key=lambda item: int(item[0].tag),
+    ):
+        line_load = floor_pressure * float(tributary_width)
+        project.add_element_load(
+            ElementLoadData(
+                tag=next_load_tag,
+                name=f"Frame floor area load E{element.tag}",
+                pattern_tag=pattern_tag,
+                element_tag=int(element.tag),
+                load_type="Uniform",
+                wx=0.0,
+                wy=0.0,
+                wz=-line_load,
+                coordinate_system="global",
+            )
+        )
+        next_load_tag += 1
+        floor_area_count += 1
+
     return {
         "load_patterns": 1,
         "self_weight_loads": self_weight_count,
         "beam_udl_loads": udl_count,
+        "floor_area_loads": floor_area_count,
     }
 
 
