@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, QSettings, Qt
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -13,7 +14,9 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QPushButton,
     QScrollArea,
     QSpinBox,
     QTabWidget,
@@ -26,6 +29,12 @@ from PySide6.QtWidgets import (
 )
 
 from ..frame_setup import prepare_frame_grid
+from ..frame_presets import (
+    BUILTIN_FRAME_PRESETS,
+    frame_preset_dependency_issues,
+    frame_spec_from_preset,
+    frame_spec_to_preset,
+)
 from ..generator import (
     FrameGridSpec,
     frame_brace_element_count,
@@ -1061,6 +1070,7 @@ class FrameWizard(QWizard):
         self._build_foundation_page()
         self._build_bracing_page()
         self._build_loads_page()
+        self.active_preset_name = "Custom"
         self._build_mass_page()
         self._build_review_page()
         self.setButtonText(QWizard.FinishButton, "Generate Model")
@@ -1249,6 +1259,29 @@ class FrameWizard(QWizard):
         self.base_support_note.setWordWrap(True)
         support_form.addRow(self.base_support_note)
         layout.addWidget(support)
+
+        self.preset_combo = QComboBox()
+        self.preset_load = QPushButton("Load Preset")
+        self.preset_save = QPushButton("Save Current…")
+        preset_buttons = QWidget()
+        preset_buttons_layout = QHBoxLayout(preset_buttons)
+        preset_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        preset_buttons_layout.addWidget(self.preset_load)
+        preset_buttons_layout.addWidget(self.preset_save)
+        preset_buttons_layout.addStretch(1)
+
+        self.preset_status = QLabel()
+        self.preset_status.setWordWrap(True)
+        preset_group = QGroupBox("Frame Wizard presets")
+        preset_form = QFormLayout(preset_group)
+        preset_form.addRow("Preset:", self.preset_combo)
+        preset_form.addRow("", preset_buttons)
+        preset_form.addRow(self.preset_status)
+        layout.addWidget(preset_group)
+
+        self._refresh_preset_combo()
+        self.preset_load.clicked.connect(self._load_selected_preset)
+        self.preset_save.clicked.connect(self._save_current_preset)
 
         self.preview = FramePreview()
         self.preview.setObjectName("frame-wizard-live-preview")
@@ -4495,6 +4528,7 @@ class FrameWizard(QWizard):
         overall_z = z_coords[-1] - z_coords[0]
 
         geometry_text = (
+            f"<b>Preset:</b> {self.active_preset_name}<br>"
             f"<b>{'2D X-Z' if spec.planar_2d else '3D'} frame</b> · "
             f"{spec.nx} X bay(s)"
             + (f" × {spec.ny} Y bay(s)" if not spec.planar_2d else "")
@@ -4674,6 +4708,556 @@ class FrameWizard(QWizard):
             )
             if finish is not None and self.currentId() == self.review_page_id:
                 finish.setEnabled(True)
+
+    @staticmethod
+    def _preset_settings() -> QSettings:
+        return QSettings("FEWIZ", "OpenSeesPy Studio")
+
+    def _user_presets(self) -> dict[str, dict]:
+        raw = self._preset_settings().value(
+            "frame_wizard/presets_json",
+            "{}",
+        )
+        try:
+            data = json.loads(str(raw or "{}"))
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        result: dict[str, dict] = {}
+        for name, preset in data.items():
+            if isinstance(preset, dict):
+                result[str(name)] = preset
+        return result
+
+    def _write_user_presets(self, presets: dict[str, dict]) -> None:
+        self._preset_settings().setValue(
+            "frame_wizard/presets_json",
+            json.dumps(presets, sort_keys=True),
+        )
+
+    def _refresh_preset_combo(self) -> None:
+        if not hasattr(self, "preset_combo"):
+            return
+        previous = self.preset_combo.currentData()
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        self.preset_combo.addItem("Built-in presets", None)
+        for name in BUILTIN_FRAME_PRESETS:
+            self.preset_combo.addItem(f"  {name}", f"builtin:{name}")
+        users = self._user_presets()
+        if users:
+            self.preset_combo.addItem("User presets", None)
+            for name in sorted(users):
+                self.preset_combo.addItem(f"  {name}", f"user:{name}")
+        index = self.preset_combo.findData(previous)
+        if index < 0:
+            index = 1 if self.preset_combo.count() > 1 else 0
+        self.preset_combo.setCurrentIndex(index)
+        self.preset_combo.blockSignals(False)
+
+    def _store_user_preset(
+        self,
+        name: str,
+        spec: FrameGridSpec,
+    ) -> None:
+        preset_name = str(name).strip()
+        if not preset_name:
+            raise ValueError("Preset name cannot be empty.")
+        presets = self._user_presets()
+        presets[preset_name] = frame_spec_to_preset(
+            spec,
+            name=preset_name,
+        )
+        self._write_user_presets(presets)
+        self.active_preset_name = preset_name
+        self._refresh_preset_combo()
+        index = self.preset_combo.findData(f"user:{preset_name}")
+        if index >= 0:
+            self.preset_combo.setCurrentIndex(index)
+        self.preset_status.setText(
+            f"Saved user preset <b>{preset_name}</b>."
+        )
+        self._update_review_page()
+
+    def _save_current_preset(self, *_args) -> None:
+        name, accepted = QInputDialog.getText(
+            self,
+            "Save Frame Wizard Preset",
+            "Preset name:",
+            text=(
+                ""
+                if self.active_preset_name in {"", "Custom"}
+                else self.active_preset_name
+            ),
+        )
+        if not accepted:
+            return
+        try:
+            self._store_user_preset(name, self.spec())
+        except (TypeError, ValueError) as exc:
+            self.preset_status.setText(
+                "<b>Preset not saved</b><br>" + str(exc)
+            )
+
+    @staticmethod
+    def _set_combo_data(combo: QComboBox, value) -> bool:
+        index = combo.findData(value)
+        if index < 0:
+            return False
+        combo.setCurrentIndex(index)
+        return True
+
+    @staticmethod
+    def _set_spacing_values(
+        editor: SpacingEditor,
+        values: tuple[float, ...],
+    ) -> None:
+        for row, value in enumerate(values):
+            widget = editor.cellWidget(row, 0)
+            if isinstance(widget, QDoubleSpinBox):
+                widget.setValue(float(value))
+
+    @staticmethod
+    def _set_check_table_values(
+        table: QTableWidget,
+        values: tuple[int, ...],
+        *,
+        first_value: int = 0,
+    ) -> None:
+        selected = {int(value) for value in values}
+        table.blockSignals(True)
+        for row in range(table.rowCount()):
+            item = table.item(row, table.columnCount() - 1)
+            if item is None:
+                continue
+            value = row + int(first_value)
+            item.setCheckState(
+                Qt.Checked if value in selected else Qt.Unchecked
+            )
+        table.blockSignals(False)
+
+    def _apply_frame_spec(self, spec: FrameGridSpec) -> None:
+        self._set_combo_data(
+            self.dimension,
+            "2D" if spec.planar_2d else "3D",
+        )
+        self.x_bays.setValue(int(spec.nx))
+        self.y_bays.setValue(int(spec.ny))
+        self.storeys.setValue(int(spec.nz))
+        self.x_spacing.setValue(float(spec.dx))
+        self.y_spacing.setValue(float(spec.dy))
+        self.storey_height.setValue(float(spec.dz))
+        self.origin_x.setValue(float(spec.origin_x))
+        self.origin_y.setValue(float(spec.origin_y))
+        self.origin_z.setValue(float(spec.origin_z))
+
+        individual = bool(
+            spec.x_bay_widths
+            or spec.y_bay_widths
+            or spec.storey_heights
+        )
+        self._set_combo_data(
+            self.spacing_mode,
+            "Individual" if individual else "Uniform",
+        )
+        self._resize_spacing_editor(self.x_spacing_editor, int(spec.nx))
+        self._resize_spacing_editor(self.y_spacing_editor, int(spec.ny))
+        self._resize_spacing_editor(self.z_spacing_editor, int(spec.nz))
+        if spec.x_bay_widths:
+            self._set_spacing_values(
+                self.x_spacing_editor,
+                tuple(spec.x_bay_widths),
+            )
+        if spec.y_bay_widths:
+            self._set_spacing_values(
+                self.y_spacing_editor,
+                tuple(spec.y_bay_widths),
+            )
+        if spec.storey_heights:
+            self._set_spacing_values(
+                self.z_spacing_editor,
+                tuple(spec.storey_heights),
+            )
+
+        self.create_columns.setChecked(bool(spec.create_columns))
+        self.create_beams_x.setChecked(bool(spec.create_beams_x))
+        self.create_beams_y.setChecked(bool(spec.create_beams_y))
+        self._set_combo_data(
+            self.base_support,
+            str(spec.planar_base_support),
+        )
+
+        self._set_combo_data(
+            self.column_formulation,
+            str(spec.column_element_type),
+        )
+        self._set_combo_data(
+            self.beam_formulation,
+            str(spec.beam_element_type),
+        )
+        self._populate_member_dependencies()
+        for combo, value in (
+            (self.column_section, spec.column_section_tag),
+            (self.beam_section, spec.beam_section_tag),
+            (self.column_transformation, spec.column_transf_tag),
+            (self.beam_transformation, spec.beam_transf_tag),
+        ):
+            self._set_combo_data(combo, value)
+        self._set_combo_data(
+            self.column_integration,
+            str(spec.column_integration_type),
+        )
+        self._set_combo_data(
+            self.beam_integration,
+            str(spec.beam_integration_type),
+        )
+        self.column_integration_points.setValue(
+            int(spec.column_integration_points)
+        )
+        self.beam_integration_points.setValue(
+            int(spec.beam_integration_points)
+        )
+        for combo, value in (
+            (
+                self.column_hinge_i_section,
+                spec.column_hinge_i_section_tag,
+            ),
+            (
+                self.column_hinge_j_section,
+                spec.column_hinge_j_section_tag,
+            ),
+            (
+                self.column_interior_section,
+                spec.column_interior_section_tag,
+            ),
+            (
+                self.beam_hinge_i_section,
+                spec.beam_hinge_i_section_tag,
+            ),
+            (
+                self.beam_hinge_j_section,
+                spec.beam_hinge_j_section_tag,
+            ),
+            (
+                self.beam_interior_section,
+                spec.beam_interior_section_tag,
+            ),
+        ):
+            self._set_combo_data(combo, value)
+        self.column_hinge_i_length.setValue(
+            float(spec.column_hinge_i_length)
+        )
+        self.column_hinge_j_length.setValue(
+            float(spec.column_hinge_j_length)
+        )
+        self.beam_hinge_i_length.setValue(
+            float(spec.beam_hinge_i_length)
+        )
+        self.beam_hinge_j_length.setValue(
+            float(spec.beam_hinge_j_length)
+        )
+        self.column_mass_per_length.setValue(
+            float(spec.column_mass_per_length)
+        )
+        self.beam_mass_per_length.setValue(
+            float(spec.beam_mass_per_length)
+        )
+        self.column_consistent_mass.setChecked(
+            bool(spec.column_consistent_mass)
+        )
+        self.beam_consistent_mass.setChecked(
+            bool(spec.beam_consistent_mass)
+        )
+
+        self._set_combo_data(self.joint_model, str(spec.joint_model))
+        self._populate_joint_materials()
+        self._set_combo_data(
+            self.joint_material,
+            spec.joint_material_tag,
+        )
+        self._set_combo_data(self.joint_scope, str(spec.joint_scope))
+        self.joint_panel_width.setValue(float(spec.joint_panel_width))
+        self.joint_panel_height.setValue(float(spec.joint_panel_height))
+        self._set_combo_data(
+            self.joint_large_disp,
+            int(spec.joint_large_disp),
+        )
+        for combo, value in zip(
+            self.joint_interface_materials,
+            spec.joint_interface_material_tags,
+        ):
+            self._set_combo_data(combo, int(value))
+        for combo, value in zip(
+            self.bcj_materials,
+            spec.joint_component_material_tags,
+        ):
+            self._set_combo_data(combo, int(value))
+        self.bcj_height_factor.setValue(float(spec.joint_height_factor))
+        self.bcj_width_factor.setValue(float(spec.joint_width_factor))
+        self.kraw_rigid_a.setValue(float(spec.joint_rigid_a))
+        self.kraw_rigid_e.setValue(float(spec.joint_rigid_e))
+        self.kraw_rigid_i.setValue(float(spec.joint_rigid_i))
+
+        self._set_combo_data(
+            self.diaphragm_mode,
+            str(spec.diaphragm_mode),
+        )
+        self._populate_slab_sections()
+        self._set_combo_data(self.slab_section, spec.slab_section_tag)
+        self._set_combo_data(
+            self.slab_formulation,
+            str(spec.slab_element_type),
+        )
+        self.slab_divisions_x.setValue(int(spec.slab_divisions_x))
+        self.slab_divisions_y.setValue(int(spec.slab_divisions_y))
+        self.slab_corotational.setChecked(bool(spec.slab_corotational))
+        self.slab_mass_per_area.setValue(float(spec.slab_mass_per_area))
+        self.diaphragm_floor_mass.setValue(
+            float(spec.diaphragm_floor_mass)
+        )
+        self.diaphragm_rotational_inertia.setValue(
+            float(spec.diaphragm_rotational_inertia)
+        )
+        self._refresh_diaphragm_levels()
+        selected_levels = {int(v) for v in spec.diaphragm_levels}
+        self.diaphragm_level_table.blockSignals(True)
+        for row in range(self.diaphragm_level_table.rowCount()):
+            item = self.diaphragm_level_table.item(row, 0)
+            if item is not None:
+                item.setCheckState(
+                    Qt.Checked
+                    if row + 1 in selected_levels
+                    else Qt.Unchecked
+                )
+        self.diaphragm_level_table.blockSignals(False)
+
+        self._set_combo_data(
+            self.foundation_mode,
+            str(spec.foundation_mode),
+        )
+        self._set_combo_data(
+            self.foundation_assignment_mode,
+            str(spec.foundation_assignment_mode),
+        )
+        self._populate_foundation_materials()
+        profiles = tuple(spec.foundation_profile_material_tags)
+        if not profiles:
+            profiles = (tuple(spec.foundation_material_tags),)
+        for profile_index, profile in enumerate(profiles):
+            if profile_index >= len(self.foundation_profile_materials):
+                break
+            for combo, value in zip(
+                self.foundation_profile_materials[profile_index],
+                profile,
+            ):
+                self._set_combo_data(combo, int(value))
+        self._refresh_foundation_base_table()
+        for row, profile_index in enumerate(
+            spec.foundation_base_profile_indices
+        ):
+            if row >= self.foundation_base_table.rowCount():
+                break
+            combo = self.foundation_base_table.cellWidget(row, 3)
+            if isinstance(combo, QComboBox):
+                self._set_combo_data(combo, int(profile_index))
+
+        self._set_combo_data(self.brace_mode, str(spec.brace_mode))
+        self._set_combo_data(self.brace_pattern, str(spec.brace_pattern))
+        self._set_combo_data(
+            self.brace_element_type,
+            str(spec.brace_element_type),
+        )
+        self._populate_brace_materials()
+        self._set_combo_data(
+            self.brace_material,
+            spec.brace_material_tag,
+        )
+        self.brace_area.setValue(float(spec.brace_area))
+        self.brace_mass_per_length.setValue(
+            float(spec.brace_mass_per_length)
+        )
+        self.brace_do_rayleigh.setChecked(bool(spec.brace_do_rayleigh))
+        self._set_combo_data(
+            self.brace_plane_mode,
+            str(spec.brace_plane_mode),
+        )
+        self._set_combo_data(
+            self.brace_y_plane_scope,
+            str(spec.brace_y_plane_scope),
+        )
+        self._set_combo_data(
+            self.brace_x_plane_scope,
+            str(spec.brace_x_plane_scope),
+        )
+        self._set_combo_data(
+            self.brace_response_preset,
+            str(spec.brace_response_preset),
+        )
+        self._refresh_brace_scope_tables()
+        self._set_check_table_values(
+            self.brace_x_table,
+            tuple(spec.brace_x_bays),
+        )
+        self._set_check_table_values(
+            self.brace_y_table,
+            tuple(spec.brace_y_bays),
+        )
+        self._set_check_table_values(
+            self.brace_storey_table,
+            tuple(spec.brace_storeys),
+            first_value=1,
+        )
+        self._refresh_brace_panel_table()
+        panel_map = {
+            (str(axis), int(plane), int(bay), int(storey)): str(pattern)
+            for axis, plane, bay, storey, pattern
+            in spec.brace_panel_patterns
+        }
+        for row in range(self.brace_panel_table.rowCount()):
+            axis_item = self.brace_panel_table.item(row, 0)
+            plane_item = self.brace_panel_table.item(row, 1)
+            bay_item = self.brace_panel_table.item(row, 2)
+            storey_item = self.brace_panel_table.item(row, 3)
+            combo = self.brace_panel_table.cellWidget(row, 4)
+            if not all((axis_item, plane_item, bay_item, storey_item)):
+                continue
+            if not isinstance(combo, QComboBox):
+                continue
+            key = (
+                axis_item.text(),
+                int(plane_item.text()),
+                int(bay_item.text()),
+                int(storey_item.text()),
+            )
+            if key in panel_map:
+                self._set_combo_data(combo, panel_map[key])
+
+        self._set_combo_data(self.load_mode, str(spec.load_mode))
+        self.load_self_weight.setChecked(bool(spec.load_self_weight))
+        self.load_self_weight_density.setValue(
+            float(spec.load_self_weight_density)
+        )
+        self.load_beam_udl.setChecked(bool(spec.load_beam_udl))
+        self._set_combo_data(
+            self.load_beam_udl_coordinate,
+            str(spec.load_beam_udl_coordinate_system),
+        )
+        self.load_udl_x.setValue(float(spec.load_beam_udl_vector[0]))
+        self.load_udl_y.setValue(float(spec.load_beam_udl_vector[1]))
+        self.load_udl_z.setValue(float(spec.load_beam_udl_vector[2]))
+        self._set_combo_data(
+            self.load_beam_scope,
+            str(spec.load_beam_scope),
+        )
+        self.load_floor_area.setChecked(bool(spec.load_floor_area))
+        self.load_floor_area_pressure.setValue(
+            float(spec.load_floor_area_pressure)
+        )
+        self._set_combo_data(
+            self.load_floor_area_direction,
+            str(spec.load_floor_area_direction),
+        )
+        self._refresh_load_storeys()
+        self._set_check_table_values(
+            self.load_storey_table,
+            tuple(spec.load_storeys),
+            first_value=1,
+        )
+
+        self._set_combo_data(
+            self.mass_source_mode,
+            str(spec.mass_source_mode),
+        )
+        self.mass_include_self.setChecked(bool(spec.mass_include_self))
+        self.mass_include_static.setChecked(
+            bool(spec.mass_include_static_loads)
+        )
+        self.mass_static_factor.setValue(
+            float(spec.mass_static_load_factor)
+        )
+        self._set_combo_data(
+            self.mass_gravity_axis,
+            int(spec.mass_gravity_axis),
+        )
+        self.mass_direction_x.setChecked(1 in spec.mass_directions)
+        self.mass_direction_y.setChecked(2 in spec.mass_directions)
+        self.mass_direction_z.setChecked(3 in spec.mass_directions)
+        self._set_combo_data(self.modal_mode, str(spec.modal_mode))
+        self.modal_num_modes.setValue(int(spec.modal_num_modes))
+        self._set_combo_data(
+            self.modal_eigen_solver,
+            str(spec.modal_eigen_solver),
+        )
+
+        self._sync_dimension()
+        self._sync_spacing_mode()
+        self._sync_member_controls()
+        self._sync_joint_controls()
+        self._sync_diaphragm_controls()
+        self._sync_foundation_controls()
+        self._sync_brace_controls()
+        self._sync_load_controls()
+        self._sync_mass_controls()
+        self._update_preview()
+        self._update_member_summary()
+        self._update_joint_summary()
+        self._update_diaphragm_summary()
+        self._update_foundation_summary()
+        self._update_brace_summary()
+        self._update_load_summary()
+        self._update_mass_summary()
+        self._update_review_page()
+
+    def _load_preset_data(
+        self,
+        preset: dict,
+        *,
+        name: str,
+    ) -> list[str]:
+        spec = frame_spec_from_preset(preset)
+        self._apply_frame_spec(spec)
+        self.active_preset_name = str(name)
+        issues = frame_preset_dependency_issues(
+            self.project,
+            self.spec(),
+        )
+        if issues:
+            self.preset_status.setText(
+                f"Loaded <b>{name}</b>.<br>"
+                + "<br>".join(f"• {item}" for item in issues[:5])
+            )
+        else:
+            self.preset_status.setText(
+                f"Loaded <b>{name}</b> · dependencies resolved."
+            )
+        self._update_review_page()
+        return issues
+
+    def _load_selected_preset(self, *_args) -> None:
+        token = self.preset_combo.currentData()
+        if not token:
+            return
+        token = str(token)
+        if token.startswith("builtin:"):
+            name = token.split(":", 1)[1]
+            preset = BUILTIN_FRAME_PRESETS.get(name)
+        elif token.startswith("user:"):
+            name = token.split(":", 1)[1]
+            preset = self._user_presets().get(name)
+        else:
+            return
+        if preset is None:
+            self.preset_status.setText(
+                "<b>Preset not found.</b>"
+            )
+            return
+        try:
+            self._load_preset_data(preset, name=name)
+        except (TypeError, ValueError) as exc:
+            self.preset_status.setText(
+                "<b>Preset could not be loaded</b><br>" + str(exc)
+            )
 
     @staticmethod
     def _section_is_compatible(
