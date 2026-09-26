@@ -39,6 +39,36 @@ jobs:
         shell: pwsh
         run: python -m openseespy_studio --self-check
 
+      - name: OpenSees masonry runtime smoke test
+        shell: pwsh
+        run: |
+          @'
+          import openseespy.opensees as ops
+
+          ops.wipe()
+          ops.model("basic", "-ndm", 2, "-ndf", 3)
+          for tag, x, y in (
+              (1, 0.0, 0.0), (2, 1.0, 0.0), (3, 2.0, 0.0), (4, 3.0, 0.0),
+              (5, 3.0, 1.0), (6, 3.0, 2.0), (7, 3.0, 3.0), (8, 2.0, 3.0),
+              (9, 1.0, 3.0), (10, 0.0, 3.0), (11, 0.0, 2.0), (12, 0.0, 1.0),
+          ):
+              ops.node(tag, x, y)
+
+          masonry_args = (
+              -5.0e6, 0.20e6, -0.002, -0.010, 0.0005, 2.5e9,
+              1.0, 1.0, 0.20, -0.002, -0.006, 0.40, 0.30,
+              1.75, 0.30, 0.50, 0.50, 0.50, 1.0, 1.0, 0,
+          )
+          ops.uniaxialMaterial("Masonry", 1, *masonry_args)
+          ops.uniaxialMaterial("Masonry", 2, *masonry_args)
+          ops.element(
+              "MasonPan12", 1,
+              1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+              1, 2, 0.15, 0.25, 0.50,
+          )
+          print("WINDOWS_MASONRY_OK", ops.version())
+          '@ | python -
+
       - name: Build standalone application
         shell: pwsh
         run: pyinstaller packaging\openseespy_studio.spec --noconfirm --clean
