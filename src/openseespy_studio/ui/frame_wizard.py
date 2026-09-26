@@ -1500,6 +1500,13 @@ class FrameWizard(QWizard):
             self._diaphragm_control_changed
         )
         self.storeys.valueChanged.connect(self._refresh_diaphragm_levels)
+        self.origin_z.valueChanged.connect(self._refresh_diaphragm_levels)
+        self.spacing_mode.currentIndexChanged.connect(
+            self._refresh_diaphragm_levels
+        )
+        self.z_spacing_editor.connect_value_changed(
+            self._refresh_diaphragm_levels
+        )
         self.dimension.currentIndexChanged.connect(
             self._diaphragm_control_changed
         )
