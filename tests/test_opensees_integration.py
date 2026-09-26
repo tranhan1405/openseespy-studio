@@ -3937,3 +3937,135 @@ def test_frame_wizard_explicit_shell_slab_builds_in_real_opensees(
     )
     assert completed.returncode == 0, completed.stderr
     assert "FRAME_SHELL_SLAB_OK" in completed.stdout
+
+
+def test_frame_wizard_foundation_springs_build_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            960,
+            "Foundation UX",
+            "Elastic",
+            parameters={"E": 2.0e8},
+            source={
+                "response_quantity": "force_deformation",
+                "parameter_dimensions": {"E": "stiffness"},
+            },
+        )
+    )
+    project.add_material(
+        MaterialData(
+            961,
+            "Foundation UZ",
+            "Elastic",
+            parameters={"E": 3.0e8},
+            source={
+                "response_quantity": "force_deformation",
+                "parameter_dimensions": {"E": "stiffness"},
+            },
+        )
+    )
+    project.add_material(
+        MaterialData(
+            962,
+            "Foundation RY",
+            "Elastic",
+            parameters={"E": 4.0e7},
+            source={
+                "response_quantity": "moment_rotation",
+                "parameter_dimensions": {"E": "stiffness"},
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            963,
+            "Foundation frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=963,
+        beam_section_tag=963,
+        foundation_mode="Springs",
+        foundation_material_tags=(960, 0, 961, 0, 962, 0),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["foundation_connections"] == 2
+    assert result["foundation_ground_nodes"] == 2
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('zeroLength'") >= 2
+    assert "'-dir', 1, 3, 5" in source
+
+    top_right = max(
+        (
+            tag
+            for tag, node in project.model.nodes.items()
+            if abs(node.xyz[2] - 3.5) < 1.0e-12
+        ),
+        key=lambda tag: project.model.nodes[tag].xyz[0],
+    )
+    run_block = f"""
+ops.timeSeries('Linear', 996)
+ops.pattern('Plain', 996, 996)
+ops.load({top_right}, 1000.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Transformation')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_ok = ops.analyze(1)
+if _ok != 0:
+    raise RuntimeError(f'Foundation spring analysis failed: {{_ok}}')
+print('FRAME_FOUNDATION_OK', ops.nodeDisp({top_right}, 1))
+"""
+    target = tmp_path / "frame-wizard-foundation-springs.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_FOUNDATION_OK" in completed.stdout
