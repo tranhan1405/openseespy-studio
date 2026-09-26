@@ -4300,6 +4300,17 @@ class MainWindow(QMainWindow):
         self.viewport_toolbar.addAction(self.actions["measure_distance"])
         self.viewport_toolbar.addAction(self.actions["clear_measurements"])
 
+        self.context_toolbar = QToolBar("Context", self)
+        self.context_toolbar.setObjectName("ContextToolbar")
+        self.context_toolbar.setMovable(False)
+        self.context_toolbar.setFloatable(False)
+        self.context_toolbar.setIconSize(QSize(18, 18))
+        self.context_toolbar.setToolButtonStyle(
+            Qt.ToolButtonTextBesideIcon
+        )
+        self.addToolBar(Qt.TopToolBarArea, self.context_toolbar)
+        self._refresh_context_toolbar()
+
         self._ribbon_tab_indices = {
             self.ribbon_tabs.tabText(index): index
             for index in range(self.ribbon_tabs.count())
@@ -4307,6 +4318,102 @@ class MainWindow(QMainWindow):
 
         brand = BrandWidget()
         ribbon.addWidget(brand)
+
+    def _refresh_context_toolbar(
+        self,
+        *,
+        nodes: set[int] | None = None,
+        elements: set[int] | None = None,
+        kinds: set[str] | None = None,
+    ) -> None:
+        toolbar = getattr(self, "context_toolbar", None)
+        if toolbar is None:
+            return
+
+        node_tags = set(
+            self.selection.nodes if nodes is None else nodes
+        )
+        element_tags = set(
+            self.selection.elements if elements is None else elements
+        )
+        payload_kinds = set(kinds or ())
+
+        toolbar.clear()
+
+        if not node_tags and not element_tags and not payload_kinds:
+            placeholder = toolbar.addAction("Context")
+            placeholder.setEnabled(False)
+            return
+
+        label_parts: list[str] = []
+        if node_tags:
+            label_parts.append(f"{len(node_tags)} Node")
+        if element_tags:
+            label_parts.append(f"{len(element_tags)} Element")
+        if payload_kinds and not label_parts:
+            label_parts.append("Tree")
+        header = toolbar.addAction(
+            "Context · " + " / ".join(label_parts)
+        )
+        header.setEnabled(False)
+        toolbar.addSeparator()
+
+        result_kinds = {
+            "jobs_root",
+            "job",
+            "job_plot",
+            "solution_root",
+            "solution_result",
+            "solution_information",
+            "solution_convergence",
+            "solver_output",
+        }
+        surface_kinds = {
+            "surface_geometry",
+            "surface_mesh_recipe",
+        }
+
+        if payload_kinds & result_kinds:
+            toolbar.addAction(self.actions["results_manager"])
+            toolbar.addAction(self.actions["fit_result"])
+            toolbar.addAction(self.actions["clear_result"])
+            return
+
+        if payload_kinds & surface_kinds:
+            toolbar.addAction(self.actions["shell_pressure"])
+            toolbar.addAction(self.actions["surface_mesh_overlay"])
+
+        if node_tags and not element_tags:
+            toolbar.addAction(self.actions["support"])
+            toolbar.addAction(self.actions["nodal_load"])
+            toolbar.addAction(self.actions["mass"])
+            toolbar.addAction(
+                self.actions["prescribed_displacement"]
+            )
+        elif element_tags and not node_tags:
+            toolbar.addAction(self.actions["assign_section"])
+            toolbar.addAction(self.actions["assign_transformation"])
+
+            selected_types = {
+                str(self.model.elements[tag].element_type).lower()
+                for tag in element_tags
+                if tag in self.model.elements
+            }
+            shell_like = any(
+                ("shell" in name or "quad" in name)
+                for name in selected_types
+            )
+            if shell_like:
+                toolbar.addAction(self.actions["shell_pressure"])
+            else:
+                toolbar.addAction(self.actions["beam_load"])
+
+        if node_tags or element_tags:
+            toolbar.addSeparator()
+            toolbar.addAction(self.actions["zoom_selection"])
+            toolbar.addAction(self.actions["hide_selection"])
+            toolbar.addAction(self.actions["isolate_selection"])
+            toolbar.addAction(self.actions["show_all"])
 
     def _save_background_preferences(self) -> None:
         settings = QSettings(
@@ -7646,6 +7753,11 @@ class MainWindow(QMainWindow):
             )
 
         self._sync_ribbon_context(selected_payload_kinds)
+        self._refresh_context_toolbar(
+            nodes=nodes,
+            elements=elements,
+            kinds=selected_payload_kinds,
+        )
 
         if jobs_root_selected:
             # Results / Jobs is a navigation context, not a particular result.
@@ -10635,16 +10747,47 @@ class MainWindow(QMainWindow):
             else:
                 self._show_entity_properties("element", next(iter(elements)))
         elif total > 1:
+            element_types = sorted({
+                str(self.model.elements[tag].element_type)
+                for tag in elements
+                if tag in self.model.elements
+            })
+            node_preview = ", ".join(
+                str(tag) for tag in sorted(nodes)[:8]
+            )
+            element_preview = ", ".join(
+                str(tag) for tag in sorted(elements)[:8]
+            )
             self.properties_panel.set_properties(
                 "Selection",
                 [
+                    ("Scope", "FE Selection"),
                     ("Nodes", len(nodes)),
+                    (
+                        "Node Tags",
+                        node_preview
+                        + (" …" if len(nodes) > 8 else ""),
+                    ),
                     ("Elements", len(elements)),
+                    (
+                        "Element Tags",
+                        element_preview
+                        + (" …" if len(elements) > 8 else ""),
+                    ),
+                    (
+                        "Element Types",
+                        ", ".join(element_types) if element_types else "—",
+                    ),
                     ("Total", total),
                 ],
             )
         else:
             self.properties_panel.set_properties("Properties", [])
+
+        self._refresh_context_toolbar(
+            nodes=nodes,
+            elements=elements,
+        )
 
         if total:
             self.status_message.setText(
