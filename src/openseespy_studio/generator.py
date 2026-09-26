@@ -2629,7 +2629,7 @@ def apply_frame_static_loads(
     project.add_load_pattern(
         LoadPatternData(
             tag=pattern_tag,
-            name="Frame Wizard gravity / beam UDL",
+            name="Frame Wizard gravity / beam / floor area load",
             pattern_type="Plain",
             time_series_tag=time_series_tag,
         )
