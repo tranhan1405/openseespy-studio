@@ -983,6 +983,7 @@ class ResultsPanel(QWidget):
         self._response2000_source_name = ""
         self._active_solution_kind = ""
         self._active_crack_element_scope: set[int] = set()
+        self._active_masonry_element_scope: set[int] = set()
         self._active_shell_element_scope: set[int] = set()
         self._active_shell_deformation_component = "Exx"
         self._active_shell_deformation_location = "mid"
@@ -1013,6 +1014,7 @@ class ResultsPanel(QWidget):
         self._build_mode_tab()
         self._build_node_tab()
         self._build_element_tab()
+        self._build_masonry_tab()
         self._build_shell_tab()
         self._build_crack_tab()
         self._build_fiber_tab()
@@ -1168,6 +1170,49 @@ class ResultsPanel(QWidget):
             self._select_tab("Member Forces")
             if self._motion_display_frame_count > 0:
                 self._set_motion_index(self._motion_display_frame_count - 1)
+            return
+
+        if kind in {
+            "MasonryPanelShear",
+            "MasonryStrutForce",
+            "MasonryStrutStrain",
+        }:
+            self._active_masonry_element_scope = {
+                int(tag)
+                for tag in options.get("_element_scope", [])
+            }
+            if kind == "MasonryPanelShear":
+                quantity = "shear"
+            elif kind == "MasonryStrutForce":
+                quantity = "strut_forces"
+            else:
+                quantity = "strut_strains"
+            index = self.masonry_quantity.findData(quantity)
+            if index >= 0:
+                self.masonry_quantity.setCurrentIndex(index)
+            component = str(
+                options.get(
+                    "component",
+                    "P1" if quantity == "strut_forces" else "E1",
+                )
+            )
+            if quantity in {"strut_forces", "strut_strains"}:
+                prefix = "P" if quantity == "strut_forces" else "E"
+                try:
+                    component_no = int(
+                        component.upper().replace(prefix, "")
+                    )
+                except (TypeError, ValueError):
+                    component_no = 1
+                component_no = max(1, min(6, component_no))
+                component_index = self.masonry_component.findData(
+                    component_no - 1
+                )
+                if component_index >= 0:
+                    self.masonry_component.setCurrentIndex(component_index)
+            self._populate_masonry_elements()
+            self._update_masonry_result()
+            self._select_tab("Masonry Results")
             return
 
         if kind == "ShellDisplacement":
@@ -2171,6 +2216,260 @@ class ResultsPanel(QWidget):
         self.element_table.cellClicked.connect(self._element_clicked)
         layout.addWidget(self.element_table)
         self.tabs.addTab(page, "Member Forces")
+
+    def _build_masonry_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(5)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Panel:"))
+        self.masonry_element = QComboBox()
+        self.masonry_element.currentIndexChanged.connect(
+            self._update_masonry_result
+        )
+        controls.addWidget(self.masonry_element)
+
+        controls.addWidget(QLabel("Result:"))
+        self.masonry_quantity = QComboBox()
+        self.masonry_quantity.addItem("Panel Shear", "shear")
+        self.masonry_quantity.addItem("Strut Force", "strut_forces")
+        self.masonry_quantity.addItem("Strut Strain", "strut_strains")
+        self.masonry_quantity.currentIndexChanged.connect(
+            self._masonry_quantity_changed
+        )
+        controls.addWidget(self.masonry_quantity)
+
+        controls.addWidget(QLabel("Strut:"))
+        self.masonry_component = QComboBox()
+        for index in range(6):
+            self.masonry_component.addItem(f"{index + 1}", index)
+        self.masonry_component.currentIndexChanged.connect(
+            self._update_masonry_result
+        )
+        controls.addWidget(self.masonry_component)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        self.masonry_info = QLabel(
+            "MasonPan12 native responses: panel shear strain/force and "
+            "six internal strut force/strain histories."
+        )
+        self.masonry_info.setWordWrap(True)
+        layout.addWidget(self.masonry_info)
+
+        self.masonry_metrics = QLabel(
+            "Points: -   Peak |Y|: -   Final: -"
+        )
+        self.masonry_metrics.setWordWrap(True)
+        layout.addWidget(self.masonry_metrics)
+
+        self.masonry_plot = TimeHistoryPlot(
+            empty_message="No masonry response data"
+        )
+        self.masonry_plot.setMinimumHeight(180)
+        layout.addWidget(self.masonry_plot, 1)
+
+        self.masonry_table = QTableWidget(0, 3)
+        self.masonry_table.setHorizontalHeaderLabels(
+            ["Step / Time", "X", "Y"]
+        )
+        self.masonry_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.masonry_table.horizontalHeader().setStretchLastSection(True)
+        self.masonry_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.masonry_table.setSelectionBehavior(
+            QAbstractItemView.SelectRows
+        )
+        layout.addWidget(self.masonry_table, 1)
+
+        self.tabs.addTab(page, "Masonry Results")
+        self._masonry_quantity_changed()
+
+    def _masonry_history(self) -> dict[str, Any]:
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        if not isinstance(history, dict):
+            return {}
+        data = history.get("masonry", {})
+        return data if isinstance(data, dict) else {}
+
+    def _populate_masonry_elements(self) -> None:
+        if not hasattr(self, "masonry_element"):
+            return
+        previous = self.masonry_element.currentData()
+        data = self._masonry_history()
+        scope = set(self._active_masonry_element_scope)
+
+        tags: list[int] = []
+        for raw_tag in data:
+            try:
+                tag = int(raw_tag)
+            except (TypeError, ValueError):
+                continue
+            if scope and tag not in scope:
+                continue
+            tags.append(tag)
+        tags.sort()
+
+        self.masonry_element.blockSignals(True)
+        self.masonry_element.clear()
+        for tag in tags:
+            self.masonry_element.addItem(f"MasonPan12 [{tag}]", tag)
+        if previous in tags:
+            index = self.masonry_element.findData(previous)
+            if index >= 0:
+                self.masonry_element.setCurrentIndex(index)
+        self.masonry_element.blockSignals(False)
+
+    def _masonry_quantity_changed(self, *_args) -> None:
+        quantity = str(
+            self.masonry_quantity.currentData() or "shear"
+        )
+        is_strut = quantity in {"strut_forces", "strut_strains"}
+        self.masonry_component.setVisible(is_strut)
+        self._update_masonry_result()
+
+    def _update_masonry_result(self, *_args) -> None:
+        if not hasattr(self, "masonry_plot"):
+            return
+        tag = self.masonry_element.currentData()
+        quantity = str(
+            self.masonry_quantity.currentData() or "shear"
+        )
+        if tag is None:
+            self.masonry_table.setRowCount(0)
+            self.masonry_plot.set_series([], [])
+            self.masonry_info.setText(
+                "No MasonPan12 response history is available. Add a Masonry "
+                "result request and re-run the analysis."
+            )
+            self.masonry_metrics.setText(
+                "Points: -   Peak |Y|: -   Final: -"
+            )
+            return
+
+        data = self._masonry_history().get(str(int(tag)), {})
+        if not isinstance(data, dict):
+            data = {}
+        history = (
+            self._result.get("history", {})
+            if isinstance(self._result, dict)
+            else {}
+        )
+        times = (
+            list(history.get("time", []))
+            if isinstance(history, dict)
+            else []
+        )
+        rows = data.get(quantity, [])
+        if not isinstance(rows, list):
+            rows = []
+
+        x_values: list[float] = []
+        y_values: list[float] = []
+        time_values: list[float] = []
+
+        if quantity == "shear":
+            for index, row in enumerate(rows):
+                if not isinstance(row, (list, tuple)) or len(row) < 2:
+                    continue
+                try:
+                    x_value = float(row[0])
+                    y_value = float(row[1])
+                except (TypeError, ValueError):
+                    continue
+                x_values.append(x_value)
+                y_values.append(y_value)
+                time_values.append(
+                    float(times[index])
+                    if index < len(times)
+                    else float(index + 1)
+                )
+            x_label = "Panel shear strain γ"
+            y_label = "Panel shear force V"
+            self.masonry_table.setHorizontalHeaderLabels(
+                ["Step / Time", "γ", "V"]
+            )
+        else:
+            component_index = int(
+                self.masonry_component.currentData() or 0
+            )
+            for index, row in enumerate(rows):
+                if (
+                    not isinstance(row, (list, tuple))
+                    or component_index >= len(row)
+                ):
+                    continue
+                try:
+                    y_value = float(row[component_index])
+                except (TypeError, ValueError):
+                    continue
+                x_value = (
+                    float(times[index])
+                    if index < len(times)
+                    else float(index + 1)
+                )
+                x_values.append(x_value)
+                y_values.append(y_value)
+                time_values.append(x_value)
+            number = component_index + 1
+            if quantity == "strut_forces":
+                x_label = "Analysis time / load coordinate"
+                y_label = f"Strut P{number} force"
+                self.masonry_table.setHorizontalHeaderLabels(
+                    ["Step / Time", f"P{number}", "Abs(P)"]
+                )
+            else:
+                x_label = "Analysis time / load coordinate"
+                y_label = f"Strut ε{number} strain"
+                self.masonry_table.setHorizontalHeaderLabels(
+                    ["Step / Time", f"ε{number}", "Abs(ε)"]
+                )
+
+        self.masonry_plot.set_series(x_values, y_values)
+        self.masonry_plot.clear_overlay()
+
+        self.masonry_table.setUpdatesEnabled(False)
+        try:
+            self.masonry_table.setRowCount(len(y_values))
+            for row_index, (time_value, x_value, y_value) in enumerate(
+                zip(time_values, x_values, y_values)
+            ):
+                if quantity == "shear":
+                    values = (time_value, x_value, y_value)
+                else:
+                    values = (time_value, y_value, abs(y_value))
+                for column, value in enumerate(values):
+                    self.masonry_table.setItem(
+                        row_index,
+                        column,
+                        QTableWidgetItem(f"{float(value):.6g}"),
+                    )
+        finally:
+            self.masonry_table.setUpdatesEnabled(True)
+
+        if y_values:
+            self.masonry_metrics.setText(
+                f"Points: {len(y_values)}   "
+                f"Peak |Y|: {max(abs(value) for value in y_values):.6g}   "
+                f"Final: ({x_values[-1]:.6g}, {y_values[-1]:.6g})"
+            )
+            self.masonry_info.setText(
+                f"MasonPan12 [{int(tag)}] · X = {x_label} · Y = {y_label}"
+            )
+        else:
+            self.masonry_metrics.setText(
+                "Points: -   Peak |Y|: -   Final: -"
+            )
+            self.masonry_info.setText(
+                f"MasonPan12 [{int(tag)}] · no {y_label} history captured."
+            )
 
     def _build_shell_tab(self) -> None:
         page = QWidget()
@@ -6264,6 +6563,18 @@ class ResultsPanel(QWidget):
             )
         self._active_solution_kind = ""
         self._active_crack_element_scope.clear()
+        self._active_masonry_element_scope.clear()
+        if hasattr(self, "masonry_element"):
+            self.masonry_element.clear()
+            self.masonry_table.setRowCount(0)
+            self.masonry_plot.set_series([], [])
+            self.masonry_info.setText(
+                "MasonPan12 native responses: panel shear strain/force and "
+                "six internal strut force/strain histories."
+            )
+            self.masonry_metrics.setText(
+                "Points: -   Peak |Y|: -   Final: -"
+            )
         self.crack_accumulate.setChecked(False)
         self.crack_line_scale.setValue(0.65)
         self.crack_table.setRowCount(0)
@@ -6961,6 +7272,7 @@ class ResultsPanel(QWidget):
         self._result = dict(result or {})
         self._result_cache_key = cache_key
         self._active_crack_element_scope = set()
+        self._active_masonry_element_scope = set()
         self._node_table_cache.clear()
         self._element_table_cache.clear()
         self._node_table_display_key = None
@@ -6991,6 +7303,8 @@ class ResultsPanel(QWidget):
         self._populate_convergence_dashboard()
         self._populate_node_table()
         self._populate_element_table()
+        self._populate_masonry_elements()
+        self._update_masonry_result()
         self._populate_shell_results()
         self._populate_crack_summary()
         self._populate_fiber_elements()

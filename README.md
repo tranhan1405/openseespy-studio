@@ -1,19 +1,19 @@
-# SARE
+# FEWIZ
 
 <p align="center">
-  <img src="src/openseespy_studio/resources/branding/sare_wordmark.svg"
-       alt="SARE — Structural Analysis & Research Environment for OpenSees"
+  <img src="src/openseespy_studio/resources/branding/fewiz_wordmark.svg"
+       alt="FEWIZ — Structural Analysis & Research Environment for OpenSees"
        width="760">
 </p>
 
-**SARE — Structural Analysis & Research Environment for OpenSees** is a
+**FEWIZ — Structural Analysis & Research Environment for OpenSees** is a
 research-oriented structural simulation environment built around
 [OpenSees](https://opensees.berkeley.edu/) with OpenSeesPy as its current
 Python backend. It combines a tree-based engineering workflow inspired by
 Abaqus/ANSYS with direct, readable OpenSeesPy generation, nonlinear analysis,
 earthquake-engineering workflows, and research-focused post-processing.
 
-SARE is intentionally positioned as an engineering and research environment,
+FEWIZ is intentionally positioned as an engineering and research environment,
 not merely a GUI wrapper. The visual interface is one layer over a validated
 project/model database, reproducible analysis definitions, solver execution,
 and inspectable result workflows.
@@ -29,9 +29,12 @@ and inspectable result workflows.
 - Tree-based project/model navigator with synchronized viewport selection.
 - Interactive PyVista/VTK 3-D viewport.
 - Quick 3-D frame grid generation.
-- Quick planar 2-D frame generation using the SARE 3-D/6-DOF backend with
+- Quick planar 2-D frame generation using the FEWIZ 3-D/6-DOF backend with
   automatic out-of-plane restraints.
 - Quick 1-D column / experimental specimen workflow.
+- RC Wall Wizard for MEFI/RCLMS, MVLEM, SFI_MVLEM and MVLEM_3D.
+- Masonry Wall Wizard with equivalent diagonal-strut and native 12-node
+  MasonPan12 formulations, engineering preview and project-material reuse.
 - Node and frame-element creation plus copy, move, rotate, mirror and delete.
 - Fixed, pinned and custom restraints; equalDOF, rigidLink and rigidDiaphragm.
 - Geometric transformations and elastic/nonlinear beam-column formulations.
@@ -45,6 +48,7 @@ Supported uniaxial material families include:
 - Steel01 / Steel02
 - ReinforcingSteel
 - Concrete01 / Concrete02 / Concrete04
+- Masonry (Crisafulli/Torrisi OpenSees model)
 - Hysteretic / Pinching4
 - Bond_SP01
 - ElasticPPGap
@@ -67,13 +71,15 @@ Research interface workflows include:
 
 #### Verified Material Library
 
-SARE includes a provenance-first **Material Library** inspired by Engineering
+FEWIZ includes a provenance-first **Material Library** inspired by Engineering
 Data workflows. The official library accepts a constitutive parameter set only
 when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
-values are not silently promoted to verified presets.
+values are not silently promoted to verified presets. The Masonry Wall Wizard
+therefore labels its built-in starting values as **custom/unverified** and
+supports reusing calibrated Masonry materials already stored in the project.
 
-The library currently contains **187 verified parameter records**:
+The library currently contains **192 verified parameter records**:
 
 - 2 Steel02 Grade-60 reinforcing-steel records from Carreño et al. (2020),
   DOI `10.1061/(ASCE)ST.1943-541X.0002505`.
@@ -120,6 +126,12 @@ The library currently contains **187 verified parameter records**:
   DOI `10.2174/1874149501509010236`.
 - 2 Concrete02 records (unconfined and confined shear-wall concrete) from
   Hung and El-Tawil (2009), DOI `10.1002/eqe.921`.
+- 5 verified RW-A20-P10-S38 wall presets from the official OpenSees MEFI
+  validation example: three Steel02 reinforcement sets (X, Y-web and
+  Y-boundary) plus unconfined and confined Concrete02. The example is tied to
+  López, Rojas and Massone (2022), DOI
+  `10.1016/j.engstruct.2021.113819`; exact numerical evidence is retained
+  from the OpenSees material-definition block.
 - 1 Concrete04 beam-column concrete record from Yigitbas, Grande and
   Imbimbo (2026), DOI `10.65102/is202545`.
 - 3 calibrated Fatigue wrapper records for 6082-T6, 6063-T6 and 6060-T5
@@ -162,12 +174,12 @@ The library currently contains **187 verified parameter records**:
   coefficient α is mapped exactly to the source-code coefficient
   a = α·fy/E. Stock OpenSeesPy 3.8.x reports RambergOsgoodSteel as
   temporarily removed from compiled Tcl/Py builds because of known issues
-  and unreliable results, so SARE keeps these records for traceable
+  and unreliable results, so FEWIZ keeps these records for traceable
   reference/preview but disables project insertion, export and runtime
   material testing.
 
-These are **published/calibrated parameter records**, not 187 unrelated
-chemical materials. SARE exposes specimen/configuration, modelling
+These are **traceable published/calibrated or official-validation parameter records**, not 192 unrelated
+chemical materials. FEWIZ exposes specimen/configuration, modelling
 representation, applicability and limitations so a paper-specific parameter
 set is not mistaken for a universal material-grade default.
 
@@ -175,7 +187,7 @@ For response-based models such as Pinching4 and Hysteretic, the library also
 records the physical response context and source units. Force-displacement
 records are stored internally in N/m-based SI quantities, moment-rotation
 records in N·m/rad, and sourced stress-strain Hysteretic records store stress
-in Pa and strain as decimal strain. SARE converts these values to the active
+in Pa and strain as decimal strain. FEWIZ converts these values to the active
 project unit system when displaying, editing and generating OpenSeesPy.
 Legacy/manual Pinching4 and Hysteretic definitions without response metadata
 retain their previous raw behavior for backward compatibility.
@@ -194,7 +206,7 @@ through the Material Editor. The regular **New/Edit Material** dialog also provi
 **Load Verified Preset...**, which loads the selected constitutive model,
 parameters and provenance into the material being edited while preserving an
 existing project's tag/name and engineering properties. If a verified
-constitutive parameter is edited, SARE changes the project material status to
+constitutive parameter is edited, FEWIZ changes the project material status to
 `modified_from_verified` rather than continuing to present it as the
 unchanged published set.
 
@@ -215,7 +227,7 @@ explicitly sources them.
 
 ### Analysis
 
-SARE currently supports:
+FEWIZ currently supports:
 
 - Static
 - Modal
@@ -241,7 +253,7 @@ Available post-processing includes:
 - convergence histories and fallback/cutback diagnostics
 - cyclic hysteresis, backbone and reversal/cycle summaries
 
-For Quick 1-D Column specimens, SARE can additionally capture and separate:
+For Quick 1-D Column specimens, FEWIZ can additionally capture and separate:
 
 - base-section moment-curvature response
 - base-interface moment-rotation response
@@ -253,7 +265,7 @@ For Quick 1-D Column specimens, SARE can additionally capture and separate:
 
 ### Section-to-hinge and cyclic calibration
 
-SARE keeps the research path explicit:
+FEWIZ keeps the research path explicit:
 
 1. **Moment-Curvature** runs an isolated OpenSees zeroLengthSection section
    test from an existing Section. The wizard asks only for Section, bending
@@ -264,7 +276,7 @@ SARE keeps the research path explicit:
    Response-2000 chart data can then be overlaid for validation either by
    importing a `.txt/.csv/.tsv/.dat` file or by copying the Response-2000
    Moment-Curvature chart data to the clipboard and choosing
-   **Paste Response-2000**. SARE can convert common source units such as
+   **Paste Response-2000**. FEWIZ can convert common source units such as
    `rad/km`, `1/m`, `1/mm`, `kN·m`, `N·m`, `N·mm` and
    `kip·in/ft` into the active project units before comparison. The result
    page reports peak moment, curvature at peak moment, initial stiffness,
@@ -273,7 +285,7 @@ SARE keeps the research path explicit:
    a moment-rotation curve directly, or from moment-curvature using the
    explicit assumption theta = kappa * L_eq, into a symmetric OpenSees
    Hysteretic moment-rotation material. Moment-Curvature results can open this
-   builder directly with their SARE source metadata prefilled. SARE does not
+   builder directly with their FEWIZ source metadata prefilled. FEWIZ does not
    infer cracking, yield, ultimate, plastic-hinge length, pinching or
    deterioration silently.
 3. **Cyclic Calibration** compares a complete model response against
@@ -300,12 +312,12 @@ The cyclic-calibration subsystem supports:
 7. preview/apply of a selected calibrated case with Undo support
 8. CSV export of scalar, objective and Pareto metadata
 
-Pareto analysis is descriptive: SARE does not automatically decide which
+Pareto analysis is descriptive: FEWIZ does not automatically decide which
 non-dominated case should be adopted.
 
-### SARE AI Assistant
+### FEWIZ AI Assistant
 
-SARE includes an optional **read-only AI Assistant** dock. The first provider
+FEWIZ includes an optional **read-only AI Assistant** dock. The first provider
 is OpenAI through the Responses API. The assistant does not execute generated
 Python or modify the project. Instead, it can inspect a local project snapshot
 through controlled read-only tools for:
@@ -320,8 +332,8 @@ through controlled read-only tools for:
 Open the assistant from **Analysis > Research**, **Tools > AI Assistant**, or
 right-click a Model Tree object and choose **Ask AI about this**.
 
-The API key is never written to a SARE project. Either set it before launching
-SARE:
+The API key is never written to a FEWIZ project. Either set it before launching
+FEWIZ:
 
 ```powershell
 $env:OPENAI_API_KEY="..."
@@ -353,7 +365,7 @@ Verify the complete runtime:
 python -m openseespy_studio --self-check
 ```
 
-Launch SARE:
+Launch FEWIZ:
 
 ```powershell
 python -m openseespy_studio
@@ -415,7 +427,7 @@ packaging/windows_installer.iss
 
 ## Verification strategy
 
-SARE uses several verification layers rather than treating GUI tests as
+FEWIZ uses several verification layers rather than treating GUI tests as
 solver validation.
 
 ### 1. Unit and offscreen GUI tests
@@ -434,8 +446,8 @@ python -m pip install -e . pytest
 python -m pytest -q -m integration tests/test_opensees_integration.py
 ```
 
-This generates a structural model through SARE's code generator, executes
-the generated Python through the SARE solver worker using the real
+This generates a structural model through FEWIZ's code generator, executes
+the generated Python through the FEWIZ solver worker using the real
 OpenSeesPy runtime, and checks displacement, reaction and convergence output.
 
 ### 3. Runtime / packaged self-check
@@ -478,7 +490,7 @@ generated Python source strings directly.
 
 ## Current limitations
 
-- SARE supports a curated subset of OpenSees/OpenSeesPy commands rather
+- FEWIZ supports a curated subset of OpenSees/OpenSeesPy commands rather
   than every possible element, material and analysis option.
 - General arbitrary OpenSeesPy script import/reconstruction is not complete.
 - Advanced research workflows still require engineering judgment about

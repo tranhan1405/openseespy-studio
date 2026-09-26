@@ -6,15 +6,24 @@ from typing import Iterable
 
 from .beam_loads import resolve_self_weight_local
 from .model import (
+    BEAM_CONTACT_ELEMENT_TYPES,
+    BEARING_ELEMENT_TYPES,
+    CABLE_ELEMENT_TYPES,
+    CONTACT_TWO_NODE_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
+    FRICTION_BEARING_ELEMENT_TYPES,
+    MASONRY_PANEL_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SUPPORTED_ELEMENT_TYPES,
+    TRUSS_MATERIAL_ELEMENT_TYPES,
+    TRUSS_SECTION_ELEMENT_TYPES,
 )
 from .project import (
     AnalysisSettingsData,
     ProjectDatabase,
     SHELL_SECTION_TYPES,
+    MEMBRANE_SECTION_TYPES,
     resolve_transformation_vecxz,
 )
 from .units import UnitSystem
@@ -315,7 +324,7 @@ def _element_geometry_checks(
                     "current generator does not yet emit faithfully.",
                     "element",
                     tag,
-                    "Choose a formulation supported by SARE.",
+                    "Choose a formulation supported by FEWIZ.",
                 )
             )
             continue
@@ -738,7 +747,12 @@ def _element_geometry_checks(
             for index in range(3)
         )
         length = _norm(axis)
-        if length <= 1.0e-12:
+        if (
+            length <= 1.0e-12
+            and element.element_type not in (
+                BEARING_ELEMENT_TYPES | CONTACT_TWO_NODE_ELEMENT_TYPES
+            )
+        ):
             issues.append(
                 ValidationIssue(
                     "ERROR",
@@ -750,13 +764,14 @@ def _element_geometry_checks(
                 )
             )
 
-        if element.element_type == "truss":
+        if element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES:
             if element.truss_area <= 0.0:
                 issues.append(
                     ValidationIssue(
                         "ERROR",
                         "Truss",
-                        f"Truss element {tag} has non-positive area.",
+                        f"{element.element_type} element {tag} has "
+                        "non-positive area.",
                         "element",
                         tag,
                         "Assign a positive cross-sectional area.",
@@ -767,7 +782,8 @@ def _element_geometry_checks(
                     ValidationIssue(
                         "ERROR",
                         "Material",
-                        f"Truss element {tag} has no material assigned.",
+                        f"{element.element_type} element {tag} has no "
+                        "material assigned.",
                         "element",
                         tag,
                         "Assign a uniaxial material before running.",
@@ -778,11 +794,400 @@ def _element_geometry_checks(
                     ValidationIssue(
                         "ERROR",
                         "Material",
-                        f"Truss element {tag} references missing material "
-                        f"{element.truss_material_tag}.",
+                        f"{element.element_type} element {tag} references "
+                        f"missing material {element.truss_material_tag}.",
                         "element",
                         tag,
                         "Assign an existing uniaxial material.",
+                    )
+                )
+            continue
+
+        if element.element_type in TRUSS_SECTION_ELEMENT_TYPES:
+            section_tag = element.section_tag
+            if section_tag is None:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Section",
+                        f"{element.element_type} element {tag} has no "
+                        "section assigned.",
+                        "element",
+                        tag,
+                        "Assign an existing axial-compatible section.",
+                    )
+                )
+            else:
+                section = project.sections.get(int(section_tag))
+                if section is None:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Section",
+                            f"{element.element_type} element {tag} references "
+                            f"missing section {section_tag}.",
+                            "element",
+                            tag,
+                            "Assign an existing section.",
+                        )
+                    )
+                elif section.section_type in (
+                    SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES
+                ):
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Section",
+                            f"{element.element_type} element {tag} cannot use "
+                            f"shell section {section_tag}.",
+                            "element",
+                            tag,
+                            "Assign an Elastic/Fiber axial section.",
+                        )
+                    )
+            continue
+
+        if element.element_type in CONTACT_TWO_NODE_ELEMENT_TYPES:
+            expected_ndm = (
+                2 if element.element_type == "zeroLengthContact2D" else 3
+            )
+            expected_ndf = expected_ndm
+            node_ndfs = {
+                int(model.nodes[node_tag].ndf)
+                for node_tag in element.node_tags()
+            }
+            if int(model.ndm) != expected_ndm or node_ndfs != {expected_ndf}:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Contact formulation",
+                        f"{element.element_type} element {tag} requires "
+                        f"ndm={expected_ndm} and ndf={expected_ndf} at both nodes.",
+                        "element",
+                        tag,
+                        "Use contact nodes with translational DOFs only.",
+                    )
+                )
+            issues.append(
+                ValidationIssue(
+                    "INFO",
+                    "Contact solver",
+                    f"{element.element_type} element {tag} has a non-symmetric "
+                    "contact tangent.",
+                    "element",
+                    tag,
+                    "Use a non-symmetric equation-system solver for analysis.",
+                )
+            )
+            continue
+
+        if element.element_type in BEAM_CONTACT_ELEMENT_TYPES:
+            p = element.special_parameters
+            nd_tag = int(p["nd_material_tag"])
+            nd_material = project.nd_materials.get(nd_tag)
+            expected_material = (
+                "ContactMaterial2D"
+                if element.element_type == "BeamContact2D"
+                else "ContactMaterial3D"
+            )
+            if nd_material is None:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Contact material",
+                        f"{element.element_type} element {tag} references "
+                        f"missing nDMaterial {nd_tag}.",
+                        "element",
+                        tag,
+                        f"Assign an existing {expected_material}.",
+                    )
+                )
+            elif nd_material.material_type != expected_material:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Contact material",
+                        f"{element.element_type} element {tag} requires "
+                        f"{expected_material}; nDMaterial {nd_tag} is "
+                        f"{nd_material.material_type}.",
+                        "element",
+                        tag,
+                        f"Assign a {expected_material}.",
+                    )
+                )
+            if element.element_type == "BeamContact2D":
+                required_ndfs = (3, 3, 2, 2)
+                expected_ndm = 2
+            else:
+                required_ndfs = (6, 6, 3, 3)
+                expected_ndm = 3
+                transf_tag = int(p["transf_tag"])
+                if transf_tag not in project.transformations:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Transformation",
+                            f"BeamContact3D element {tag} references missing "
+                            f"transformation {transf_tag}.",
+                            "element",
+                            tag,
+                            "Assign an existing 3D geometric transformation.",
+                        )
+                    )
+            actual_ndfs = tuple(
+                int(model.nodes[node_tag].ndf)
+                for node_tag in element.node_tags()
+            )
+            if int(model.ndm) != expected_ndm or actual_ndfs != required_ndfs:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Contact formulation",
+                        f"{element.element_type} element {tag} node NDFs are "
+                        f"{actual_ndfs}; expected {required_ndfs}.",
+                        "element",
+                        tag,
+                        "Use mixed-DOF master/contact/Lagrange nodes required "
+                        "by the OpenSees BeamContact formulation.",
+                    )
+                )
+            if element.l is not None and any(model.nodes[int(element.l)].fixity):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Contact formulation",
+                        f"{element.element_type} Lagrange node {element.l} "
+                        "must remain free.",
+                        "element",
+                        tag,
+                        "Remove fixities from the Lagrange multiplier node.",
+                    )
+                )
+            continue
+
+        if element.element_type in CABLE_ELEMENT_TYPES:
+            if (int(model.ndm), int(model.ndf)) != (3, 3):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Cable formulation",
+                        f"CatenaryCable element {tag} requires ndm=3/ndf=3; "
+                        f"got ndm={model.ndm}, ndf={model.ndf}.",
+                        "element",
+                        tag,
+                        "Use a 3D model with 3 translational DOF per node.",
+                    )
+                )
+            continue
+
+        if element.element_type in FRICTION_BEARING_ELEMENT_TYPES:
+            signature = (int(model.ndm), int(model.ndf))
+            if signature not in {(2, 3), (3, 6)}:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing formulation",
+                        f"{element.element_type} element {tag} requires "
+                        f"2D/3DOF or 3D/6DOF; got "
+                        f"ndm={model.ndm}, ndf={model.ndf}.",
+                        "element",
+                        tag,
+                        "Use a 2D/3DOF or 3D/6DOF structural model.",
+                    )
+                )
+            referenced = {
+                int(value)
+                for key in (
+                    "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                )
+                for value in [element.special_parameters.get(key)]
+                if value is not None
+            }
+            missing = sorted(
+                mat_tag
+                for mat_tag in referenced
+                if mat_tag not in project.materials
+            )
+            if missing:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing material",
+                        f"{element.element_type} element {tag} references "
+                        "missing uniaxial material tag(s): "
+                        + ", ".join(map(str, missing))
+                        + ".",
+                        "element",
+                        tag,
+                        "Assign existing uniaxial materials to all bearing "
+                        "directions.",
+                    )
+                )
+            friction_tag = int(
+                element.special_parameters["frn_model_tag"]
+            )
+            if friction_tag not in project.friction_models:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Friction model",
+                        f"{element.element_type} element {tag} references "
+                        f"missing friction model tag {friction_tag}.",
+                        "element",
+                        tag,
+                        "Create and assign an existing Friction Model.",
+                    )
+                )
+            if signature == (3, 6) and (
+                element.special_parameters.get("t_mat_tag") is None
+                or element.special_parameters.get("my_mat_tag") is None
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing material",
+                        f"3D {element.element_type} element {tag} requires "
+                        "axial, torsion, My, and Mz materials.",
+                        "element",
+                        tag,
+                        "Assign all four 3D bearing material directions.",
+                    )
+                )
+            continue
+
+        if element.element_type == "elastomericBearingPlasticity":
+            signature = (int(model.ndm), int(model.ndf))
+            if signature not in {(2, 3), (3, 6)}:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing formulation",
+                        f"elastomericBearingPlasticity element {tag} "
+                        f"requires 2D/3DOF or 3D/6DOF; got "
+                        f"ndm={model.ndm}, ndf={model.ndf}.",
+                        "element",
+                        tag,
+                        "Use a 2D/3DOF or 3D/6DOF structural model.",
+                    )
+                )
+            referenced = {
+                int(value)
+                for key in (
+                    "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                )
+                for value in [element.special_parameters.get(key)]
+                if value is not None
+            }
+            missing = sorted(
+                mat_tag for mat_tag in referenced
+                if mat_tag not in project.materials
+            )
+            if missing:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing material",
+                        f"elastomericBearingPlasticity element {tag} "
+                        "references missing uniaxial material tag(s): "
+                        + ", ".join(map(str, missing))
+                        + ".",
+                        "element",
+                        tag,
+                        "Assign existing uniaxial materials to all bearing "
+                        "directions.",
+                    )
+                )
+            if signature == (3, 6) and (
+                element.special_parameters.get("t_mat_tag") is None
+                or element.special_parameters.get("my_mat_tag") is None
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing material",
+                        f"3D elastomericBearingPlasticity element {tag} "
+                        "requires axial, torsion, My, and Mz materials.",
+                        "element",
+                        tag,
+                        "Assign all four 3D bearing material directions.",
+                    )
+                )
+            continue
+
+        if element.element_type == "LeadRubberX":
+            if (int(model.ndm), int(model.ndf)) != (3, 6):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing formulation",
+                        f"LeadRubberX element {tag} requires ndm=3/ndf=6.",
+                        "element",
+                        tag,
+                        "Use this isolation bearing in a 3D/6DOF model.",
+                    )
+                )
+            continue
+
+        if element.element_type == "TripleFrictionPendulum":
+            if (int(model.ndm), int(model.ndf)) != (3, 6):
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing formulation",
+                        f"TripleFrictionPendulum element {tag} requires "
+                        "ndm=3/ndf=6 with global Z vertical.",
+                        "element",
+                        tag,
+                        "Use a 3D/6DOF model with global Z as vertical.",
+                    )
+                )
+            referenced_materials = {
+                int(element.special_parameters[key])
+                for key in (
+                    "vertMatTag", "rotZMatTag",
+                    "rotXMatTag", "rotYMatTag",
+                )
+            }
+            missing_materials = sorted(
+                mat_tag
+                for mat_tag in referenced_materials
+                if mat_tag not in project.materials
+            )
+            if missing_materials:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Bearing material",
+                        f"TripleFrictionPendulum element {tag} references "
+                        "missing uniaxial material tag(s): "
+                        + ", ".join(map(str, missing_materials))
+                        + ".",
+                        "element",
+                        tag,
+                        "Assign existing vertical and rotational materials.",
+                    )
+                )
+            referenced_friction = {
+                int(element.special_parameters[key])
+                for key in ("frnTag1", "frnTag2", "frnTag3")
+            }
+            missing_friction = sorted(
+                frn_tag
+                for frn_tag in referenced_friction
+                if frn_tag not in project.friction_models
+            )
+            if missing_friction:
+                issues.append(
+                    ValidationIssue(
+                        "ERROR",
+                        "Friction model",
+                        f"TripleFrictionPendulum element {tag} references "
+                        "missing friction model tag(s): "
+                        + ", ".join(map(str, missing_friction))
+                        + ".",
+                        "element",
+                        tag,
+                        "Create and assign all three friction models.",
                     )
                 )
             continue
@@ -816,22 +1221,72 @@ def _element_geometry_checks(
                     )
                 )
             elif (
-                element.element_type == "elasticBeamColumn"
+                element.element_type
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                 and section.section_type != "Elastic"
             ):
                 issues.append(
                     ValidationIssue(
                         "ERROR",
                         "Element formulation",
-                        f"elasticBeamColumn element {tag} cannot use "
-                        f"{section.section_type} section {section.tag} in the "
-                        "current 3D generator.",
+                        f"{element.element_type} element {tag} cannot use "
+                        f"{section.section_type} section {section.tag}; "
+                        "an Elastic section is required.",
                         "element",
                         tag,
-                        "Use an Elastic section, or switch the element to "
-                        "forceBeamColumn / dispBeamColumn for Fiber sections.",
+                        "Assign an Elastic Section to this element.",
                     )
                 )
+            elif element.element_type == "dispBeamColumnInt":
+                if (int(model.ndm), int(model.ndf)) != (2, 3):
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Element formulation",
+                            f"dispBeamColumnInt element {tag} requires "
+                            "ndm=2 and ndf=3.",
+                            "element",
+                            tag,
+                            "Use this formulation only in a 2D/3DOF model.",
+                        )
+                    )
+                if section.section_type != "FiberInt":
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Element formulation",
+                            f"dispBeamColumnInt element {tag} requires a "
+                            f"FiberInt section; got {section.section_type} "
+                            f"section {section.tag}.",
+                            "element",
+                            tag,
+                            "Assign a FiberInt section.",
+                        )
+                    )
+                if element.integration_points < 1:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Beam integration",
+                            f"dispBeamColumnInt element {tag} needs at least "
+                            "1 integration point.",
+                            "element",
+                            tag,
+                            "Increase the integration-point count.",
+                        )
+                    )
+                if not 0.0 <= float(element.beam_center_ratio) <= 1.0:
+                    issues.append(
+                        ValidationIssue(
+                            "ERROR",
+                            "Element formulation",
+                            f"dispBeamColumnInt element {tag} has cRot="
+                            f"{element.beam_center_ratio:g}; expected 0..1.",
+                            "element",
+                            tag,
+                            "Set the center-of-rotation ratio cRot in 0..1.",
+                        )
+                    )
             elif (
                 element.element_type
                 in {"forceBeamColumn", "dispBeamColumn"}
@@ -872,6 +1327,39 @@ def _element_geometry_checks(
                     "element",
                     tag,
                     "Assign an existing transformation.",
+                )
+            )
+            continue
+
+        if (
+            element.element_type == "dispBeamColumnInt"
+            and transformation.transformation_type != "LinearInt"
+        ):
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Transformation",
+                    f"dispBeamColumnInt element {tag} requires a LinearInt "
+                    f"transformation; got {transformation.transformation_type}.",
+                    "element",
+                    tag,
+                    "Assign a LinearInt geometric transformation.",
+                )
+            )
+            continue
+        if (
+            element.element_type != "dispBeamColumnInt"
+            and transformation.transformation_type == "LinearInt"
+        ):
+            issues.append(
+                ValidationIssue(
+                    "ERROR",
+                    "Transformation",
+                    f"LinearInt transformation {transformation.tag} is reserved "
+                    "for dispBeamColumnInt elements.",
+                    "element",
+                    tag,
+                    "Use Linear/PDelta/Corotational for this frame formulation.",
                 )
             )
             continue
@@ -1154,7 +1642,8 @@ def _support_and_connectivity_checks(
                     connect(element.i, retained)
         elif (
             element.element_type in SHELL_ELEMENT_TYPES
-            or element.element_type == "MEFI"
+            or element.element_type in MASONRY_PANEL_ELEMENT_TYPES
+            or element.element_type in {"MEFI", "MVLEM_3D"}
         ):
             for left, right in zip(
                 node_tags,

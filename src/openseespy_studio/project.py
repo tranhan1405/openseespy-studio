@@ -7,7 +7,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .model import FRAME_ELEMENT_TYPES, SHELL_ELEMENT_TYPES, StructuralModel, Vec3
+from .model import (
+    BEAM_CONTACT_ELEMENT_TYPES,
+    BEARING_ELEMENT_TYPES,
+    CONTACT_TWO_NODE_ELEMENT_TYPES,
+    CONTINUUM_QUAD_ELEMENT_TYPES,
+    FRAME_ELEMENT_TYPES,
+    FRICTION_BEARING_ELEMENT_TYPES,
+    MASONRY_PANEL_ELEMENT_TYPES,
+    SHELL_ELEMENT_TYPES,
+    SOLID_ELEMENT_TYPES,
+    TRUSS_MATERIAL_ELEMENT_TYPES,
+    TRUSS_SECTION_ELEMENT_TYPES,
+    WALL_MACRO_3D_ELEMENT_TYPES,
+    WALL_MACRO_ELEMENT_TYPES,
+    StructuralModel,
+    Vec3,
+)
 from .result_catalog import result_choices_for_analysis
 from .section_response import validate_section_response_request
 from .units import DEFAULT_PROJECT_UNITS, normalize_project_units
@@ -55,7 +71,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 45
+PROJECT_FORMAT_VERSION = 53
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -69,6 +85,8 @@ MATERIAL_CATEGORIES: dict[str, str] = {
     "Concrete01": "Concrete",
     "Concrete02": "Concrete",
     "Concrete04": "Concrete",
+    "ConcreteCM": "Concrete",
+    "Masonry": "Masonry / Infill",
     "Hysteretic": "Hysteretic / Connection",
     "HystereticSmooth": "Hysteretic / Connection",
     "Pinching4": "Hysteretic / Connection",
@@ -97,6 +115,15 @@ MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "Concrete01": ("fpc", "epsc0", "fpcu", "epsU"),
     "Concrete02": ("fpc", "epsc0", "fpcu", "epsU", "lambda", "ft", "Ets"),
     "Concrete04": ("fc", "epsc", "epscu", "Ec", "fct", "et", "beta"),
+    "ConcreteCM": (
+        "fpcc", "epcc", "Ec", "rc", "xcrn",
+        "ft", "et", "rt", "xcrp", "GapClose",
+    ),
+    "Masonry": (
+        "Fm", "Ft", "Um", "Uult", "Ucl", "Emo", "L",
+        "A1", "A2", "D1", "D2", "Ach", "Are", "Ba", "Bch",
+        "Gun", "Gplu", "Gplr", "Exp1", "Exp2", "IENV",
+    ),
     "HystereticSmooth": ("ka", "kb", "fbar", "beta"),
     "Hysteretic": (
         "s1p", "e1p", "s2p", "e2p", "s3p", "e3p",
@@ -154,6 +181,12 @@ MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
     },
     "Concrete04": {
         "fc": "stress", "Ec": "stress", "fct": "stress",
+    },
+    "ConcreteCM": {
+        "fpcc": "stress", "Ec": "stress", "ft": "stress",
+    },
+    "Masonry": {
+        "Fm": "stress", "Ft": "stress", "Emo": "stress",
     },
     "Hysteretic": {},
     "HystereticSmooth": {},
@@ -300,6 +333,34 @@ MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
     "Concrete01": {"fpc": -30.0e6, "epsc0": -0.002, "fpcu": -6.0e6, "epsU": -0.006},
     "Concrete02": {"fpc": -30.0e6, "epsc0": -0.002, "fpcu": -6.0e6, "epsU": -0.006, "lambda": 0.1, "ft": 3.0e6, "Ets": 2.0e8},
     "Concrete04": {"fc": -30.0e6, "epsc": -0.002, "epscu": -0.006, "Ec": 3.0e10, "fct": 3.0e6, "et": 0.0002, "beta": 0.1},
+    "ConcreteCM": {
+        "fpcc": -30.0e6, "epcc": -0.002, "Ec": 3.0e10,
+        "rc": 7.0, "xcrn": 1.02, "ft": 3.0e6, "et": 0.0001,
+        "rt": 1.2, "xcrp": 10000.0, "GapClose": 0.0,
+    },
+    "Masonry": {
+        "Fm": -5.0e6,
+        "Ft": 0.20e6,
+        "Um": -0.002,
+        "Uult": -0.010,
+        "Ucl": 0.0005,
+        "Emo": 2.5e9,
+        "L": 1.0,
+        "A1": 1.0,
+        "A2": 0.20,
+        "D1": -0.002,
+        "D2": -0.006,
+        "Ach": 0.40,
+        "Are": 0.30,
+        "Ba": 1.75,
+        "Bch": 0.20,
+        "Gun": 2.0,
+        "Gplu": 0.60,
+        "Gplr": 1.30,
+        "Exp1": 1.75,
+        "Exp2": 1.25,
+        "IENV": 0.0,
+    },
     "Hysteretic": {"s1p": 1.0, "e1p": 0.001, "s2p": 1.2, "e2p": 0.01, "s3p": 1.0, "e3p": 0.03, "s1n": -1.0, "e1n": -0.001, "s2n": -1.2, "e2n": -0.01, "s3n": -1.0, "e3n": -0.03, "pinchX": 0.5, "pinchY": 0.5, "damage1": 0.0, "damage2": 0.0, "beta": 0.0},
     "HystereticSmooth": {
         "ka": 1.0,
@@ -359,9 +420,18 @@ class MaterialData:
             raise ValueError(f"Unsupported material type: {self.material_type}")
 
         defaults = MATERIAL_DEFAULTS[self.material_type]
+        raw_parameters = dict(self.parameters)
+        if self.material_type == "Masonry":
+            # Backward-compatible aliases from the first FEWIZ masonry
+            # implementation. OpenSees calls these Area1 / Area2; retain old
+            # project files that stored them as a1 / a2.
+            if "A1" not in raw_parameters and "a1" in raw_parameters:
+                raw_parameters["A1"] = raw_parameters["a1"]
+            if "A2" not in raw_parameters and "a2" in raw_parameters:
+                raw_parameters["A2"] = raw_parameters["a2"]
         normalized: dict[str, float] = {}
         for key in MATERIAL_PARAMETER_ORDER[self.material_type]:
-            normalized[key] = float(self.parameters.get(key, defaults[key]))
+            normalized[key] = float(raw_parameters.get(key, defaults[key]))
         self.parameters = normalized
 
         raw_base_material_tag = self.base_material_tag
@@ -452,7 +522,7 @@ class MaterialData:
                     f"Concrete02 material {self.tag} has zero epsc0."
                 )
             return abs(2.0 * float(self.parameters["fpc"]) / epsc0)
-        if self.material_type == "Concrete04":
+        if self.material_type in {"Concrete04", "ConcreteCM"}:
             return float(self.parameters["Ec"])
         if self.material_type == "FRPConfinedConcrete02":
             return float(self.parameters["Ec"])
@@ -514,6 +584,87 @@ class MaterialData:
         )
 
 
+@dataclass
+class FrictionModelData:
+    tag: int
+    name: str
+    friction_type: str = "Coulomb"
+    parameters: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.tag = _strict_int(self.tag, "Friction model tag")
+        if self.tag <= 0:
+            raise ValueError("Friction model tag must be positive.")
+        self.name = str(self.name).strip() or f"Friction {self.tag}"
+        self.friction_type = str(self.friction_type)
+        supported = {"Coulomb", "VelDependent"}
+        if self.friction_type not in supported:
+            raise ValueError(
+                f"Unsupported friction model type: {self.friction_type}. "
+                "FEWIZ currently supports Coulomb and VelDependent."
+            )
+        raw = dict(self.parameters)
+        if self.friction_type == "Coulomb":
+            required = ("mu",)
+        else:
+            required = ("muSlow", "muFast", "transRate")
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                f"{self.friction_type} requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                f"Unsupported {self.friction_type} parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        self.parameters = {
+            key: float(raw[key])
+            for key in required
+        }
+        if any(
+            not math.isfinite(value)
+            for value in self.parameters.values()
+        ):
+            raise ValueError("Friction model parameters must be finite.")
+        if self.friction_type == "Coulomb":
+            if self.parameters["mu"] < 0.0:
+                raise ValueError("Coulomb mu cannot be negative.")
+        else:
+            if (
+                self.parameters["muSlow"] < 0.0
+                or self.parameters["muFast"] < 0.0
+            ):
+                raise ValueError(
+                    "VelDependent friction coefficients cannot be negative."
+                )
+            if self.parameters["transRate"] <= 0.0:
+                raise ValueError(
+                    "VelDependent transRate must be positive."
+                )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tag": self.tag,
+            "name": self.name,
+            "friction_type": self.friction_type,
+            "parameters": dict(self.parameters),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FrictionModelData":
+        return cls(
+            tag=data["tag"],
+            name=str(data.get("name", "")),
+            friction_type=str(data.get("friction_type", "Coulomb")),
+            parameters=dict(data.get("parameters", {})),
+        )
+
+
 ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "ElasticIsotropic": ("E", "nu", "rho"),
     "ElasticOrthotropic": (
@@ -551,6 +702,11 @@ ND_MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     "SmearedSteelDoubleLayer": (
         "mat1", "mat2", "ratio1", "ratio2", "orientation",
     ),
+    "FSAM": (
+        "rho", "sX", "sY", "conc", "rouX", "rouY", "nu", "alfadow",
+    ),
+    "ContactMaterial2D": ("mu", "G", "c", "t"),
+    "ContactMaterial3D": ("mu", "G", "c", "t"),
 }
 
 ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
@@ -654,6 +810,28 @@ ND_MATERIAL_PARAMETER_KINDS: dict[str, dict[str, str]] = {
         "ratio1": "dimensionless",
         "ratio2": "dimensionless",
         "orientation": "dimensionless",
+    },
+    "FSAM": {
+        "rho": "density",
+        "sX": "dimensionless",
+        "sY": "dimensionless",
+        "conc": "dimensionless",
+        "rouX": "dimensionless",
+        "rouY": "dimensionless",
+        "nu": "dimensionless",
+        "alfadow": "dimensionless",
+    },
+    "ContactMaterial2D": {
+        "mu": "dimensionless",
+        "G": "stress",
+        "c": "stress",
+        "t": "stress",
+    },
+    "ContactMaterial3D": {
+        "mu": "dimensionless",
+        "G": "stress",
+        "c": "stress",
+        "t": "stress",
     },
 }
 
@@ -759,6 +937,28 @@ ND_MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "ratio2": 0.01,
         "orientation": 0.0,
     },
+    "FSAM": {
+        "rho": 0.0,
+        "sX": 1.0,
+        "sY": 2.0,
+        "conc": 3.0,
+        "rouX": 0.0025,
+        "rouY": 0.0025,
+        "nu": 0.35,
+        "alfadow": 0.005,
+    },
+    "ContactMaterial2D": {
+        "mu": 0.30,
+        "G": 1.0e8,
+        "c": 0.0,
+        "t": 0.0,
+    },
+    "ContactMaterial3D": {
+        "mu": 0.30,
+        "G": 1.0e8,
+        "c": 0.0,
+        "t": 0.0,
+    },
 }
 
 
@@ -791,6 +991,9 @@ ND_MATERIAL_FORMULATIONS: dict[str, tuple[str, ...]] = {
     "ASDConcrete3D": ("ThreeDimensional",),
     "OrthotropicRAConcrete": ("Plane Stress",),
     "SmearedSteelDoubleLayer": ("Plane Stress",),
+    "FSAM": ("Plane Stress",),
+    "ContactMaterial2D": ("Contact 2D",),
+    "ContactMaterial3D": ("Contact 3D",),
 }
 
 
@@ -1065,6 +1268,46 @@ class NDMaterialData:
                         f"SmearedSteelDoubleLayer {key} must satisfy 0 <= "
                         f"{key} <= 1."
                     )
+        elif self.material_type == "FSAM":
+            for key in ("sX", "sY", "conc"):
+                tag = self.parameters[key]
+                if not tag.is_integer() or tag <= 0.0:
+                    raise ValueError(
+                        f"FSAM {key} must be a positive uniaxial material tag."
+                    )
+            if self.parameters["rho"] < 0.0:
+                raise ValueError("FSAM density rho cannot be negative.")
+            for key in ("rouX", "rouY"):
+                if not 0.0 <= self.parameters[key] <= 1.0:
+                    raise ValueError(
+                        f"FSAM {key} must satisfy 0 <= {key} <= 1."
+                    )
+            if not 0.0 < self.parameters["nu"] < 1.5:
+                raise ValueError(
+                    "FSAM friction coefficient nu must satisfy 0 < nu < 1.5."
+                )
+            if not 0.0 < self.parameters["alfadow"] < 0.05:
+                raise ValueError(
+                    "FSAM dowel coefficient alfadow must satisfy "
+                    "0 < alfadow < 0.05."
+                )
+        elif self.material_type in {
+            "ContactMaterial2D",
+            "ContactMaterial3D",
+        }:
+            if self.parameters["mu"] < 0.0:
+                raise ValueError(
+                    f"{self.material_type} mu cannot be negative."
+                )
+            if self.parameters["G"] <= 0.0:
+                raise ValueError(
+                    f"{self.material_type} G must be positive."
+                )
+            if self.parameters["c"] < 0.0 or self.parameters["t"] < 0.0:
+                raise ValueError(
+                    f"{self.material_type} c/t cannot be negative."
+                )
+
         if not isinstance(self.source, dict):
             raise ValueError("nDMaterial source metadata must be an object.")
         self.source = deepcopy(self.source)
@@ -1098,8 +1341,13 @@ class NDMaterialData:
 
 
 SECTION_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
-    "Elastic": ("E", "A", "Iz", "Iy", "G", "J"),
+    "Elastic": ("E", "A", "Iz", "Iy", "G", "J", "Avy", "Avz"),
     "Fiber": ("GJ",),
+    "FiberInt": (
+        "nStrip1", "thick1",
+        "nStrip2", "thick2",
+        "nStrip3", "thick3",
+    ),
     "ElasticMembranePlate": ("E", "nu", "h", "rho", "EpModifier"),
     "PlateFiber": ("h",),
     "LayeredShell": (),
@@ -1121,9 +1369,16 @@ SECTION_DEFAULTS: dict[str, dict[str, float]] = {
         "Iy": 8.0e-5,
         "G": 7.6923e10,
         "J": 8.0e-5,
+        "Avy": 0.02,
+        "Avz": 0.02,
     },
     "Fiber": {
         "GJ": 1.0e6,
+    },
+    "FiberInt": {
+        "nStrip1": 1.0, "thick1": 0.20,
+        "nStrip2": 1.0, "thick2": 0.20,
+        "nStrip3": 1.0, "thick3": 0.20,
     },
     "ElasticMembranePlate": {
         "E": 2.0e11,
@@ -1499,6 +1754,7 @@ class SectionData:
     display_geometry: dict[str, Any] = field(default_factory=dict)
     nd_material_tag: int | None = None
     shell_layers: list[ShellLayerData] = field(default_factory=list)
+    horizontal_fibers: list[FiberData] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Section tag")
@@ -1603,6 +1859,54 @@ class SectionData:
             else FiberComponentData.from_dict(component)
             for component in self.fiber_components
         ]
+        self.horizontal_fibers = [
+            fiber if isinstance(fiber, FiberData) else FiberData.from_dict(fiber)
+            for fiber in self.horizontal_fibers
+        ]
+        if self.section_type == "Elastic":
+            for key in ("E", "A", "Iz", "Avy", "Avz"):
+                if self.parameters[key] <= 0.0:
+                    raise ValueError(
+                        f"Elastic section parameter {key} must be positive."
+                    )
+            for key in ("Iy", "G", "J"):
+                if self.parameters[key] < 0.0:
+                    raise ValueError(
+                        f"Elastic section parameter {key} cannot be negative."
+                    )
+        if self.section_type == "FiberInt":
+            for key in ("nStrip1", "nStrip2", "nStrip3"):
+                value = self.parameters[key]
+                if not float(value).is_integer() or value < 0.0:
+                    raise ValueError(
+                        f"FiberInt {key} must be a non-negative integer."
+                    )
+            for key in ("thick1", "thick2", "thick3"):
+                if self.parameters[key] <= 0.0:
+                    raise ValueError(f"FiberInt {key} must be positive.")
+            strip_count = sum(
+                int(self.parameters[key])
+                for key in ("nStrip1", "nStrip2", "nStrip3")
+            )
+            if strip_count < 1:
+                raise ValueError("FiberInt requires at least one strip.")
+            if not self.fibers:
+                raise ValueError(
+                    "FiberInt requires vertical concrete/steel fibers."
+                )
+            if not self.horizontal_fibers:
+                raise ValueError(
+                    "FiberInt requires at least one horizontal Hfiber."
+                )
+            unique_y = {round(float(fiber.y), 12) for fiber in self.fibers}
+            if len(unique_y) != strip_count:
+                raise ValueError(
+                    "FiberInt NStrip total must match the number of distinct "
+                    "vertical-fiber y locations."
+                )
+            self.fiber_components = []
+        elif self.section_type != "Fiber":
+            self.horizontal_fibers = []
         if self.section_type == "Elastic" and self.material_tag is not None:
             self.material_tag = _strict_int(
                 self.material_tag,
@@ -1645,15 +1949,20 @@ class SectionData:
         return compiled
 
     def fiber_material_tags(self) -> set[int]:
-        if self.section_type != "Fiber":
-            return set()
-        return {
-            fiber.material_tag
-            for fiber in self.fibers
-        } | {
-            component.material_tag
-            for component in self.fiber_components
-        }
+        if self.section_type == "Fiber":
+            return {
+                fiber.material_tag
+                for fiber in self.fibers
+            } | {
+                component.material_tag
+                for component in self.fiber_components
+            }
+        if self.section_type == "FiberInt":
+            return {
+                fiber.material_tag
+                for fiber in (*self.fibers, *self.horizontal_fibers)
+            }
+        return set()
 
     def fiber_area_and_centroid(
         self,
@@ -1734,6 +2043,9 @@ class SectionData:
                 component.to_dict()
                 for component in self.fiber_components
             ],
+            "horizontal_fibers": [
+                fiber.to_dict() for fiber in self.horizontal_fibers
+            ],
             "material_tag": self.material_tag,
             "nd_material_tag": self.nd_material_tag,
             "shell_layers": [
@@ -1770,6 +2082,10 @@ class SectionData:
                 FiberComponentData.from_dict(dict(item))
                 for item in data.get("fiber_components", [])
             ],
+            horizontal_fibers=[
+                FiberData.from_dict(dict(item))
+                for item in data.get("horizontal_fibers", [])
+            ],
             material_tag=data.get("material_tag"),
             display_geometry=dict(data.get("display_geometry", {})),
             nd_material_tag=data.get("nd_material_tag"),
@@ -1799,6 +2115,7 @@ class TransformationData:
             "Linear",
             "PDelta",
             "Corotational",
+            "LinearInt",
         }:
             raise ValueError(
                 f"Unsupported transformation type: {self.transformation_type}"
@@ -3850,6 +4167,9 @@ SOLUTION_RESULT_TYPES = {
     "NodalDisplacement",
     "NodalReaction",
     "MemberForce",
+    "MasonryPanelShear",
+    "MasonryStrutForce",
+    "MasonryStrutStrain",
     "ShellForce",
     "ShellDeformation",
     "ShellDisplacement",
@@ -4107,6 +4427,7 @@ class LineGeometryData:
     integration_points: int = 5
     mass_per_length: float = 0.0
     consistent_mass: bool = False
+    center_rotation: float = 0.4
     do_rayleigh: bool = False
     generated_node_tags: list[int] = field(default_factory=list)
     owned_node_tags: list[int] = field(default_factory=list)
@@ -4185,8 +4506,14 @@ class LineGeometryData:
             self.integration_points,
             "Line integration points",
         )
-        if not 2 <= self.integration_points <= 20:
-            raise ValueError("Line integration points must be in 2..20.")
+        minimum_points = (
+            1 if self.element_type == "dispBeamColumnInt" else 2
+        )
+        if not minimum_points <= self.integration_points <= 20:
+            raise ValueError(
+                "Line integration points must be in "
+                f"{minimum_points}..20 for {self.element_type}."
+            )
         self.mass_per_length = float(self.mass_per_length)
         if (
             not math.isfinite(self.mass_per_length)
@@ -4199,6 +4526,16 @@ class LineGeometryData:
             self.consistent_mass,
             "Line consistent mass",
         )
+        self.center_rotation = float(self.center_rotation)
+        if (
+            not math.isfinite(self.center_rotation)
+            or not 0.0 <= self.center_rotation <= 1.0
+        ):
+            raise ValueError(
+                "Line dispBeamColumnInt cRot must satisfy 0 <= cRot <= 1."
+            )
+        if self.element_type == "dispBeamColumnInt":
+            self.consistent_mass = False
         self.do_rayleigh = _strict_bool(
             self.do_rayleigh,
             "Line Rayleigh flag",
@@ -4247,6 +4584,7 @@ class LineGeometryData:
             "integration_points": self.integration_points,
             "mass_per_length": self.mass_per_length,
             "consistent_mass": self.consistent_mass,
+            "center_rotation": self.center_rotation,
             "do_rayleigh": self.do_rayleigh,
             "generated_node_tags": list(self.generated_node_tags),
             "owned_node_tags": list(self.owned_node_tags),
@@ -4278,6 +4616,7 @@ class LineGeometryData:
             integration_points=data.get("integration_points", 5),
             mass_per_length=data.get("mass_per_length", 0.0),
             consistent_mass=data.get("consistent_mass", False),
+            center_rotation=data.get("center_rotation", 0.4),
             do_rayleigh=data.get("do_rayleigh", False),
             generated_node_tags=list(data.get("generated_node_tags", [])),
             owned_node_tags=list(
@@ -5054,6 +5393,7 @@ class ProjectDatabase:
         default_factory=dict
     )
     materials: dict[int, MaterialData] = field(default_factory=dict)
+    friction_models: dict[int, FrictionModelData] = field(default_factory=dict)
     nd_materials: dict[int, NDMaterialData] = field(default_factory=dict)
 
     # Reserved object stores. They are persisted now so future editors can be
@@ -5076,6 +5416,7 @@ class ProjectDatabase:
         default_factory=dict
     )
     active_analysis_tag: int | None = None
+    frame_wizard_recipe: dict[str, Any] = field(default_factory=dict)
 
     units: dict[str, str] = field(
         default_factory=lambda: dict(DEFAULT_PROJECT_UNITS)
@@ -5800,6 +6141,37 @@ class ProjectDatabase:
                 raise ValueError(
                     "Frame Line requires an existing Geometric Transformation."
                 )
+            section = self.sections[int(line.section_tag)]
+            transformation = self.transformations[
+                int(line.transformation_tag)
+            ]
+            if (
+                line.element_type
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
+                and section.section_type != "Elastic"
+            ):
+                raise ValueError(
+                    f"{line.element_type} Frame Line requires an Elastic Section."
+                )
+            if line.element_type == "dispBeamColumnInt":
+                if (int(self.model.ndm), int(self.model.ndf)) != (2, 3):
+                    raise ValueError(
+                        "dispBeamColumnInt Frame Line requires ndm=2/ndf=3."
+                    )
+                if section.section_type != "FiberInt":
+                    raise ValueError(
+                        "dispBeamColumnInt Frame Line requires a FiberInt Section."
+                    )
+                if transformation.transformation_type != "LinearInt":
+                    raise ValueError(
+                        "dispBeamColumnInt Frame Line requires a LinearInt "
+                        "Geometric Transformation."
+                    )
+            elif transformation.transformation_type == "LinearInt":
+                raise ValueError(
+                    "LinearInt Geometric Transformation is reserved for "
+                    "dispBeamColumnInt Frame Lines."
+                )
         else:
             if (
                 line.material_tag is None
@@ -6439,6 +6811,12 @@ class ProjectDatabase:
                 int(round(material.parameters["mat1"])),
                 int(round(material.parameters["mat2"])),
             ]
+        if material.material_type == "FSAM":
+            return [
+                int(round(material.parameters["sX"])),
+                int(round(material.parameters["sY"])),
+                int(round(material.parameters["conc"])),
+            ]
         return []
 
     def _validate_nd_material_dependencies(
@@ -6455,6 +6833,14 @@ class ProjectDatabase:
                 f"{material.material_type} references missing uniaxial "
                 "material tag(s): " + ", ".join(map(str, missing))
             )
+        if material.material_type == "FSAM":
+            concrete_tag = int(round(material.parameters["conc"]))
+            concrete = self.materials.get(concrete_tag)
+            if concrete is not None and concrete.material_type != "ConcreteCM":
+                raise ValueError(
+                    "FSAM concrete dependency must use ConcreteCM; "
+                    f"material {concrete_tag} is {concrete.material_type}."
+                )
 
     def nd_materials_using_material(
         self,
@@ -6516,15 +6902,56 @@ class ProjectDatabase:
                 for layer in section.shell_layers:
                     if layer.material_tag == original_tag:
                         layer.material_tag = material.tag
+            for element in self.model.elements.values():
+                if element.continuum_material_tag == original_tag:
+                    element.continuum_material_tag = material.tag
+                if element.solid_material_tag == original_tag:
+                    element.solid_material_tag = material.tag
+                if element.element_type == "SFI_MVLEM":
+                    element.wall_nd_material_tags = tuple(
+                        material.tag if int(tag) == original_tag else int(tag)
+                        for tag in element.wall_nd_material_tags
+                    )
+                if (
+                    element.element_type in BEAM_CONTACT_ELEMENT_TYPES
+                    and element.special_parameters.get("nd_material_tag")
+                    == original_tag
+                ):
+                    element.special_parameters["nd_material_tag"] = material.tag
 
     def remove_nd_material(self, tag: int) -> None:
         tag = _strict_int(tag, "nDMaterial tag")
         section_users = self.sections_using_nd_material(tag)
-        if section_users:
+        element_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.continuum_material_tag == tag
+                or element.solid_material_tag == tag
+                or (
+                    element.element_type == "SFI_MVLEM"
+                    and tag in element.wall_nd_material_tags
+                )
+                or (
+                    element.element_type in BEAM_CONTACT_ELEMENT_TYPES
+                    and element.special_parameters.get("nd_material_tag") == tag
+                )
+            )
+        )
+        if section_users or element_users:
+            details = []
+            if section_users:
+                details.append(
+                    "Shell section(s) " + ", ".join(map(str, section_users))
+                )
+            if element_users:
+                details.append(
+                    "element(s) " + ", ".join(map(str, element_users))
+                )
             raise ValueError(
-                f"nDMaterial {tag} is still referenced by Shell section(s): "
-                + ", ".join(map(str, section_users))
-                + ". Reassign those sections before deleting it."
+                f"nDMaterial {tag} is still referenced by "
+                + "; ".join(details)
+                + ". Reassign those references before deleting it."
             )
         self.nd_materials.pop(tag, None)
 
@@ -6612,6 +7039,28 @@ class ProjectDatabase:
             for element in self.model.elements.values():
                 if element.truss_material_tag == original_tag:
                     element.truss_material_tag = material.tag
+                if element.element_type in BEARING_ELEMENT_TYPES:
+                    for key in (
+                        "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag",
+                        "vertMatTag", "rotZMatTag", "rotXMatTag", "rotYMatTag",
+                    ):
+                        if element.special_parameters.get(key) == original_tag:
+                            element.special_parameters[key] = material.tag
+                if element.element_type in MASONRY_PANEL_ELEMENT_TYPES:
+                    for key in ("mat_1", "mat_2"):
+                        if element.special_parameters.get(key) == original_tag:
+                            element.special_parameters[key] = material.tag
+                if element.element_type in {"MVLEM", "MVLEM_3D"}:
+                    element.wall_concrete_tags = tuple(
+                        material.tag if int(tag) == original_tag else int(tag)
+                        for tag in element.wall_concrete_tags
+                    )
+                    element.wall_steel_tags = tuple(
+                        material.tag if int(tag) == original_tag else int(tag)
+                        for tag in element.wall_steel_tags
+                    )
+                    if element.wall_shear_tag == original_tag:
+                        element.wall_shear_tag = material.tag
             for connection in self.connections.values():
                 connection.materials_by_dof = {
                     int(dof): (
@@ -6654,6 +7103,13 @@ class ProjectDatabase:
                             == original_tag
                         ):
                             nd_material.parameters[key] = float(material.tag)
+                elif nd_material.material_type == "FSAM":
+                    for key in ("sX", "sY", "conc"):
+                        if (
+                            int(round(nd_material.parameters[key]))
+                            == original_tag
+                        ):
+                            nd_material.parameters[key] = float(material.tag)
 
     def remove_material(self, tag: int) -> None:
         tag = _strict_int(tag, "Material tag")
@@ -6664,6 +7120,47 @@ class ProjectDatabase:
             element.tag
             for element in self.model.elements.values()
             if element.truss_material_tag == tag
+        )
+        dependent_wall_elements = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in {"MVLEM", "MVLEM_3D"}
+                and (
+                    tag in element.wall_concrete_tags
+                    or tag in element.wall_steel_tags
+                    or element.wall_shear_tag == tag
+                )
+            )
+        )
+        dependent_masonry_panels = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in MASONRY_PANEL_ELEMENT_TYPES
+                and tag in {
+                    int(element.special_parameters[key])
+                    for key in ("mat_1", "mat_2")
+                }
+            )
+        )
+        dependent_bearings = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in BEARING_ELEMENT_TYPES
+                and tag in {
+                    int(value)
+                    for key in (
+                        "p_mat_tag", "t_mat_tag",
+                        "my_mat_tag", "mz_mat_tag",
+                        "vertMatTag", "rotZMatTag",
+                        "rotXMatTag", "rotYMatTag",
+                    )
+                    for value in [element.special_parameters.get(key)]
+                    if value is not None
+                }
+            )
         )
         dependent_connections = self.connections_using_material(tag)
         dependent_recorders = sorted(
@@ -6679,6 +7176,9 @@ class ProjectDatabase:
             or dependent_sections
             or dependent_nd_materials
             or dependent_trusses
+            or dependent_wall_elements
+            or dependent_masonry_panels
+            or dependent_bearings
             or dependent_connections
             or dependent_recorders
         ):
@@ -6701,6 +7201,21 @@ class ProjectDatabase:
                     "truss elements "
                     + ", ".join(map(str, dependent_trusses))
                 )
+            if dependent_wall_elements:
+                details.append(
+                    "wall macro-elements "
+                    + ", ".join(map(str, dependent_wall_elements))
+                )
+            if dependent_masonry_panels:
+                details.append(
+                    "masonry panel elements "
+                    + ", ".join(map(str, dependent_masonry_panels))
+                )
+            if dependent_bearings:
+                details.append(
+                    "bearing elements "
+                    + ", ".join(map(str, dependent_bearings))
+                )
             if dependent_connections:
                 details.append(
                     "connections "
@@ -6716,6 +7231,94 @@ class ProjectDatabase:
                 + ". Reassign those references before deleting it."
             )
         self.materials.pop(tag, None)
+
+    def next_friction_model_tag(self) -> int:
+        return max(self.friction_models, default=0) + 1
+
+    def add_friction_model(self, model: FrictionModelData) -> None:
+        if model.tag in self.friction_models:
+            raise ValueError(
+                f"Friction model tag {model.tag} already exists."
+            )
+        self.friction_models[model.tag] = model
+
+    def update_friction_model(
+        self,
+        original_tag: int,
+        model: FrictionModelData,
+    ) -> None:
+        original_tag = _strict_int(
+            original_tag,
+            "Friction model original tag",
+        )
+        if original_tag not in self.friction_models:
+            raise ValueError(
+                f"Friction model tag {original_tag} does not exist."
+            )
+        if (
+            model.tag != original_tag
+            and model.tag in self.friction_models
+        ):
+            raise ValueError(
+                f"Friction model tag {model.tag} already exists."
+            )
+        self.friction_models.pop(original_tag)
+        self.friction_models[model.tag] = model
+        if model.tag != original_tag:
+            for element in self.model.elements.values():
+                if element.element_type == "TripleFrictionPendulum":
+                    for key in ("frnTag1", "frnTag2", "frnTag3"):
+                        if (
+                            element.special_parameters.get(key)
+                            == original_tag
+                        ):
+                            element.special_parameters[key] = model.tag
+                elif element.element_type in FRICTION_BEARING_ELEMENT_TYPES:
+                    if (
+                        element.special_parameters.get("frn_model_tag")
+                        == original_tag
+                    ):
+                        element.special_parameters["frn_model_tag"] = model.tag
+
+    def remove_friction_model(self, tag: int) -> None:
+        tag = _strict_int(tag, "Friction model tag")
+        tfp_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type == "TripleFrictionPendulum"
+                and tag in {
+                    int(element.special_parameters[key])
+                    for key in ("frnTag1", "frnTag2", "frnTag3")
+                }
+            )
+        )
+        bearing_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in FRICTION_BEARING_ELEMENT_TYPES
+                and int(element.special_parameters["frn_model_tag"]) == tag
+            )
+        )
+        if tfp_users or bearing_users:
+            details = []
+            if tfp_users:
+                details.append(
+                    "TripleFrictionPendulum element(s): "
+                    + ", ".join(map(str, tfp_users))
+                )
+            if bearing_users:
+                details.append(
+                    "friction-bearing element(s): "
+                    + ", ".join(map(str, bearing_users))
+                )
+            raise ValueError(
+                f"Friction model {tag} is still referenced by "
+                + "; ".join(details)
+                + "."
+            )
+        self.friction_models.pop(tag, None)
 
     def next_section_tag(self) -> int:
         return max(self.sections, default=0) + 1
@@ -6740,16 +7343,33 @@ class ProjectDatabase:
             element.tag
             for element in self.model.elements.values()
             if (
-                element.element_type == "elasticBeamColumn"
+                element.element_type
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                 and element.section_tag == original_tag
             )
         )
         if elastic_beam_users and section.section_type != "Elastic":
             raise ValueError(
-                f"Section {original_tag} is used by elasticBeamColumn "
+                f"Section {original_tag} is used by elastic frame "
                 "element(s) "
                 + ", ".join(map(str, elastic_beam_users))
                 + " and must remain an Elastic section."
+            )
+
+        fiber_int_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type == "dispBeamColumnInt"
+                and element.section_tag == original_tag
+            )
+        )
+        if fiber_int_users and section.section_type != "FiberInt":
+            raise ValueError(
+                f"Section {original_tag} is used by dispBeamColumnInt "
+                "element(s) "
+                + ", ".join(map(str, fiber_int_users))
+                + " and must remain a FiberInt section."
             )
 
         shell_users = sorted(
@@ -6765,6 +7385,26 @@ class ProjectDatabase:
                 f"Section {original_tag} is used by Shell element(s) "
                 + ", ".join(map(str, shell_users))
                 + " and must remain a shell-compatible section."
+            )
+
+        truss_section_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in TRUSS_SECTION_ELEMENT_TYPES
+                and element.section_tag == original_tag
+            )
+        )
+        if (
+            truss_section_users
+            and section.section_type
+            in (SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES)
+        ):
+            raise ValueError(
+                f"Section {original_tag} is used by section-based truss "
+                "element(s) "
+                + ", ".join(map(str, truss_section_users))
+                + " and cannot become a shell section."
             )
 
         self_weight_users = sorted(
@@ -6930,7 +7570,7 @@ class ProjectDatabase:
                     ) from exc
             return
 
-        if section.section_type != "Fiber":
+        if section.section_type not in {"Fiber", "FiberInt"}:
             return
 
         missing = sorted(
@@ -6940,9 +7580,45 @@ class ProjectDatabase:
         )
         if missing:
             raise ValueError(
-                "Fiber section references missing material tag(s): "
-                + ", ".join(map(str, missing))
+                f"{section.section_type} section references missing material "
+                "tag(s): " + ", ".join(map(str, missing))
             )
+        if section.section_type == "FiberInt":
+            concrete_types = {
+                "Concrete01", "Concrete02", "Concrete04", "ConcreteCM",
+                "FRPConfinedConcrete", "FRPConfinedConcrete02",
+            }
+            steel_types = {
+                "Steel01", "Steel02", "RambergOsgoodSteel", "Hardening",
+                "ElasticPP", "ElasticBilin", "ReinforcingSteel",
+            }
+            for fiber in section.fibers:
+                material = self.materials[fiber.material_tag]
+                if material.material_type in concrete_types:
+                    if fiber.material_tag > 1000:
+                        raise ValueError(
+                            "FiberInt concrete material tags must be <= 1000."
+                        )
+                elif material.material_type in steel_types:
+                    if fiber.material_tag <= 1000:
+                        raise ValueError(
+                            "FiberInt steel material tags must be > 1000."
+                        )
+                else:
+                    raise ValueError(
+                        "FiberInt vertical fibers must use concrete or steel "
+                        "uniaxial materials."
+                    )
+            for fiber in section.horizontal_fibers:
+                material = self.materials[fiber.material_tag]
+                if (
+                    material.material_type not in steel_types
+                    or fiber.material_tag <= 1000
+                ):
+                    raise ValueError(
+                        "FiberInt Hfiber reinforcement must use a steel "
+                        "material tag > 1000."
+                    )
 
     def sections_using_material(self, material_tag: int) -> list[int]:
         material_tag = _strict_int(material_tag, "Material tag")
@@ -6969,7 +7645,9 @@ class ProjectDatabase:
                 + ", ".join(map(str, missing))
             )
 
-        if element.element_type in SHELL_ELEMENT_TYPES:
+        if element.element_type in (
+            SHELL_ELEMENT_TYPES | WALL_MACRO_3D_ELEMENT_TYPES
+        ):
             if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
                 raise ValueError(
                     f"{element.element_type} element {element.tag} requires "
@@ -7135,6 +7813,10 @@ class ProjectDatabase:
         )
         length2 = sum(value * value for value in delta)
         if length2 <= 1.0e-24:
+            if element.element_type in (
+                BEARING_ELEMENT_TYPES | CONTACT_TWO_NODE_ELEMENT_TYPES
+            ):
+                return
             raise ValueError(
                 f"Element {element.tag} has coincident end nodes and zero length."
             )
@@ -8573,16 +9255,304 @@ class ProjectDatabase:
         element = self.model.elements[element_tag]
         self._validate_element_geometry(element)
 
+        if element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES:
+            if element.truss_area <= 0.0:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "a positive cross-sectional area."
+                )
+            material_tag = element.truss_material_tag
+            if material_tag is None or int(material_tag) not in self.materials:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "an existing uniaxial material."
+                )
+
+        if element.element_type in TRUSS_SECTION_ELEMENT_TYPES:
+            section_tag = element.section_tag
+            section = (
+                self.sections.get(int(section_tag))
+                if section_tag is not None
+                else None
+            )
+            if section is None:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "an existing section."
+                )
+            if section.section_type in (
+                SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES
+            ):
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} cannot "
+                    f"use shell section {section.tag}."
+                )
+
+        if element.element_type in FRICTION_BEARING_ELEMENT_TYPES:
+            referenced = {
+                int(value)
+                for key in (
+                    "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                )
+                for value in [element.special_parameters.get(key)]
+                if value is not None
+            }
+            missing = sorted(
+                tag for tag in referenced if tag not in self.materials
+            )
+            if missing:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    "references missing uniaxial material tag(s): "
+                    + ", ".join(map(str, missing))
+                )
+            friction_tag = int(
+                element.special_parameters["frn_model_tag"]
+            )
+            if friction_tag not in self.friction_models:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    f"references missing friction model tag {friction_tag}."
+                )
+            signature = (int(self.model.ndm), int(self.model.ndf))
+            if signature == (3, 6):
+                if (
+                    element.special_parameters.get("t_mat_tag") is None
+                    or element.special_parameters.get("my_mat_tag") is None
+                ):
+                    raise ValueError(
+                        f"3D {element.element_type} requires torsion and "
+                        "My material tags."
+                    )
+            elif signature != (2, 3):
+                raise ValueError(
+                    f"{element.element_type} requires a 2D/3DOF or "
+                    "3D/6DOF model."
+                )
+
+        if element.element_type == "elastomericBearingPlasticity":
+            referenced = {
+                int(value)
+                for key in (
+                    "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                )
+                for value in [element.special_parameters.get(key)]
+                if value is not None
+            }
+            missing = sorted(
+                tag for tag in referenced if tag not in self.materials
+            )
+            if missing:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    "references missing uniaxial material tag(s): "
+                    + ", ".join(map(str, missing))
+                )
+            signature = (int(self.model.ndm), int(self.model.ndf))
+            if signature == (3, 6):
+                if (
+                    element.special_parameters.get("t_mat_tag") is None
+                    or element.special_parameters.get("my_mat_tag") is None
+                ):
+                    raise ValueError(
+                        "3D elastomericBearingPlasticity requires "
+                        "torsion and My material tags."
+                    )
+            elif signature != (2, 3):
+                raise ValueError(
+                    "elastomericBearingPlasticity requires a 2D/3DOF "
+                    "or 3D/6DOF model."
+                )
+
+        if element.element_type == "LeadRubberX":
+            if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+                raise ValueError(
+                    "LeadRubberX requires a 3D/6DOF model."
+                )
+
+        if element.element_type == "TripleFrictionPendulum":
+            if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+                raise ValueError(
+                    "TripleFrictionPendulum requires a 3D/6DOF model."
+                )
+            material_keys = (
+                "vertMatTag", "rotZMatTag", "rotXMatTag", "rotYMatTag"
+            )
+            referenced_materials = {
+                int(element.special_parameters[key])
+                for key in material_keys
+            }
+            missing_materials = sorted(
+                tag
+                for tag in referenced_materials
+                if tag not in self.materials
+            )
+            if missing_materials:
+                raise ValueError(
+                    f"TripleFrictionPendulum element {element_tag} "
+                    "references missing uniaxial material tag(s): "
+                    + ", ".join(map(str, missing_materials))
+                )
+            referenced_friction = {
+                int(element.special_parameters[key])
+                for key in ("frnTag1", "frnTag2", "frnTag3")
+            }
+            missing_friction = sorted(
+                tag
+                for tag in referenced_friction
+                if tag not in self.friction_models
+            )
+            if missing_friction:
+                raise ValueError(
+                    f"TripleFrictionPendulum element {element_tag} "
+                    "references missing friction model tag(s): "
+                    + ", ".join(map(str, missing_friction))
+                )
+
+        if element.element_type in BEAM_CONTACT_ELEMENT_TYPES:
+            nd_tag = int(element.special_parameters["nd_material_tag"])
+            nd_material = self.nd_materials.get(nd_tag)
+            if nd_material is None:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    f"references missing nDMaterial {nd_tag}."
+                )
+            expected_type = (
+                "ContactMaterial2D"
+                if element.element_type == "BeamContact2D"
+                else "ContactMaterial3D"
+            )
+            if nd_material.material_type != expected_type:
+                raise ValueError(
+                    f"{element.element_type} requires {expected_type}; "
+                    f"nDMaterial {nd_tag} is {nd_material.material_type}."
+                )
+            if element.element_type == "BeamContact3D":
+                transf_tag = int(
+                    element.special_parameters["transf_tag"]
+                )
+                if transf_tag not in self.transformations:
+                    raise ValueError(
+                        f"BeamContact3D element {element_tag} references "
+                        f"missing transformation {transf_tag}."
+                    )
+
+        if element.element_type in MASONRY_PANEL_ELEMENT_TYPES:
+            if (int(self.model.ndm), int(self.model.ndf)) != (2, 3):
+                raise ValueError(
+                    f"{element.element_type} requires an ndm=2/ndf=3 model."
+                )
+            referenced = {
+                int(element.special_parameters[key])
+                for key in ("mat_1", "mat_2")
+            }
+            missing = sorted(
+                tag for tag in referenced if tag not in self.materials
+            )
+            if missing:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    "references missing uniaxial material tag(s): "
+                    + ", ".join(map(str, missing))
+                )
+
+        if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
+            material_tag = element.continuum_material_tag
+            if material_tag is None or int(material_tag) not in self.nd_materials:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "an existing nDMaterial."
+                )
+
+        if element.element_type in SOLID_ELEMENT_TYPES:
+            material_tag = element.solid_material_tag
+            if material_tag is None or int(material_tag) not in self.nd_materials:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} requires "
+                    "an existing nDMaterial."
+                )
+
+        if element.element_type in {"MVLEM", "MVLEM_3D"}:
+            direct_tags = {*element.wall_concrete_tags, *element.wall_steel_tags}
+            if element.wall_shear_tag is not None:
+                direct_tags.add(int(element.wall_shear_tag))
+            missing = sorted(
+                tag for tag in direct_tags if int(tag) not in self.materials
+            )
+            if missing:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    "references missing uniaxial material tag(s): "
+                    + ", ".join(map(str, missing))
+                )
+        elif element.element_type == "SFI_MVLEM":
+            missing = sorted(
+                tag for tag in element.wall_nd_material_tags
+                if int(tag) not in self.nd_materials
+            )
+            if missing:
+                raise ValueError(
+                    f"SFI_MVLEM element {element_tag} references missing "
+                    "nDMaterial tag(s): " + ", ".join(map(str, missing))
+                )
+            incompatible = [
+                int(tag)
+                for tag in element.wall_nd_material_tags
+                if self.nd_materials[int(tag)].material_type != "FSAM"
+            ]
+            if incompatible:
+                raise ValueError(
+                    f"SFI_MVLEM element {element_tag} requires FSAM "
+                    "nDMaterials; incompatible tag(s): "
+                    + ", ".join(map(str, incompatible))
+                )
+
         if element.section_tag is not None:
             section = self.sections.get(int(element.section_tag))
             if (
                 section is not None
-                and element.element_type == "elasticBeamColumn"
+                and element.element_type
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                 and section.section_type != "Elastic"
             ):
                 raise ValueError(
-                    f"elasticBeamColumn element {element_tag} requires an "
-                    "Elastic section."
+                    f"{element.element_type} element {element_tag} requires "
+                    "an Elastic section."
+                )
+            if (
+                section is not None
+                and element.element_type == "ElasticTimoshenkoBeam"
+                and section.section_type == "Elastic"
+            ):
+                resolved = section.resolved_elastic_parameters(
+                    self.materials
+                )
+                required = (
+                    ("E", "G", "A", "Iz", "Avy")
+                    if int(self.model.ndm) == 2
+                    else (
+                        "E", "G", "A", "J", "Iy", "Iz", "Avy", "Avz"
+                    )
+                )
+                invalid = [
+                    key
+                    for key in required
+                    if float(resolved.get(key, 0.0)) <= 0.0
+                ]
+                if invalid:
+                    raise ValueError(
+                        f"ElasticTimoshenkoBeam element {element_tag} "
+                        "requires positive Elastic section parameter(s): "
+                        + ", ".join(invalid)
+                    )
+            if (
+                section is not None
+                and element.element_type == "dispBeamColumnInt"
+                and section.section_type != "FiberInt"
+            ):
+                raise ValueError(
+                    f"dispBeamColumnInt element {element_tag} requires a "
+                    "FiberInt section."
                 )
             if (
                 section is not None
@@ -8599,6 +9569,22 @@ class ProjectDatabase:
                 int(element.transf_tag)
             )
             if transformation is not None:
+                if (
+                    element.element_type == "dispBeamColumnInt"
+                    and transformation.transformation_type != "LinearInt"
+                ):
+                    raise ValueError(
+                        f"dispBeamColumnInt element {element_tag} requires "
+                        "a LinearInt geometric transformation."
+                    )
+                if (
+                    element.element_type != "dispBeamColumnInt"
+                    and transformation.transformation_type == "LinearInt"
+                ):
+                    raise ValueError(
+                        "LinearInt geometric transformations are reserved "
+                        "for dispBeamColumnInt elements."
+                    )
                 self._validate_element_geometry(
                     element,
                     transformation=transformation,
@@ -9598,12 +10584,17 @@ class ProjectDatabase:
                 for tag in recorder.target_tags
                 if tag not in self.model.elements
                 or self.model.elements[tag].element_type
-                not in {"forceBeamColumn", "dispBeamColumn"}
+                not in {
+                    "forceBeamColumn",
+                    "dispBeamColumn",
+                    "dispBeamColumnInt",
+                }
             ]
             if incompatible:
                 raise ValueError(
                     "Section/Fiber recorders require forceBeamColumn or "
-                    "dispBeamColumn element tag(s): "
+                    "dispBeamColumn element tag(s), including "
+                    "dispBeamColumnInt: "
                     + ", ".join(map(str, incompatible))
                 )
             too_short = [
@@ -10610,6 +11601,10 @@ class ProjectDatabase:
                 self.materials[tag].to_dict()
                 for tag in sorted(self.materials)
             ],
+            "friction_models": [
+                self.friction_models[tag].to_dict()
+                for tag in sorted(self.friction_models)
+            ],
             "nd_materials": [
                 self.nd_materials[tag].to_dict()
                 for tag in sorted(self.nd_materials)
@@ -10667,6 +11662,7 @@ class ProjectDatabase:
                 for tag in sorted(self.solution_results)
             ],
             "active_analysis_tag": self.active_analysis_tag,
+            "frame_wizard_recipe": deepcopy(self.frame_wizard_recipe),
         }
 
     @staticmethod
@@ -10864,6 +11860,24 @@ class ProjectDatabase:
                 materials[material.tag] = material
 
         return materials
+
+    @staticmethod
+    def _load_friction_models(
+        raw: Any,
+    ) -> dict[int, FrictionModelData]:
+        result: dict[int, FrictionModelData] = {}
+        for index, item in enumerate(
+            _require_list(raw, "Friction models")
+        ):
+            model = FrictionModelData.from_dict(
+                _require_object(item, f"Friction model item {index}")
+            )
+            if model.tag in result:
+                raise ValueError(
+                    f"Duplicate friction model tag {model.tag}."
+                )
+            result[model.tag] = model
+        return result
 
     @staticmethod
     def _load_nd_materials(raw: Any) -> dict[int, NDMaterialData]:
@@ -11202,6 +12216,9 @@ class ProjectDatabase:
                 data.get("surface_recorders", [])
             ),
             materials=cls._load_materials(data.get("materials", [])),
+            friction_models=cls._load_friction_models(
+                data.get("friction_models", [])
+            ),
             nd_materials=cls._load_nd_materials(
                 data.get("nd_materials", [])
             ),
@@ -11233,6 +12250,9 @@ class ProjectDatabase:
                 )
                 if data.get("active_analysis_tag") is not None
                 else None
+            ),
+            frame_wizard_recipe=deepcopy(
+                dict(data.get("frame_wizard_recipe", {}))
             ),
             units=normalize_project_units(
                 {

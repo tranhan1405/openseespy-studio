@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="FEWIZ monochrome mesh W mark">
+  <g fill="none" stroke="#1F2933" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M42 64 77 150 124 92 164 150 205 62" stroke-width="7"/>
+    <path d="M59 84 92 176 130 120 180 176 220 82" stroke-width="7"/>
+    <path d="M42 64 59 84M77 150 92 176M124 92 130 120M164 150 180 176M205 62 220 82" stroke-width="3.5"/>
+    <path d="M59 84 77 150M77 150 130 120M130 120 164 150M164 150 220 82" stroke-width="3"/>
+  </g>
+  <g fill="#fff" stroke="#1F2933" stroke-width="3">
+    <circle cx="42" cy="64" r="5.5"/><circle cx="77" cy="150" r="5.5"/><circle cx="124" cy="92" r="5.5"/><circle cx="164" cy="150" r="5.5"/><circle cx="205" cy="62" r="5.5"/>
+    <circle cx="59" cy="84" r="5.5"/><circle cx="92" cy="176" r="5.5"/><circle cx="130" cy="120" r="5.5"/><circle cx="180" cy="176" r="5.5"/><circle cx="220" cy="82" r="5.5"/>
+  </g>
+  <path d="M218 29l4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="#1F2933"/>
+</svg>

@@ -18,6 +18,7 @@ from .project import (
     ElementLoadData,
     FiberComponentData,
     FiberData,
+    FrictionModelData,
     LoadPatternData,
     MaterialData,
     ND_MATERIAL_DEFAULTS,
@@ -308,7 +309,7 @@ class _Importer:
 
     OPS_COMMANDS = {
         "model", "wipe", "wipeAnalysis", "node", "fix", "mass",
-        "uniaxialMaterial", "nDMaterial", "section", "fiber", "patch", "layer",
+        "uniaxialMaterial", "frictionModel", "nDMaterial", "section", "fiber", "patch", "layer",
         "geomTransf", "beamIntegration", "element",
         "equalDOF", "rigidLink", "rigidDiaphragm",
         "timeSeries", "pattern", "load",
@@ -597,6 +598,44 @@ class _Importer:
                 "execution requires a compatible/custom OpenSees build.",
             )
 
+    def add_friction_model(self, node: ast.Call, args: list[Any]) -> None:
+        if len(args) < 3:
+            raise ValueError("frictionModel needs type, tag and parameters")
+        kind = str(args[0])
+        tag = int(args[1])
+        values = list(args[2:])
+        if kind == "Coulomb":
+            if len(values) < 1:
+                raise ValueError("Coulomb frictionModel needs mu")
+            parameters = {"mu": float(values[0])}
+        elif kind == "VelDependent":
+            if len(values) < 3:
+                raise ValueError(
+                    "VelDependent frictionModel needs muSlow, muFast and transRate"
+                )
+            parameters = {
+                "muSlow": float(values[0]),
+                "muFast": float(values[1]),
+                "transRate": float(values[2]),
+            }
+        else:
+            self.issue(
+                "UNSUPPORTED",
+                node,
+                f"frictionModel {kind}",
+                f"Friction model {kind!r} is not supported by FEWIZ yet.",
+            )
+            return
+        self.project.add_friction_model(
+            FrictionModelData(
+                tag,
+                f"Imported {kind} {tag}",
+                kind,
+                parameters,
+            )
+        )
+        self.count("Friction Models")
+
     def add_nd_material(self, node: ast.Call, args: list[Any]) -> None:
         if len(args) < 2:
             raise ValueError("nDMaterial needs type and tag")
@@ -837,21 +876,34 @@ class _Importer:
         kind = str(args[0])
         tag = int(args[1])
         if kind == "Elastic":
-            if len(args) < 8:
+            if len(args) < 5:
                 raise ValueError("Elastic section has too few arguments")
+            parameters = {
+                "E": self.stress_to_pa(args[2]),
+                "A": float(args[3]),
+                "Iz": float(args[4]),
+            }
+            if len(args) >= 8:
+                parameters.update({
+                    "Iy": float(args[5]),
+                    "G": self.stress_to_pa(args[6]),
+                    "J": float(args[7]),
+                })
+            else:
+                # OpenSees' 2D Elastic section signature is E, A, Iz.
+                # Keep the unused 3D-only terms neutral so a FEWIZ
+                # export/import round trip preserves the 2D definition.
+                parameters.update({
+                    "Iy": 0.0,
+                    "G": 0.0,
+                    "J": 0.0,
+                })
             self.project.add_section(
                 SectionData(
                     tag,
                     f"Imported Elastic {tag}",
                     "Elastic",
-                    parameters={
-                        "E": self.stress_to_pa(args[2]),
-                        "A": float(args[3]),
-                        "Iz": float(args[4]),
-                        "Iy": float(args[5]),
-                        "G": self.stress_to_pa(args[6]),
-                        "J": float(args[7]),
-                    },
+                    parameters=parameters,
                 )
             )
             self.current_fiber_section = None
@@ -1398,6 +1450,36 @@ class _Importer:
             self.count("Elements")
             return
 
+        if kind == "MasonPan12":
+            if len(args) != 19:
+                raise ValueError(
+                    "MasonPan12 needs 12 node tags, two material tags, "
+                    "thickness, w_tot and w_1."
+                )
+            masonry_nodes = tuple(int(value) for value in args[2:14])
+            material_1 = int(args[14])
+            material_2 = int(args[15])
+            thickness = float(args[16])
+            w_tot = float(args[17])
+            w_1 = float(args[18])
+            self.project.model.add_element(
+                tag,
+                masonry_nodes[0],
+                masonry_nodes[1],
+                element_type="MasonPan12",
+                group="masonry",
+                special_parameters={
+                    "mat_1": material_1,
+                    "mat_2": material_2,
+                    "thick": thickness,
+                    "w_tot": w_tot,
+                    "w_1": w_1,
+                },
+                additional_node_tags=masonry_nodes[2:],
+            )
+            self.count("Elements")
+            return
+
         if kind == "MEFI":
             if len(args) < 11:
                 raise ValueError(
@@ -1502,36 +1584,121 @@ class _Importer:
             self.count("Elements")
             return
 
-        if kind.lower() in {"truss", "corottruss"}:
-            if len(args) < 6:
-                raise ValueError(
-                    f"{kind} needs area and material tag"
-                )
-            rest = args[6:]
-            element_type = (
-                "corotTruss"
-                if kind.lower() == "corottruss"
-                else "truss"
+        if kind in {"flatSliderBearing", "singleFPBearing"}:
+            minimum = 7 if kind == "singleFPBearing" else 6
+            if len(args) < minimum:
+                raise ValueError(f"{kind} has too few arguments")
+            friction_tag = int(args[4])
+            if kind == "singleFPBearing":
+                reff = self.length_to_m(float(args[5]))
+                k_index = 6
+            else:
+                reff = None
+                k_index = 5
+            k_init = (
+                float(args[k_index])
+                * self.units.force_to_n
+                / self.units.length_to_m
             )
+            rest = list(args[k_index + 1:])
+            p_tag = self.flag_value(rest, "-P")
+            mz_tag = self.flag_value(rest, "-Mz")
+            if p_tag is None or mz_tag is None:
+                raise ValueError(f"{kind} requires -P and -Mz material tags")
+
+            t_tag = self.flag_value(rest, "-T")
+            my_tag = self.flag_value(rest, "-My")
+            orient_values = self.flag_values(rest, "-orient")
+            orientation = (
+                tuple(float(value) for value in orient_values[:6])
+                if len(orient_values) >= 6
+                else None
+            )
+            iter_values = self.flag_values(rest, "-iter")
+            max_iter = int(iter_values[0]) if len(iter_values) >= 1 else 20
+            tol = float(iter_values[1]) if len(iter_values) >= 2 else 1.0e-8
+            mass_value = float(self.flag_value(rest, "-mass", 0.0) or 0.0)
+
+            parameters = {
+                "frn_model_tag": friction_tag,
+                "kInit": k_init,
+                "p_mat_tag": int(p_tag),
+                "mz_mat_tag": int(mz_tag),
+                "t_mat_tag": None if t_tag is None else int(t_tag),
+                "my_mat_tag": None if my_tag is None else int(my_tag),
+                "orientation": orientation,
+                "shearDist": float(
+                    self.flag_value(rest, "-shearDist", 0.0) or 0.0
+                ),
+                "doRayleigh": "-doRayleigh" in rest,
+                "mass": mass_value * self.units.mass_unit_kg,
+                "maxIter": max_iter,
+                "tol": tol,
+            }
+            if reff is not None:
+                parameters["Reff"] = reff
             self.project.model.add_element(
                 tag,
                 ni,
                 nj,
-                element_type=element_type,
-                group="truss",
-                mass_per_length=float(
+                element_type=kind,
+                group="isolation",
+                special_parameters=parameters,
+            )
+            self.count("Elements")
+            return
+
+        if kind.lower() in {
+            "truss", "corottruss", "trusssection", "corottrusssection",
+        }:
+            normalized = kind.lower()
+            section_based = normalized in {
+                "trusssection", "corottrusssection",
+            }
+            minimum = 5 if section_based else 6
+            if len(args) < minimum:
+                raise ValueError(
+                    f"{kind} needs "
+                    + (
+                        "a section tag"
+                        if section_based
+                        else "area and material tag"
+                    )
+                )
+            rest = args[5:] if section_based else args[6:]
+            if normalized == "truss":
+                element_type = "truss"
+            elif normalized == "corottruss":
+                element_type = "corotTruss"
+            elif normalized == "trusssection":
+                element_type = "trussSection"
+            else:
+                element_type = "corotTrussSection"
+            kwargs = {
+                "element_type": element_type,
+                "group": "truss",
+                "mass_per_length": float(
                     self.flag_value(rest, "-rho", 0.0) or 0.0
                 ),
-                consistent_mass=bool(
+                "consistent_mass": bool(
                     int(self.flag_value(rest, "-cMass", 0) or 0)
                 )
                 if "-cMass" in rest
                 else False,
-                truss_area=float(args[4]),
-                truss_material_tag=int(args[5]),
-                truss_do_rayleigh=bool(
+                "truss_do_rayleigh": bool(
                     int(self.flag_value(rest, "-doRayleigh", 0) or 0)
                 ),
+            }
+            if section_based:
+                kwargs["section_tag"] = int(args[4])
+            else:
+                kwargs["truss_area"] = float(args[4])
+                kwargs["truss_material_tag"] = int(args[5])
+            self.project.model.add_element(
+                tag,
+                ni,
+                nj,
+                **kwargs,
             )
             self.count("Elements")
             return
@@ -2588,6 +2755,8 @@ class _Importer:
                 self.count("Mass assignments")
             elif command == "uniaxialMaterial":
                 self.add_material(node, args)
+            elif command == "frictionModel":
+                self.add_friction_model(node, args)
             elif command == "nDMaterial":
                 self.add_nd_material(node, args)
             elif command == "section":

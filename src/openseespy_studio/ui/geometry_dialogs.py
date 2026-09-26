@@ -52,16 +52,49 @@ class _BaseDialog(QDialog):
 
 
 class NodeDialog(_BaseDialog):
-    def __init__(self, tag: int, parent=None):
+    def __init__(
+        self,
+        tag: int,
+        parent=None,
+        *,
+        default_ndf: int = 6,
+    ):
         super().__init__("Create Node", parent)
         self.tag = _tag_spin(tag)
         self.x = _coord_spin()
         self.y = _coord_spin()
         self.z = _coord_spin()
+        self.ndf = QComboBox()
+        for value in range(1, 7):
+            self.ndf.addItem(
+                (
+                    f"{value} DOF (model default)"
+                    if value == int(default_ndf)
+                    else f"{value} DOF"
+                ),
+                value,
+            )
+        index = self.ndf.findData(int(default_ndf))
+        if index >= 0:
+            self.ndf.setCurrentIndex(index)
         self.form.addRow("Tag:", self.tag)
         self.form.addRow("X:", self.x)
         self.form.addRow("Y:", self.y)
         self.form.addRow("Z:", self.z)
+        self.form.addRow("Node DOFs:", self.ndf)
+
+        note = QLabel(
+            "Most nodes should use the model default. A different node NDF "
+            "is mainly for mixed-DOF formulations such as BeamContact."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            "padding: 6px; background: #f3f6f9; color: #526476;"
+        )
+        self.root.insertWidget(1, note)
+
+    def node_ndf(self) -> int:
+        return int(self.ndf.currentData())
 
     def values(self):
         return self.tag.value(), self.x.value(), self.y.value(), self.z.value()
@@ -80,6 +113,8 @@ class ElementDialog(_BaseDialog):
         transformations=None,
         new_section_callback=None,
         new_transformation_callback=None,
+        ndm: int = 3,
+        ndf: int = 6,
         parent=None,
     ):
         super().__init__("Create Frame Member", parent)
@@ -87,17 +122,22 @@ class ElementDialog(_BaseDialog):
         self._transformations = dict(transformations or {})
         self._new_section_callback = new_section_callback
         self._new_transformation_callback = new_transformation_callback
+        self._dims = (int(ndm), int(ndf))
 
         self.tag = _tag_spin(tag)
         self.node_i = _tag_spin(node_i)
         self.node_j = _tag_spin(node_j)
 
         self.element_type = QComboBox()
-        self.element_type.addItems([
+        element_types = [
             "elasticBeamColumn",
+            "ElasticTimoshenkoBeam",
             "forceBeamColumn",
             "dispBeamColumn",
-        ])
+        ]
+        if self._dims == (2, 3):
+            element_types.append("dispBeamColumnInt")
+        self.element_type.addItems(element_types)
 
         self.section = QComboBox()
         self.section_new = QPushButton("New Section...")
@@ -132,8 +172,17 @@ class ElementDialog(_BaseDialog):
         self.integration_type = QComboBox()
         self.integration_type.addItems(["Lobatto", "Legendre", "Radau"])
         self.integration_points = QSpinBox()
-        self.integration_points.setRange(2, 50)
+        self.integration_points.setRange(1, 50)
         self.integration_points.setValue(5)
+
+        self.center_rotation = QDoubleSpinBox()
+        self.center_rotation.setDecimals(6)
+        self.center_rotation.setRange(0.0, 1.0)
+        self.center_rotation.setSingleStep(0.05)
+        self.center_rotation.setValue(0.4)
+        self.center_rotation.setToolTip(
+            "dispBeamColumnInt center-of-rotation ratio cRot."
+        )
 
         self.form.addRow("Tag:", self.tag)
         self.form.addRow("Node I:", self.node_i)
@@ -144,19 +193,20 @@ class ElementDialog(_BaseDialog):
         self.form.addRow("Group:", self.group)
         self.form.addRow("Beam integration:", self.integration_type)
         self.form.addRow("Integration points:", self.integration_points)
+        self.form.addRow("Center of rotation cRot:", self.center_rotation)
+
+        self.formulation_note = QLabel()
+        self.formulation_note.setWordWrap(True)
+        self.formulation_note.setStyleSheet(
+            "padding: 6px; background: #f3f6f9; color: #526476;"
+        )
+        self.root.insertWidget(1, self.formulation_note)
 
         self._populate_transformations()
         self.element_type.currentTextChanged.connect(
             self._sync_formulation_controls
         )
         self._sync_formulation_controls(self.element_type.currentText())
-
-        note = QLabel(
-            "Frame creates a solver-ready structural member. "
-            "Section and geometric transformation are assigned at creation."
-        )
-        note.setWordWrap(True)
-        self.root.insertWidget(1, note)
 
     def _create_section_dependency(self) -> None:
         if not callable(self._new_section_callback):
@@ -183,13 +233,29 @@ class ElementDialog(_BaseDialog):
             self.transformation.setCurrentIndex(index)
 
     def _populate_transformations(self) -> None:
+        current = self.transformation.currentData()
+        element_type = self.element_type.currentText()
         self.transformation.clear()
         for tag in sorted(self._transformations):
             item = self._transformations[tag]
+            if (
+                element_type == "dispBeamColumnInt"
+                and item.transformation_type != "LinearInt"
+            ):
+                continue
+            if (
+                element_type != "dispBeamColumnInt"
+                and item.transformation_type == "LinearInt"
+            ):
+                continue
             self.transformation.addItem(
                 f"{tag} - {item.name} ({item.transformation_type})",
                 int(tag),
             )
+        if current is not None:
+            index = self.transformation.findData(int(current))
+            if index >= 0:
+                self.transformation.setCurrentIndex(index)
 
     def _populate_sections(self, element_type: str) -> None:
         current = self.section.currentData()
@@ -197,8 +263,14 @@ class ElementDialog(_BaseDialog):
         for tag in sorted(self._sections):
             item = self._sections[tag]
             if (
-                element_type == "elasticBeamColumn"
+                element_type
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                 and item.section_type != "Elastic"
+            ):
+                continue
+            if (
+                element_type == "dispBeamColumnInt"
+                and item.section_type != "FiberInt"
             ):
                 continue
             self.section.addItem(
@@ -212,9 +284,37 @@ class ElementDialog(_BaseDialog):
 
     def _sync_formulation_controls(self, element_type: str) -> None:
         nonlinear = element_type in {"forceBeamColumn", "dispBeamColumn"}
+        interaction = element_type == "dispBeamColumnInt"
         self.integration_type.setEnabled(nonlinear)
-        self.integration_points.setEnabled(nonlinear)
+        self.integration_points.setEnabled(nonlinear or interaction)
+        self.integration_points.setMinimum(1 if interaction else 2)
+        self.center_rotation.setEnabled(interaction)
         self._populate_sections(element_type)
+        self._populate_transformations()
+
+        if interaction:
+            self.formulation_note.setText(
+                "Flexure-shear interaction formulation. Requires a FiberInt "
+                "section and LinearInt transformation. Integration points and "
+                "cRot are direct dispBeamColumnInt parameters; no separate "
+                "beamIntegration tag is used."
+            )
+        elif element_type == "ElasticTimoshenkoBeam":
+            self.formulation_note.setText(
+                "Elastic Timoshenko beam with shear deformation. Use an "
+                "Elastic section containing E, G and shear areas Avy/Avz "
+                "as required by the model dimension."
+            )
+        elif element_type == "elasticBeamColumn":
+            self.formulation_note.setText(
+                "Elastic Euler-Bernoulli beam-column. Shear deformation is "
+                "not included; use ElasticTimoshenkoBeam when it matters."
+            )
+        else:
+            self.formulation_note.setText(
+                "Distributed-plasticity beam-column. Assign a compatible "
+                "section and geometric transformation before analysis."
+            )
 
     def values(self):
         section_tag = self.section.currentData()
@@ -237,11 +337,16 @@ class ElementDialog(_BaseDialog):
             self.group.currentText().strip() or "frame",
             self.integration_type.currentText(),
             self.integration_points.value(),
+            self.center_rotation.value(),
         )
 
 
 class TrussDialog(_BaseDialog):
-    """Create an axial-only OpenSees Truss element."""
+    """Create or edit an axial-only OpenSees truss formulation."""
+
+    MATERIAL_TYPES = {"truss", "corotTruss"}
+    SECTION_TYPES = {"trussSection", "corotTrussSection"}
+    AXIAL_SECTION_TYPES = {"Elastic", "Fiber", "FiberInt"}
 
     def __init__(
         self,
@@ -250,26 +355,56 @@ class TrussDialog(_BaseDialog):
         node_j: int = 2,
         *,
         materials=None,
+        sections=None,
         units=None,
         default_area: float | None = None,
         new_material_callback=None,
+        new_section_callback=None,
+        element=None,
         parent=None,
     ):
-        super().__init__("Create Truss Element", parent)
+        super().__init__(
+            "Edit Truss Element" if element is not None else "Create Truss Element",
+            parent,
+        )
         self._materials = dict(materials or {})
+        self._sections = {
+            int(section_tag): section
+            for section_tag, section in dict(sections or {}).items()
+            if getattr(section, "section_type", "") in self.AXIAL_SECTION_TYPES
+        }
         self._new_material_callback = new_material_callback
+        self._new_section_callback = new_section_callback
         self.unit_system = UnitSystem.from_mapping(units)
 
-        self.tag = _tag_spin(tag)
-        self.node_i = _tag_spin(node_i)
-        self.node_j = _tag_spin(node_j)
+        self.tag = _tag_spin(getattr(element, "tag", tag))
+        if element is not None:
+            self.tag.setEnabled(False)
+        self.node_i = _tag_spin(getattr(element, "i", node_i))
+        self.node_j = _tag_spin(getattr(element, "j", node_j))
+
+        self.formulation = QComboBox()
+        self.formulation.addItem("Linear · Area + Material", "truss")
+        self.formulation.addItem(
+            "Corotational · Area + Material",
+            "corotTruss",
+        )
+        self.formulation.addItem("Linear · Section", "trussSection")
+        self.formulation.addItem(
+            "Corotational · Section",
+            "corotTrussSection",
+        )
+        initial_type = getattr(element, "element_type", "truss")
+        index = self.formulation.findData(initial_type)
+        self.formulation.setCurrentIndex(index if index >= 0 else 0)
 
         self.area = QDoubleSpinBox()
         self.area.setDecimals(9)
         self.area.setRange(1.0e-12, 1.0e18)
         if default_area is None:
             default_area = 1.0e-3 / (self.unit_system.length_to_m ** 2)
-        self.area.setValue(float(default_area))
+        element_area = float(getattr(element, "truss_area", 0.0) or 0.0)
+        self.area.setValue(element_area if element_area > 0.0 else float(default_area))
 
         self.material = QComboBox()
         self.material_new = QPushButton("New Material...")
@@ -281,28 +416,53 @@ class TrussDialog(_BaseDialog):
         material_row.setSpacing(4)
         material_row.addWidget(self.material, 1)
         material_row.addWidget(self.material_new)
-        self._refresh_material_choices()
+        self._refresh_material_choices(
+            getattr(element, "truss_material_tag", None)
+        )
+
+        self.section = QComboBox()
+        self.section_new = QPushButton("New Section...")
+        self.section_new.setEnabled(callable(self._new_section_callback))
+        self.section_new.clicked.connect(self._create_section_dependency)
+        self.section_holder = QWidget()
+        section_row = QHBoxLayout(self.section_holder)
+        section_row.setContentsMargins(0, 0, 0, 0)
+        section_row.setSpacing(4)
+        section_row.addWidget(self.section, 1)
+        section_row.addWidget(self.section_new)
+        self._refresh_section_choices(
+            getattr(element, "section_tag", None)
+        )
 
         self.group = QComboBox()
         self.group.setEditable(True)
         self.group.addItems(["truss", "brace", "tie", "bar"])
+        self.group.setCurrentText(getattr(element, "group", "truss"))
 
         self.rho = QDoubleSpinBox()
         self.rho.setDecimals(9)
         self.rho.setRange(0.0, 1.0e18)
-        self.rho.setValue(0.0)
+        self.rho.setValue(float(getattr(element, "mass_per_length", 0.0)))
 
         self.consistent_mass = QCheckBox("Use consistent mass matrix")
+        self.consistent_mass.setChecked(
+            bool(getattr(element, "consistent_mass", False))
+        )
         self.do_rayleigh = QCheckBox("Include in Rayleigh damping")
+        self.do_rayleigh.setChecked(
+            bool(getattr(element, "truss_do_rayleigh", False))
+        )
 
         self.form.addRow("Tag:", self.tag)
         self.form.addRow("Node I:", self.node_i)
         self.form.addRow("Node J:", self.node_j)
+        self.form.addRow("Formulation:", self.formulation)
         self.form.addRow(
             f"Area [{self.unit_system.length}²]:",
             self.area,
         )
         self.form.addRow("Uniaxial material:", self.material_holder)
+        self.form.addRow("Section:", self.section_holder)
         self.form.addRow("Group:", self.group)
         self.form.addRow(
             f"rho [{self.unit_system.mass_per_length_label}]:",
@@ -311,13 +471,15 @@ class TrussDialog(_BaseDialog):
         self.form.addRow("Mass:", self.consistent_mass)
         self.form.addRow("Rayleigh:", self.do_rayleigh)
 
-        note = QLabel(
-            "Truss is axial-only: it uses area + uniaxial material and "
-            "does not require a Section, geometric Transformation, or "
-            "beam Integration."
+        self.note = QLabel()
+        self.note.setWordWrap(True)
+        self.note.setStyleSheet(
+            "padding: 6px; background: #f3f6f9; color: #526476;"
         )
-        note.setWordWrap(True)
-        self.root.insertWidget(1, note)
+        self.root.insertWidget(1, self.note)
+
+        self.formulation.currentIndexChanged.connect(self._sync_formulation)
+        self._sync_formulation()
 
     def _refresh_material_choices(self, select_tag: int | None = None) -> None:
         current = self.material.currentData() if self.material.count() else None
@@ -337,6 +499,24 @@ class TrussDialog(_BaseDialog):
         elif self.material.count() == 2:
             self.material.setCurrentIndex(1)
 
+    def _refresh_section_choices(self, select_tag: int | None = None) -> None:
+        current = self.section.currentData() if self.section.count() else None
+        wanted = select_tag if select_tag is not None else current
+        self.section.clear()
+        self.section.addItem("Select Section...", None)
+        for section_tag in sorted(self._sections):
+            section = self._sections[section_tag]
+            self.section.addItem(
+                f"{section_tag} - {section.name} ({section.section_type})",
+                int(section_tag),
+            )
+        if wanted is not None:
+            index = self.section.findData(int(wanted))
+            if index >= 0:
+                self.section.setCurrentIndex(index)
+        elif self.section.count() == 2:
+            self.section.setCurrentIndex(1)
+
     def _create_material_dependency(self) -> None:
         if not callable(self._new_material_callback):
             return
@@ -346,24 +526,83 @@ class TrussDialog(_BaseDialog):
         self._materials[int(material.tag)] = material
         self._refresh_material_choices(int(material.tag))
 
-    def values(self):
-        material_tag = self.material.currentData()
-        if material_tag is None:
+    def _create_section_dependency(self) -> None:
+        if not callable(self._new_section_callback):
+            return
+        section = self._new_section_callback()
+        if section is None:
+            return
+        if getattr(section, "section_type", "") not in self.AXIAL_SECTION_TYPES:
             raise ValueError(
-                "Select a uniaxial material before creating the Truss element."
+                "TrussSection requires an Elastic, Fiber, or FiberInt section."
             )
+        self._sections[int(section.tag)] = section
+        self._refresh_section_choices(int(section.tag))
+
+    def _sync_formulation(self, *_args) -> None:
+        element_type = str(self.formulation.currentData())
+        section_based = element_type in self.SECTION_TYPES
+        self.area.setEnabled(not section_based)
+        self.material_holder.setEnabled(not section_based)
+        self.section_holder.setEnabled(section_based)
+        if section_based:
+            geometry = (
+                "corotational large-displacement"
+                if element_type == "corotTrussSection"
+                else "linear-geometry"
+            )
+            self.note.setText(
+                f"{element_type} is an axial-only {geometry} truss using "
+                "a Section response directly. Area and uniaxial material "
+                "are therefore not separate element inputs."
+            )
+        else:
+            geometry = (
+                "corotational large-displacement"
+                if element_type == "corotTruss"
+                else "linear-geometry"
+            )
+            self.note.setText(
+                f"{element_type} is an axial-only {geometry} truss using "
+                "cross-sectional area + uniaxial material. No Section or "
+                "geometric Transformation is required."
+            )
+
+    def values(self) -> dict[str, object]:
+        element_type = str(self.formulation.currentData())
         if self.node_i.value() == self.node_j.value():
             raise ValueError("Truss end nodes must be different.")
+
+        material_tag = None
+        section_tag = None
+        area = 0.0
+        if element_type in self.MATERIAL_TYPES:
+            material_tag = self.material.currentData()
+            if material_tag is None:
+                raise ValueError(
+                    "Select a uniaxial material for the area/material truss."
+                )
+            area = float(self.area.value())
+        else:
+            section_tag = self.section.currentData()
+            if section_tag is None:
+                raise ValueError(
+                    "Select an Elastic, Fiber, or FiberInt section for "
+                    "the section-based truss."
+                )
+
         return (
-            self.tag.value(),
-            self.node_i.value(),
-            self.node_j.value(),
-            self.area.value(),
-            int(material_tag),
+            int(self.tag.value()),
+            int(self.node_i.value()),
+            int(self.node_j.value()),
+            area,
+            None if material_tag is None else int(material_tag),
             self.group.currentText().strip() or "truss",
-            self.rho.value(),
+            float(self.rho.value()),
             self.consistent_mass.isChecked(),
             self.do_rayleigh.isChecked(),
+            element_type,
+            None if section_tag is None else int(section_tag),
         )
 
 
@@ -378,18 +617,26 @@ class ElementFormulationDialog(_BaseDialog):
         force_tolerance: float = 1.0e-12,
         mass_per_length: float = 0.0,
         consistent_mass: bool = False,
+        beam_center_ratio: float = 0.4,
+        ndm: int = 3,
+        ndf: int = 6,
         units=None,
         parent=None,
     ):
         super().__init__("Element Formulation", parent)
         self.unit_system = UnitSystem.from_mapping(units)
+        self._dims = (int(ndm), int(ndf))
 
         self.element_type = QComboBox()
-        self.element_type.addItems([
+        element_types = [
             "elasticBeamColumn",
+            "ElasticTimoshenkoBeam",
             "forceBeamColumn",
             "dispBeamColumn",
-        ])
+        ]
+        if self._dims == (2, 3):
+            element_types.append("dispBeamColumnInt")
+        self.element_type.addItems(element_types)
         self.element_type.setCurrentText(element_type)
 
         self.integration_type = QComboBox()
@@ -397,7 +644,7 @@ class ElementFormulationDialog(_BaseDialog):
         self.integration_type.setCurrentText(integration_type)
 
         self.integration_points = QSpinBox()
-        self.integration_points.setRange(2, 50)
+        self.integration_points.setRange(1, 50)
         self.integration_points.setValue(int(integration_points))
 
         self.force_max_iter = QSpinBox()
@@ -415,9 +662,15 @@ class ElementFormulationDialog(_BaseDialog):
         self.mass_per_length.setValue(float(mass_per_length))
 
         self.consistent_mass = QCheckBox(
-            "Use consistent mass matrix (dispBeamColumn)"
+            "Use consistent mass matrix when supported"
         )
         self.consistent_mass.setChecked(bool(consistent_mass))
+
+        self.center_rotation = QDoubleSpinBox()
+        self.center_rotation.setDecimals(6)
+        self.center_rotation.setRange(0.0, 1.0)
+        self.center_rotation.setSingleStep(0.05)
+        self.center_rotation.setValue(float(beam_center_ratio))
 
         self.form.addRow("Type:", self.element_type)
         self.form.addRow("Beam integration:", self.integration_type)
@@ -429,27 +682,66 @@ class ElementFormulationDialog(_BaseDialog):
             self.mass_per_length,
         )
         self.form.addRow("", self.consistent_mass)
+        self.form.addRow("Center of rotation cRot:", self.center_rotation)
 
-        note = QLabel(
-            "Lobatto places integration points at the member ends and is "
-            "the common distributed-plasticity choice for forceBeamColumn."
+        self.formulation_note = QLabel()
+        self.formulation_note.setWordWrap(True)
+        self.formulation_note.setStyleSheet(
+            "padding: 6px; background: #f3f6f9; color: #526476;"
         )
-        note.setWordWrap(True)
-        self.root.insertWidget(1, note)
+        self.root.insertWidget(1, self.formulation_note)
 
         self.element_type.currentTextChanged.connect(self._sync)
         self._sync(self.element_type.currentText())
 
     def _sync(self, element_type: str) -> None:
         nonlinear = element_type in {"forceBeamColumn", "dispBeamColumn"}
+        interaction = element_type == "dispBeamColumnInt"
         force_based = element_type == "forceBeamColumn"
-        displacement_based = element_type == "dispBeamColumn"
+        mass_matrix_supported = element_type in {
+            "elasticBeamColumn",
+            "ElasticTimoshenkoBeam",
+            "dispBeamColumn",
+        }
 
         self.integration_type.setEnabled(nonlinear)
-        self.integration_points.setEnabled(nonlinear)
+        self.integration_points.setEnabled(nonlinear or interaction)
+        self.integration_points.setMinimum(1 if interaction else 2)
         self.force_max_iter.setEnabled(force_based)
         self.force_tolerance.setEnabled(force_based)
-        self.consistent_mass.setEnabled(displacement_based)
+        self.consistent_mass.setEnabled(mass_matrix_supported)
+        if not mass_matrix_supported:
+            self.consistent_mass.setChecked(False)
+        self.center_rotation.setEnabled(interaction)
+
+        if interaction:
+            self.formulation_note.setText(
+                "dispBeamColumnInt is a 2D flexure-shear interaction "
+                "formulation. It uses FiberInt + LinearInt, with cRot and "
+                "the integration-point count stored directly on the element."
+            )
+        elif element_type == "ElasticTimoshenkoBeam":
+            self.formulation_note.setText(
+                "ElasticTimoshenkoBeam includes shear deformation; section "
+                "shear properties must be defined in the assigned Elastic "
+                "section."
+            )
+        elif element_type == "forceBeamColumn":
+            self.formulation_note.setText(
+                "forceBeamColumn uses the selected beam integration rule. "
+                "Lobatto is the common distributed-plasticity choice because "
+                "it places integration points at the member ends."
+            )
+        elif element_type == "dispBeamColumn":
+            self.formulation_note.setText(
+                "dispBeamColumn uses the selected beam integration rule and "
+                "supports a consistent mass matrix."
+            )
+        else:
+            self.formulation_note.setText(
+                "elasticBeamColumn is the Euler-Bernoulli elastic frame "
+                "formulation; shear deformation is neglected."
+            )
 
     def values(self) -> dict[str, object]:
         return {
@@ -460,6 +752,7 @@ class ElementFormulationDialog(_BaseDialog):
             "force_tolerance": self.force_tolerance.value(),
             "mass_per_length": self.mass_per_length.value(),
             "consistent_mass": self.consistent_mass.isChecked(),
+            "beam_center_ratio": self.center_rotation.value(),
         }
 
 

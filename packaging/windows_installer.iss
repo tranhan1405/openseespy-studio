@@ -1,4 +1,4 @@
-#define AppName "SARE"
+#define AppName "FEWIZ"
 #ifndef AppVersion
   #define AppVersion "0.2.0-alpha.1"
 #endif
@@ -12,13 +12,13 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=Tran-Van Han
 DefaultDirName={localappdata}\Programs\SARE
-DefaultGroupName=SARE
+DefaultGroupName=FEWIZ
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#RepoRoot}\dist\installer
-OutputBaseFilename=OpenSeesPy-Studio-{#AppVersion}-Setup
+OutputBaseFilename=FEWIZ-{#AppVersion}-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -35,4 +35,4 @@ Name: "{autodesktop}\SARE"; Filename: "{app}\OpenSeesPyStudio.exe"; Tasks: deskt
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Run]
-Filename: "{app}\OpenSeesPyStudio.exe"; Description: "Launch SARE"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\OpenSeesPyStudio.exe"; Description: "Launch FEWIZ"; Flags: nowait postinstall skipifsilent

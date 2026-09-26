@@ -39,6 +39,101 @@ jobs:
         shell: pwsh
         run: python -m openseespy_studio --self-check
 
+      - name: OpenSees masonry runtime smoke test
+        shell: pwsh
+        run: |
+          @'
+          import openseespy.opensees as ops
+
+          ops.wipe()
+          ops.model("basic", "-ndm", 2, "-ndf", 3)
+          for tag, x, y in (
+              (1, 0.0, 0.0), (2, 1.0, 0.0), (3, 2.0, 0.0), (4, 3.0, 0.0),
+              (5, 3.0, 1.0), (6, 3.0, 2.0), (7, 3.0, 3.0), (8, 2.0, 3.0),
+              (9, 1.0, 3.0), (10, 0.0, 3.0), (11, 0.0, 2.0), (12, 0.0, 1.0),
+          ):
+              ops.node(tag, x, y)
+
+          masonry_args = (
+              -5.0e6, 0.20e6, -0.002, -0.010, 0.0005, 2.5e9,
+              1.0, 1.0, 0.20, -0.002, -0.006, 0.40, 0.30,
+              1.75, 0.30, 0.50, 0.50, 0.50, 1.0, 1.0, 0,
+          )
+          ops.uniaxialMaterial("Masonry", 1, *masonry_args)
+          ops.uniaxialMaterial("Masonry", 2, *masonry_args)
+          ops.element(
+              "MasonPan12", 1,
+              1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+              1, 2, 0.15, 0.25, 0.50,
+          )
+          print("WINDOWS_MASONRY_OK", ops.version())
+          '@ | python -
+
+      - name: OpenSees wall macro runtime smoke test
+        shell: pwsh
+        run: |
+          @'
+          import openseespy.opensees as ops
+
+          from openseespy_studio.generator import to_openseespy
+          from openseespy_studio.project import ProjectDatabase
+          from openseespy_studio.rc_wall import (
+              RCWallSpec,
+              build_rc_wall_macro_2d,
+          )
+
+          for formulation in ("MVLEM", "SFI_MVLEM"):
+              project = ProjectDatabase()
+              project.units = {"length": "m", "force": "N", "time": "s"}
+              result = build_rc_wall_macro_2d(
+                  project,
+                  RCWallSpec(
+                      width=1.2,
+                      height=3.0,
+                      thickness=0.2,
+                      boundary_width=0.2,
+                      vertical_elements=2,
+                      macro_fibers=5,
+                      formulation=formulation,
+                      boundary_unconfined_thickness=0.05,
+                      boundary_confined_thickness=0.15,
+                      replace_geometry=True,
+                  ),
+              )
+              source = to_openseespy(
+                  project.model,
+                  materials=project.materials,
+                  sections=project.sections,
+                  transformations=project.transformations,
+                  constraints=project.constraints,
+                  connections=project.connections,
+                  units=project.units,
+                  nd_materials=project.nd_materials,
+              )
+              exec(source, {})
+              top = result.node_tags[-1]
+              ops.timeSeries("Linear", 980)
+              ops.pattern("Plain", 980, 980)
+              ops.load(top, 1.0, 0.0, 0.0)
+              ops.system("UmfPack")
+              ops.numberer("RCM")
+              ops.constraints("Plain")
+              ops.test("NormDispIncr", 1.0e-10, 30)
+              ops.algorithm("Newton")
+              ops.integrator("LoadControl", 1.0)
+              ops.analysis("Static")
+              ok = ops.analyze(1)
+              if ok != 0:
+                  raise RuntimeError(
+                      f"{formulation} Windows smoke analysis failed: {ok}"
+                  )
+              print(
+                  "WINDOWS_WALL_MACRO_OK",
+                  formulation,
+                  ops.nodeDisp(top, 1),
+              )
+          '@ | python -
+
       - name: Build standalone application
         shell: pwsh
         run: pyinstaller packaging\openseespy_studio.spec --noconfirm --clean
@@ -59,7 +154,7 @@ jobs:
       - name: Create portable ZIP
         shell: pwsh
         run: |
-          $zip = ".\dist\OpenSeesPy-Studio-$env:STUDIO_VERSION-Windows-x64-portable.zip"
+          $zip = ".\dist\FEWIZ-$env:STUDIO_VERSION-Windows-x64-portable.zip"
           Compress-Archive -Path ".\dist\OpenSeesPyStudio\*" -DestinationPath $zip -Force
 
       - name: Install Inno Setup
@@ -91,8 +186,8 @@ jobs:
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OpenSeesPy-Studio-${{ env.STUDIO_VERSION }}-Windows-x64
+          name: FEWIZ-${{ env.STUDIO_VERSION }}-Windows-x64
           path: |
-            dist/OpenSeesPy-Studio-*-Windows-x64-portable.zip
+            dist/FEWIZ-*-Windows-x64-portable.zip
             dist/installer/*.exe
           if-no-files-found: error

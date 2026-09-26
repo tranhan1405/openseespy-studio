@@ -8,14 +8,27 @@ from .beam_loads import (
     resolve_element_load_local_end_components,
     resolve_self_weight_local,
 )
+from .mass_source import apply_mass_source
+from .analysis_templates import build_modal_template
 from .units import UnitSystem
 from .model import (
+    BEAM_CONTACT_ELEMENT_TYPES,
+    BEARING_ELEMENT_TYPES,
+    CABLE_ELEMENT_TYPES,
+    CONTACT_TWO_NODE_ELEMENT_TYPES,
+    CONTINUUM_QUAD_ELEMENT_TYPES,
     EMBEDDED_ELEMENT_TYPES,
+    FRICTION_BEARING_ELEMENT_TYPES,
+    MASONRY_PANEL_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
+    SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
+    TRUSS_MATERIAL_ELEMENT_TYPES,
+    TRUSS_SECTION_ELEMENT_TYPES,
+    WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
 )
-from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
+from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MassSourceData, MaterialData, FrictionModelData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, MEMBRANE_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 from .response_spectrum import build_period_grid
 
@@ -28,6 +41,12 @@ class FrameGridSpec:
     dx: float = 5.0
     dy: float = 6.0
     dz: float = 3.5
+    x_bay_widths: tuple[float, ...] = ()
+    y_bay_widths: tuple[float, ...] = ()
+    storey_heights: tuple[float, ...] = ()
+    origin_x: float = 0.0
+    origin_y: float = 0.0
+    origin_z: float = 0.0
     start_node_tag: int = 1
     start_element_tag: int = 1
     create_columns: bool = True
@@ -37,17 +56,1043 @@ class FrameGridSpec:
     beam_section_tag: int | None = None
     column_transf_tag: int | None = None
     beam_transf_tag: int | None = None
+    column_element_type: str = "elasticBeamColumn"
+    beam_element_type: str = "elasticBeamColumn"
+    column_integration_type: str = "Lobatto"
+    beam_integration_type: str = "Lobatto"
+    column_integration_points: int = 5
+    beam_integration_points: int = 5
+    column_hinge_i_section_tag: int | None = None
+    column_hinge_j_section_tag: int | None = None
+    column_interior_section_tag: int | None = None
+    beam_hinge_i_section_tag: int | None = None
+    beam_hinge_j_section_tag: int | None = None
+    beam_interior_section_tag: int | None = None
+    column_hinge_i_length: float = 0.0
+    column_hinge_j_length: float = 0.0
+    beam_hinge_i_length: float = 0.0
+    beam_hinge_j_length: float = 0.0
+    column_mass_per_length: float = 0.0
+    beam_mass_per_length: float = 0.0
+    column_consistent_mass: bool = False
+    beam_consistent_mass: bool = False
+    joint_model: str = "None"
+    joint_material_tag: int | None = None
+    joint_scope: str = "all"
+    joint_panel_width: float = 0.40
+    joint_panel_height: float = 0.50
+    joint_interface_material_tags: tuple[int, ...] = (0, 0, 0, 0)
+    joint_large_disp: int = 0
+    joint_component_material_tags: tuple[int, ...] = ()
+    joint_height_factor: float = 1.0
+    joint_width_factor: float = 1.0
+    joint_rigid_a: float = 0.0
+    joint_rigid_e: float = 0.0
+    joint_rigid_i: float = 0.0
+    diaphragm_mode: str = "None"
+    diaphragm_levels: tuple[int, ...] = ()
+    diaphragm_floor_mass: float = 0.0
+    diaphragm_rotational_inertia: float = 0.0
+    slab_section_tag: int | None = None
+    slab_element_type: str = "ASDShellQ4"
+    slab_divisions_x: int = 1
+    slab_divisions_y: int = 1
+    slab_corotational: bool = False
+    slab_mass_per_area: float = 0.0
+    foundation_mode: str = "Direct"
+    foundation_material_tags: tuple[int, ...] = (0, 0, 0, 0, 0, 0)
+    foundation_assignment_mode: str = "Uniform"
+    foundation_profile_material_tags: tuple[
+        tuple[int, ...], ...
+    ] = ()
+    foundation_base_profile_indices: tuple[int, ...] = ()
+    brace_mode: str = "None"
+    brace_pattern: str = "X"
+    brace_element_type: str = "truss"
+    brace_material_tag: int | None = None
+    brace_area: float = 0.01
+    brace_mass_per_length: float = 0.0
+    brace_do_rayleigh: bool = False
+    brace_x_bays: tuple[int, ...] = ()
+    brace_y_bays: tuple[int, ...] = ()
+    brace_storeys: tuple[int, ...] = ()
+    brace_plane_mode: str = "X"
+    brace_y_plane_scope: str = "All"
+    brace_x_plane_scope: str = "All"
+    brace_panel_patterns: tuple[
+        tuple[str, int, int, int, str], ...
+    ] = ()
+    brace_response_preset: str = "Standard"
+    load_mode: str = "None"
+    load_self_weight: bool = False
+    load_self_weight_density: float = 0.0
+    load_beam_udl: bool = False
+    load_beam_udl_coordinate_system: str = "global"
+    load_beam_udl_vector: tuple[float, float, float] = (0.0, 0.0, -10.0)
+    load_beam_scope: str = "Both"
+    load_storeys: tuple[int, ...] = ()
+    load_floor_area: bool = False
+    load_floor_area_pressure: float = 0.0
+    load_floor_area_direction: str = "X"
+    mass_source_mode: str = "None"
+    mass_include_self: bool = True
+    mass_include_static_loads: bool = True
+    mass_static_load_factor: float = 1.0
+    mass_gravity_axis: int = 3
+    mass_directions: tuple[int, ...] = (1, 2)
+    modal_mode: str = "None"
+    modal_num_modes: int = 6
+    modal_eigen_solver: str = "-genBandArpack"
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
 
+def _frame_axis_coordinates(
+    count: int,
+    uniform_spacing: float,
+    individual_spacings: tuple[float, ...],
+    origin: float,
+    axis_name: str,
+) -> list[float]:
+    count = int(count)
+    if count < 1:
+        raise ValueError(f"{axis_name} needs at least one interval.")
+    if not math.isfinite(float(origin)):
+        raise ValueError(f"{axis_name} origin must be finite.")
+
+    values = tuple(float(value) for value in individual_spacings)
+    if values and len(values) != count:
+        raise ValueError(
+            f"{axis_name} spacing count is {len(values)} but expected {count}."
+        )
+    if not values:
+        values = (float(uniform_spacing),) * count
+    for index, value in enumerate(values, start=1):
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(
+                f"{axis_name} spacing {index} must be finite and positive."
+            )
+
+    coordinates = [float(origin)]
+    for value in values:
+        coordinates.append(coordinates[-1] + value)
+    return coordinates
+
+
+def frame_grid_coordinates(
+    spec: FrameGridSpec,
+) -> tuple[list[float], list[float], list[float]]:
+    """Resolve regular or individually-sized grid coordinates."""
+    x = _frame_axis_coordinates(
+        spec.nx,
+        spec.dx,
+        spec.x_bay_widths,
+        spec.origin_x,
+        "X bay",
+    )
+    if spec.planar_2d:
+        y = [float(spec.origin_y)]
+    else:
+        y = _frame_axis_coordinates(
+            spec.ny,
+            spec.dy,
+            spec.y_bay_widths,
+            spec.origin_y,
+            "Y bay",
+        )
+    z = _frame_axis_coordinates(
+        spec.nz,
+        spec.dz,
+        spec.storey_heights,
+        spec.origin_z,
+        "Storey",
+    )
+    return x, y, z
+
+
+def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
+    """Validate frame-grid topology and resolve coordinate arrays."""
+    if int(spec.start_node_tag) < 1 or int(spec.start_element_tag) < 1:
+        raise ValueError("Frame node and element start tags must be positive.")
+    if spec.planar_2d and spec.planar_base_support not in {"Fixed", "Pinned"}:
+        raise ValueError("2D frame base support must be Fixed or Pinned.")
+    if not (
+        bool(spec.create_columns)
+        or bool(spec.create_beams_x)
+        or (not spec.planar_2d and bool(spec.create_beams_y))
+    ):
+        raise ValueError("Frame grid must create at least one member family.")
+
+    supported_frame_types = {
+        "elasticBeamColumn",
+        "forceBeamColumn",
+        "dispBeamColumn",
+    }
+    distributed_integrations = {"Lobatto", "Legendre", "Radau"}
+    hinge_integrations = {
+        "HingeRadau",
+        "HingeRadauTwo",
+        "HingeMidpoint",
+        "HingeEndpoint",
+        "ConcentratedPlasticity",
+    }
+    for (
+        role,
+        enabled,
+        element_type,
+        integration_type,
+        points,
+        hinge_i_section,
+        hinge_j_section,
+        interior_section,
+        hinge_i_length,
+        hinge_j_length,
+        mass_per_length,
+    ) in (
+        (
+            "Column",
+            bool(spec.create_columns),
+            str(spec.column_element_type),
+            str(spec.column_integration_type),
+            int(spec.column_integration_points),
+            spec.column_hinge_i_section_tag,
+            spec.column_hinge_j_section_tag,
+            spec.column_interior_section_tag,
+            float(spec.column_hinge_i_length),
+            float(spec.column_hinge_j_length),
+            float(spec.column_mass_per_length),
+        ),
+        (
+            "Beam",
+            bool(spec.create_beams_x)
+            or (not spec.planar_2d and bool(spec.create_beams_y)),
+            str(spec.beam_element_type),
+            str(spec.beam_integration_type),
+            int(spec.beam_integration_points),
+            spec.beam_hinge_i_section_tag,
+            spec.beam_hinge_j_section_tag,
+            spec.beam_interior_section_tag,
+            float(spec.beam_hinge_i_length),
+            float(spec.beam_hinge_j_length),
+            float(spec.beam_mass_per_length),
+        ),
+    ):
+        if not enabled:
+            continue
+        if element_type not in supported_frame_types:
+            raise ValueError(
+                f"{role} formulation {element_type!r} is not supported by "
+                "Frame Wizard."
+            )
+        if not math.isfinite(mass_per_length) or mass_per_length < 0.0:
+            raise ValueError(
+                f"{role} mass per length must be finite and non-negative."
+            )
+        if element_type in {"forceBeamColumn", "dispBeamColumn"}:
+            if integration_type in distributed_integrations:
+                if points < 2 or points > 20:
+                    raise ValueError(
+                        f"{role} integration points must be between 2 and 20."
+                    )
+            elif integration_type in hinge_integrations:
+                if (
+                    hinge_i_section is None
+                    or hinge_j_section is None
+                    or interior_section is None
+                ):
+                    raise ValueError(
+                        f"{role} {integration_type} requires I-end, J-end, "
+                        "and interior section assignments."
+                    )
+                if (
+                    not math.isfinite(hinge_i_length)
+                    or not math.isfinite(hinge_j_length)
+                    or hinge_i_length < 0.0
+                    or hinge_j_length < 0.0
+                ):
+                    raise ValueError(
+                        f"{role} plastic hinge lengths must be finite and "
+                        "non-negative."
+                    )
+                if (
+                    integration_type != "ConcentratedPlasticity"
+                    and (hinge_i_length <= 0.0 or hinge_j_length <= 0.0)
+                ):
+                    raise ValueError(
+                        f"{role} {integration_type} requires positive I/J "
+                        "plastic hinge lengths."
+                    )
+            else:
+                raise ValueError(
+                    f"{role} beam integration {integration_type!r} is not "
+                    "supported by Frame Wizard."
+                )
+    joint_model = str(spec.joint_model or "None")
+    supported_joint_models = {
+        "None",
+        "ZeroLength",
+        "Joint2D",
+        "BeamColumnJoint",
+        "KrawinklerPanelZone",
+    }
+    if joint_model not in supported_joint_models:
+        raise ValueError(
+            f"Frame Wizard joint model {joint_model!r} is not supported."
+        )
+    if str(spec.joint_scope) not in {"all", "interior"}:
+        raise ValueError("Frame joint scope must be 'all' or 'interior'.")
+
+    if joint_model != "None":
+        if not bool(spec.create_columns):
+            raise ValueError(
+                "Beam-column joints require columns to be created."
+            )
+        if not (
+            bool(spec.create_beams_x)
+            or (not spec.planar_2d and bool(spec.create_beams_y))
+        ):
+            raise ValueError(
+                "Beam-column joints require at least one beam family."
+            )
+
+    if joint_model == "ZeroLength":
+        if spec.joint_material_tag is None or int(spec.joint_material_tag) <= 0:
+            raise ValueError(
+                "Semi-rigid beam-column joints require a rotational "
+                "uniaxial material."
+            )
+
+    macro_joint_models = {
+        "Joint2D",
+        "BeamColumnJoint",
+        "KrawinklerPanelZone",
+    }
+    if joint_model in macro_joint_models:
+        if not spec.planar_2d:
+            raise ValueError(
+                f"{joint_model} is a planar joint-core model in Frame Wizard; "
+                "switch the frame dimension to 2D."
+            )
+        if not bool(spec.create_beams_x):
+            raise ValueError(
+                f"{joint_model} requires X-direction beams in the 2D frame."
+            )
+        width = float(spec.joint_panel_width)
+        height = float(spec.joint_panel_height)
+        if (
+            not math.isfinite(width)
+            or not math.isfinite(height)
+            or width <= 0.0
+            or height <= 0.0
+        ):
+            raise ValueError(
+                "Joint panel width and height must be finite and positive."
+            )
+        x_coordinates, _, z_coordinates = frame_grid_coordinates(spec)
+        min_bay = min(
+            x_coordinates[index + 1] - x_coordinates[index]
+            for index in range(len(x_coordinates) - 1)
+        )
+        min_storey = min(
+            z_coordinates[index + 1] - z_coordinates[index]
+            for index in range(len(z_coordinates) - 1)
+        )
+        if width >= min_bay:
+            raise ValueError(
+                "Joint panel width must be smaller than every X bay width."
+            )
+        if height >= min_storey:
+            raise ValueError(
+                "Joint panel height must be smaller than every storey height."
+            )
+        if (
+            str(spec.joint_scope) == "interior"
+            and int(spec.nx) < 2
+        ):
+            raise ValueError(
+                "Interior joint scope requires at least two X bays."
+            )
+
+    if joint_model == "Joint2D":
+        if spec.joint_material_tag is None or int(spec.joint_material_tag) <= 0:
+            raise ValueError("Joint2D requires a panel rotational material.")
+        interface = tuple(int(tag) for tag in spec.joint_interface_material_tags)
+        if len(interface) != 4 or any(tag < 0 for tag in interface):
+            raise ValueError(
+                "Joint2D requires four interface material tags (zero = rigid)."
+            )
+        if int(spec.joint_large_disp) not in {0, 1, 2}:
+            raise ValueError("Joint2D large-displacement flag must be 0, 1, or 2.")
+
+    if joint_model == "BeamColumnJoint":
+        components = tuple(
+            int(tag) for tag in spec.joint_component_material_tags
+        )
+        if len(components) != 13 or any(tag <= 0 for tag in components):
+            raise ValueError(
+                "BeamColumnJoint requires 13 positive component material tags."
+            )
+        if (
+            not math.isfinite(float(spec.joint_height_factor))
+            or not math.isfinite(float(spec.joint_width_factor))
+            or float(spec.joint_height_factor) <= 0.0
+            or float(spec.joint_width_factor) <= 0.0
+        ):
+            raise ValueError(
+                "BeamColumnJoint height/width factors must be positive."
+            )
+
+    if joint_model == "KrawinklerPanelZone":
+        if spec.joint_material_tag is None or int(spec.joint_material_tag) <= 0:
+            raise ValueError(
+                "Krawinkler panel-zone requires a panel rotational material."
+            )
+        for label, value in (
+            ("rigid A", spec.joint_rigid_a),
+            ("rigid E", spec.joint_rigid_e),
+            ("rigid I", spec.joint_rigid_i),
+        ):
+            numeric = float(value)
+            if not math.isfinite(numeric) or numeric <= 0.0:
+                raise ValueError(
+                    f"Krawinkler panel-zone requires positive {label}."
+                )
+
+    diaphragm_mode = str(spec.diaphragm_mode or "None")
+    if diaphragm_mode not in {"None", "Rigid", "Shell"}:
+        raise ValueError(
+            f"Frame Wizard floor mode {diaphragm_mode!r} is not supported."
+        )
+    if diaphragm_mode in {"Rigid", "Shell"}:
+        if spec.planar_2d:
+            raise ValueError(
+                "Floor diaphragm/slab models require a 3D frame."
+            )
+        normalized_levels = tuple(
+            sorted({int(level) for level in spec.diaphragm_levels})
+        )
+        if normalized_levels and any(
+            level < 1 or level > int(spec.nz)
+            for level in normalized_levels
+        ):
+            raise ValueError(
+                "Floor levels must be between 1 and the number of storeys."
+            )
+
+    if diaphragm_mode == "Rigid":
+        floor_mass = float(spec.diaphragm_floor_mass)
+        rotational_inertia = float(spec.diaphragm_rotational_inertia)
+        if not math.isfinite(floor_mass) or floor_mass < 0.0:
+            raise ValueError(
+                "Diaphragm floor mass must be finite and non-negative."
+            )
+        if (
+            not math.isfinite(rotational_inertia)
+            or rotational_inertia < 0.0
+        ):
+            raise ValueError(
+                "Diaphragm rotational inertia must be finite and "
+                "non-negative."
+            )
+
+    if diaphragm_mode == "Shell":
+        if str(spec.joint_model or "None") != "None":
+            raise ValueError(
+                "Explicit shell slabs currently require rigid centerline "
+                "beam-column joints so the slab cannot bypass joint springs."
+            )
+        if not bool(spec.create_beams_x) or not bool(spec.create_beams_y):
+            raise ValueError(
+                "Explicit shell slabs require both X and Y beam families."
+            )
+        if spec.slab_section_tag is None or int(spec.slab_section_tag) <= 0:
+            raise ValueError(
+                "Explicit shell slabs require a shell-compatible section."
+            )
+        if str(spec.slab_element_type) not in SHELL_ELEMENT_TYPES:
+            raise ValueError(
+                f"Unsupported slab shell formulation {spec.slab_element_type!r}."
+            )
+        nx_mesh = int(spec.slab_divisions_x)
+        ny_mesh = int(spec.slab_divisions_y)
+        if not 1 <= nx_mesh <= 50 or not 1 <= ny_mesh <= 50:
+            raise ValueError(
+                "Slab mesh divisions per bay must be between 1 and 50."
+            )
+        selected_floor_count = (
+            len(normalized_levels)
+            if normalized_levels
+            else int(spec.nz)
+        )
+        shell_count = (
+            int(spec.nx)
+            * int(spec.ny)
+            * nx_mesh
+            * ny_mesh
+            * selected_floor_count
+        )
+        if shell_count > 50000:
+            raise ValueError(
+                "Frame Wizard explicit slab mesh would create "
+                f"{shell_count} Shell elements. Reduce X/Y mesh divisions, "
+                "bay count, or selected floors; the Wizard limit is 50,000."
+            )
+        if (
+            (nx_mesh > 1 or ny_mesh > 1)
+            and str(spec.beam_element_type) != "elasticBeamColumn"
+        ):
+            raise ValueError(
+                "Refined conforming slab meshes currently require "
+                "elasticBeamColumn beams. Use 1×1 mesh per bay for nonlinear "
+                "beam formulations."
+            )
+        mass_per_area = float(spec.slab_mass_per_area)
+        if not math.isfinite(mass_per_area) or mass_per_area < 0.0:
+            raise ValueError(
+                "Additional slab mass per area must be finite and non-negative."
+            )
+
+    foundation_mode = str(spec.foundation_mode or "Direct")
+    if foundation_mode not in {"Direct", "Springs"}:
+        raise ValueError(
+            f"Frame Wizard foundation mode {foundation_mode!r} is not supported."
+        )
+
+    assignment_mode = str(spec.foundation_assignment_mode or "Uniform")
+    if assignment_mode not in {"Uniform", "PerBase"}:
+        raise ValueError(
+            "Foundation assignment mode must be Uniform or PerBase."
+        )
+
+    foundation_tags = tuple(
+        int(tag) for tag in spec.foundation_material_tags
+    )
+    if len(foundation_tags) != 6 or any(tag < 0 for tag in foundation_tags):
+        raise ValueError(
+            "Foundation definition requires six material slots; "
+            "zero means rigid transfer."
+        )
+
+    profile_tags = tuple(
+        tuple(int(tag) for tag in profile)
+        for profile in spec.foundation_profile_material_tags
+    )
+    if profile_tags:
+        if len(profile_tags) > 3:
+            raise ValueError(
+                "Frame Wizard supports up to three equivalent foundation "
+                "profiles in this workflow."
+            )
+        if any(
+            len(profile) != 6 or any(tag < 0 for tag in profile)
+            for profile in profile_tags
+        ):
+            raise ValueError(
+                "Every foundation profile requires six material slots; "
+                "zero means rigid transfer."
+            )
+    else:
+        profile_tags = (foundation_tags,)
+
+    if foundation_mode == "Springs":
+        if joint_model in macro_joint_models:
+            raise ValueError(
+                "Foundation springs currently require the standard 3D/6DOF "
+                "Frame Wizard backend; use rigid/pinned support with native "
+                "2D macro joints."
+            )
+        if not bool(spec.create_columns):
+            raise ValueError(
+                "Foundation springs require columns and base-column nodes."
+            )
+
+        base_count = (
+            int(spec.nx) + 1
+            if spec.planar_2d
+            else (int(spec.nx) + 1) * (int(spec.ny) + 1)
+        )
+        if assignment_mode == "PerBase":
+            assignments = tuple(
+                int(value) for value in spec.foundation_base_profile_indices
+            )
+            if len(assignments) != base_count:
+                raise ValueError(
+                    "Per-base foundation assignment count must match the "
+                    f"{base_count} column bases."
+                )
+            if any(
+                index < 0 or index >= len(profile_tags)
+                for index in assignments
+            ):
+                raise ValueError(
+                    "Foundation base assignment references an unavailable "
+                    "profile."
+                )
+            used_profile_indices = sorted(set(assignments))
+        else:
+            used_profile_indices = [0]
+
+        active_dofs = (
+            (1, 3, 5)
+            if spec.planar_2d
+            else (1, 2, 3, 4, 5, 6)
+        )
+        for profile_index in used_profile_indices:
+            profile = profile_tags[profile_index]
+            if not any(profile[dof - 1] > 0 for dof in active_dofs):
+                label = chr(ord("A") + profile_index)
+                raise ValueError(
+                    f"Foundation profile {label} requires at least one active "
+                    "uniaxial spring material."
+                )
+
+    brace_mode = str(spec.brace_mode or "None")
+    if brace_mode not in {"None", "Truss"}:
+        raise ValueError(
+            f"Frame Wizard brace mode {brace_mode!r} is not supported."
+        )
+    brace_pattern = str(spec.brace_pattern or "X")
+    supported_brace_patterns = {
+        "DiagonalForward",
+        "DiagonalBackward",
+        "X",
+        "VUpper",
+        "VLower",
+        "KLeft",
+        "KRight",
+    }
+    if brace_pattern not in supported_brace_patterns:
+        raise ValueError(
+            f"Frame Wizard brace pattern {brace_pattern!r} is not supported."
+        )
+    if str(spec.brace_element_type) not in {"truss", "corotTruss"}:
+        raise ValueError(
+            "Frame Wizard braces currently support truss or corotTruss."
+        )
+
+    plane_mode = str(spec.brace_plane_mode or "X")
+    if plane_mode not in {"X", "Y", "Both"}:
+        raise ValueError(
+            "Brace plane mode must be X, Y, or Both."
+        )
+    if spec.planar_2d and plane_mode != "X":
+        raise ValueError(
+            "Planar Frame Wizard models support X-Z bracing only."
+        )
+
+    response_preset = str(spec.brace_response_preset or "Standard")
+    if response_preset not in {"Standard", "NonlinearReady", "BRBReady"}:
+        raise ValueError(
+            "Brace response preset must be Standard, NonlinearReady, or "
+            "BRBReady."
+        )
+
+    brace_x_bays = tuple(sorted({int(value) for value in spec.brace_x_bays}))
+    if (
+        plane_mode in {"X", "Both"}
+        and brace_x_bays
+        and any(
+            value < 0 or value >= int(spec.nx)
+            for value in brace_x_bays
+        )
+    ):
+        raise ValueError(
+            "Brace X-bay selections must be zero-based indices inside the "
+            "frame grid."
+        )
+    brace_y_bays = tuple(sorted({int(value) for value in spec.brace_y_bays}))
+    if (
+        not spec.planar_2d
+        and plane_mode in {"Y", "Both"}
+        and brace_y_bays
+        and any(
+            value < 0 or value >= int(spec.ny)
+            for value in brace_y_bays
+        )
+    ):
+        raise ValueError(
+            "Brace Y-bay selections must be zero-based indices inside the "
+            "frame grid."
+        )
+    brace_storeys = tuple(
+        sorted({int(value) for value in spec.brace_storeys})
+    )
+    if brace_storeys and any(
+        value < 1 or value > int(spec.nz)
+        for value in brace_storeys
+    ):
+        raise ValueError(
+            "Brace storey selections must be between 1 and the number of "
+            "storeys."
+        )
+    if str(spec.brace_y_plane_scope) not in {
+        "All",
+        "Exterior",
+        "YMin",
+        "YMax",
+    }:
+        raise ValueError(
+            "Brace Y-plane scope must be All, Exterior, YMin, or YMax."
+        )
+    if str(spec.brace_x_plane_scope) not in {
+        "All",
+        "Exterior",
+        "XMin",
+        "XMax",
+    }:
+        raise ValueError(
+            "Brace X-plane scope must be All, Exterior, XMin, or XMax."
+        )
+
+    panel_overrides = tuple(spec.brace_panel_patterns)
+    seen_override_keys: set[tuple[str, int, int, int]] = set()
+    for raw in panel_overrides:
+        if len(raw) != 5:
+            raise ValueError(
+                "Brace panel override needs axis, plane, bay, storey, pattern."
+            )
+        axis = str(raw[0])
+        plane = int(raw[1])
+        bay = int(raw[2])
+        storey = int(raw[3])
+        pattern = str(raw[4])
+        if axis not in {"X", "Y"}:
+            raise ValueError("Brace panel override axis must be X or Y.")
+        if pattern not in supported_brace_patterns | {"None"}:
+            raise ValueError(
+                f"Unsupported per-panel brace pattern {pattern!r}."
+            )
+        key = (axis, plane, bay, storey)
+        if key in seen_override_keys:
+            raise ValueError(
+                "Brace panel overrides cannot contain duplicate panel keys."
+            )
+        seen_override_keys.add(key)
+        if not 1 <= storey <= int(spec.nz):
+            raise ValueError(
+                "Brace panel override storey is outside the frame."
+            )
+        if axis == "X":
+            if not 0 <= plane <= int(spec.ny):
+                raise ValueError(
+                    "X-Z brace panel Y-grid line is outside the frame."
+                )
+            if not 0 <= bay < int(spec.nx):
+                raise ValueError(
+                    "X-Z brace panel X bay is outside the frame."
+                )
+        else:
+            if not 0 <= plane <= int(spec.nx):
+                raise ValueError(
+                    "Y-Z brace panel X-grid line is outside the frame."
+                )
+            if not 0 <= bay < int(spec.ny):
+                raise ValueError(
+                    "Y-Z brace panel Y bay is outside the frame."
+                )
+
+    if brace_mode == "Truss":
+        if joint_model in macro_joint_models:
+            raise ValueError(
+                "Frame Wizard bracing currently requires the standard "
+                "3D/6DOF frame backend; native 2D macro-joint cores are not "
+                "combined with braces yet."
+            )
+        if not bool(spec.create_columns):
+            raise ValueError(
+                "Frame bracing requires columns."
+            )
+        if plane_mode in {"X", "Both"} and not bool(spec.create_beams_x):
+            raise ValueError(
+                "X-Z plane bracing requires X-direction beams."
+            )
+        if plane_mode in {"Y", "Both"} and not bool(spec.create_beams_y):
+            raise ValueError(
+                "Y-Z plane bracing requires Y-direction beams."
+            )
+        if (
+            spec.brace_material_tag is None
+            or int(spec.brace_material_tag) <= 0
+        ):
+            raise ValueError(
+                "Frame bracing requires a positive uniaxial material tag."
+            )
+        brace_area = float(spec.brace_area)
+        if not math.isfinite(brace_area) or brace_area <= 0.0:
+            raise ValueError("Brace area must be finite and positive.")
+        brace_mass = float(spec.brace_mass_per_length)
+        if not math.isfinite(brace_mass) or brace_mass < 0.0:
+            raise ValueError(
+                "Brace mass per length must be finite and non-negative."
+            )
+
+        active_patterns = {
+            brace_pattern,
+            *(
+                str(raw[4])
+                for raw in panel_overrides
+                if str(raw[4]) != "None"
+            ),
+        }
+        selected_storeys = (
+            brace_storeys
+            if brace_storeys
+            else tuple(range(1, int(spec.nz) + 1))
+        )
+        if "VLower" in active_patterns and 1 in selected_storeys:
+            # This is conservative: per-panel overrides can disable S1, but
+            # the default pattern may still target it. UI removes S1 when
+            # VLower is selected globally.
+            if brace_pattern == "VLower":
+                raise ValueError(
+                    "Chevron-to-lower-beam bracing cannot use storey 1 because "
+                    "Frame Wizard does not create a beam on the base line."
+                )
+        if active_patterns & {"VUpper", "VLower"} and (
+            str(spec.beam_element_type) != "elasticBeamColumn"
+        ):
+            raise ValueError(
+                "Chevron bracing that meets a beam midpoint currently "
+                "requires elasticBeamColumn beams."
+            )
+        if active_patterns & {"KLeft", "KRight"} and (
+            str(spec.column_element_type) != "elasticBeamColumn"
+        ):
+            raise ValueError(
+                "K bracing at a column midpoint currently requires "
+                "elasticBeamColumn columns."
+            )
+
+
+    load_mode = str(spec.load_mode or "None")
+    if load_mode not in {"None", "Static"}:
+        raise ValueError(
+            f"Frame Wizard load mode {load_mode!r} is not supported."
+        )
+    load_storeys = tuple(sorted({int(value) for value in spec.load_storeys}))
+    if load_storeys and any(
+        value < 1 or value > int(spec.nz)
+        for value in load_storeys
+    ):
+        raise ValueError(
+            "Frame Wizard load storeys must be between 1 and the number "
+            "of storeys."
+        )
+    if str(spec.load_beam_scope) not in {"X", "Y", "Both"}:
+        raise ValueError(
+            "Frame Wizard beam load scope must be X, Y, or Both."
+        )
+    if str(spec.load_beam_udl_coordinate_system).lower() not in {
+        "local", "global"
+    }:
+        raise ValueError(
+            "Frame Wizard beam UDL coordinate system must be local or global."
+        )
+    udl_vector = tuple(float(value) for value in spec.load_beam_udl_vector)
+    if len(udl_vector) != 3 or any(
+        not math.isfinite(value) for value in udl_vector
+    ):
+        raise ValueError(
+            "Frame Wizard beam UDL vector requires three finite components."
+        )
+    density_override = float(spec.load_self_weight_density)
+    if (
+        not math.isfinite(density_override)
+        or density_override < 0.0
+    ):
+        raise ValueError(
+            "Frame Wizard self-weight density override must be finite and "
+            "non-negative."
+        )
+    floor_pressure = float(spec.load_floor_area_pressure)
+    if not math.isfinite(floor_pressure) or floor_pressure < 0.0:
+        raise ValueError(
+            "Frame Wizard floor area pressure must be finite and non-negative."
+        )
+    floor_direction = str(spec.load_floor_area_direction or "X")
+    if floor_direction not in {"X", "Y"}:
+        raise ValueError(
+            "Frame Wizard floor area load direction must be X or Y."
+        )
+    mass_mode = str(spec.mass_source_mode or "None")
+    if mass_mode not in {"None", "Source"}:
+        raise ValueError(
+            f"Frame Wizard mass source mode {mass_mode!r} is not supported."
+        )
+    mass_factor = float(spec.mass_static_load_factor)
+    if not math.isfinite(mass_factor) or mass_factor < 0.0:
+        raise ValueError(
+            "Frame Wizard mass-source static load factor must be finite and "
+            "non-negative."
+        )
+    mass_axis = int(spec.mass_gravity_axis)
+    if mass_axis not in (1, 2, 3):
+        raise ValueError(
+            "Frame Wizard mass-source gravity axis must be X, Y, or Z."
+        )
+    mass_directions = tuple(
+        sorted({int(value) for value in spec.mass_directions})
+    )
+    if mass_directions and any(
+        value not in (1, 2, 3) for value in mass_directions
+    ):
+        raise ValueError(
+            "Frame Wizard mass-source directions must be translational DOFs "
+            "1, 2, or 3."
+        )
+    if mass_mode == "Source":
+        if not mass_directions:
+            raise ValueError(
+                "Frame Wizard mass source needs at least one direction."
+            )
+        if (
+            not bool(spec.mass_include_self)
+            and not bool(spec.mass_include_static_loads)
+        ):
+            raise ValueError(
+                "Frame Wizard mass source must include structural self mass "
+                "and/or the generated static load pattern."
+            )
+        if bool(spec.mass_include_static_loads):
+            if load_mode != "Static":
+                raise ValueError(
+                    "Frame Wizard mass source cannot convert static loads "
+                    "because automatic static load generation is disabled."
+                )
+            if mass_factor <= 0.0:
+                raise ValueError(
+                    "Frame Wizard mass-source static load factor must be "
+                    "positive when static loads are included."
+                )
+        if (
+            str(spec.diaphragm_mode or "None") == "Rigid"
+            and float(spec.diaphragm_floor_mass) > 0.0
+        ):
+            raise ValueError(
+                "Automatic Mass Source replaces selected nodal mass and cannot "
+                "be combined with explicit rigid-diaphragm floor mass. Set the "
+                "floor mass to zero and derive mass from gravity loads, or "
+                "disable the automatic Mass Source."
+            )
+        if (
+            str(spec.diaphragm_mode or "None") == "Shell"
+            and float(spec.slab_mass_per_area) > 0.0
+        ):
+            raise ValueError(
+                "Automatic Mass Source replaces selected nodal mass and cannot "
+                "be combined with additional slab nodal mass. Set slab mass "
+                "per area to zero and derive mass from gravity loads, or "
+                "disable the automatic Mass Source."
+            )
+
+    modal_mode = str(spec.modal_mode or "None")
+    if modal_mode not in {"None", "Modal"}:
+        raise ValueError(
+            f"Frame Wizard modal mode {modal_mode!r} is not supported."
+        )
+    modal_num_modes = int(spec.modal_num_modes)
+    if not 1 <= modal_num_modes <= 100:
+        raise ValueError(
+            "Frame Wizard modal analysis requires 1 to 100 modes."
+        )
+    modal_solver = str(spec.modal_eigen_solver or "-genBandArpack")
+    if modal_solver not in {
+        "-genBandArpack",
+        "-fullGenLapack",
+        "-symmBandLapack",
+    }:
+        raise ValueError(
+            "Frame Wizard modal eigen solver is not supported."
+        )
+    if modal_mode == "Modal":
+        if joint_model in macro_joint_models:
+            raise ValueError(
+                "Frame Wizard automatic Modal setup currently requires the "
+                "standard 3D/6DOF frame backend."
+            )
+        if (
+            mass_mode == "None"
+            and float(spec.column_mass_per_length) <= 0.0
+            and float(spec.beam_mass_per_length) <= 0.0
+            and float(spec.brace_mass_per_length) <= 0.0
+            and float(spec.diaphragm_floor_mass) <= 0.0
+            and float(spec.slab_mass_per_area) <= 0.0
+        ):
+            raise ValueError(
+                "Frame Wizard Modal setup needs a mass definition. Enable the "
+                "automatic Mass Source or assign member/floor/slab mass."
+            )
+
+    if load_mode == "Static":
+        if joint_model in macro_joint_models:
+            raise ValueError(
+                "Frame Wizard automatic loads currently require the standard "
+                "3D/6DOF frame backend; native 2D macro-joint cores are not "
+                "combined with automatic loads yet."
+            )
+        if (
+            not bool(spec.load_self_weight)
+            and not bool(spec.load_beam_udl)
+            and not bool(spec.load_floor_area)
+        ):
+            raise ValueError(
+                "Frame Wizard static load mode requires self-weight, beam UDL "
+                "and/or floor area load."
+            )
+        beam_scope = str(spec.load_beam_scope)
+        if spec.planar_2d and beam_scope in {"Y", "Both"}:
+            if beam_scope == "Y":
+                raise ValueError(
+                    "Planar Frame Wizard models have no Y-direction beams."
+                )
+        if bool(spec.load_beam_udl):
+            if all(abs(value) <= 1.0e-15 for value in udl_vector):
+                raise ValueError(
+                    "Frame Wizard beam UDL vector cannot be zero."
+                )
+            if beam_scope in {"X", "Both"} and not bool(spec.create_beams_x):
+                raise ValueError(
+                    "X beam UDL requires X-direction beams."
+                )
+            if (
+                not spec.planar_2d
+                and beam_scope in {"Y", "Both"}
+                and not bool(spec.create_beams_y)
+            ):
+                raise ValueError(
+                    "Y beam UDL requires Y-direction beams."
+                )
+        if bool(spec.load_floor_area):
+            if spec.planar_2d:
+                raise ValueError(
+                    "Floor area load tributary distribution requires a 3D "
+                    "Frame Wizard model."
+                )
+            if floor_pressure <= 0.0:
+                raise ValueError(
+                    "Frame Wizard floor area pressure must be positive."
+                )
+            if floor_direction == "X" and not bool(spec.create_beams_x):
+                raise ValueError(
+                    "Floor area load to X beams requires X-direction beams."
+                )
+            if floor_direction == "Y" and not bool(spec.create_beams_y):
+                raise ValueError(
+                    "Floor area load to Y beams requires Y-direction beams."
+                )
+
+    frame_grid_coordinates(spec)
+
+
 def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
-    """Create a regular frame grid.
+    """Create a regular or individually-spaced frame grid.
 
     Standard mode creates a 3-D X-Y-Z frame. Planar mode creates an X-Z
     frame while retaining the Studio 3-D / 6-DOF backend and automatically
     restraining all out-of-plane DOFs.
     """
+    validate_frame_grid_spec(spec)
+    x_coordinates, y_coordinates, z_coordinates = frame_grid_coordinates(spec)
     model.clear()
 
     if spec.planar_2d:
@@ -63,9 +1108,9 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
             for i in range(spec.nx + 1):
                 model.add_node(
                     node_tag,
-                    i * spec.dx,
-                    0.0,
-                    k * spec.dz,
+                    x_coordinates[i],
+                    y_coordinates[0],
+                    z_coordinates[k],
                 )
                 node_at_2d[(i, k)] = node_tag
                 model.set_fixity(node_tag, out_of_plane)
@@ -79,9 +1124,19 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at_2d[(i, k)],
                         node_at_2d[(i, k + 1)],
+                        element_type=spec.column_element_type,
                         section_tag=spec.column_section_tag,
                         transf_tag=spec.column_transf_tag,
                         group="column-2d",
+                        integration_type=spec.column_integration_type,
+                        integration_points=spec.column_integration_points,
+                        mass_per_length=spec.column_mass_per_length,
+                        consistent_mass=spec.column_consistent_mass,
+                        hinge_i_section_tag=spec.column_hinge_i_section_tag,
+                        hinge_j_section_tag=spec.column_hinge_j_section_tag,
+                        interior_section_tag=spec.column_interior_section_tag,
+                        hinge_i_length=spec.column_hinge_i_length,
+                        hinge_j_length=spec.column_hinge_j_length,
                     )
                     ele_tag += 1
 
@@ -92,9 +1147,19 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at_2d[(i, k)],
                         node_at_2d[(i + 1, k)],
+                        element_type=spec.beam_element_type,
                         section_tag=spec.beam_section_tag,
                         transf_tag=spec.beam_transf_tag,
                         group="beam-2d",
+                        integration_type=spec.beam_integration_type,
+                        integration_points=spec.beam_integration_points,
+                        mass_per_length=spec.beam_mass_per_length,
+                        consistent_mass=spec.beam_consistent_mass,
+                        hinge_i_section_tag=spec.beam_hinge_i_section_tag,
+                        hinge_j_section_tag=spec.beam_hinge_j_section_tag,
+                        interior_section_tag=spec.beam_interior_section_tag,
+                        hinge_i_length=spec.beam_hinge_i_length,
+                        hinge_j_length=spec.beam_hinge_j_length,
                     )
                     ele_tag += 1
 
@@ -112,7 +1177,12 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
     for k in range(spec.nz + 1):
         for j in range(spec.ny + 1):
             for i in range(spec.nx + 1):
-                model.add_node(node_tag, i * spec.dx, j * spec.dy, k * spec.dz)
+                model.add_node(
+                    node_tag,
+                    x_coordinates[i],
+                    y_coordinates[j],
+                    z_coordinates[k],
+                )
                 node_at[(i, j, k)] = node_tag
                 node_tag += 1
 
@@ -126,9 +1196,19 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at[(i, j, k)],
                         node_at[(i, j, k + 1)],
+                        element_type=spec.column_element_type,
                         section_tag=spec.column_section_tag,
                         transf_tag=spec.column_transf_tag,
                         group="column",
+                        integration_type=spec.column_integration_type,
+                        integration_points=spec.column_integration_points,
+                        mass_per_length=spec.column_mass_per_length,
+                        consistent_mass=spec.column_consistent_mass,
+                        hinge_i_section_tag=spec.column_hinge_i_section_tag,
+                        hinge_j_section_tag=spec.column_hinge_j_section_tag,
+                        interior_section_tag=spec.column_interior_section_tag,
+                        hinge_i_length=spec.column_hinge_i_length,
+                        hinge_j_length=spec.column_hinge_j_length,
                     )
                     ele_tag += 1
 
@@ -140,9 +1220,19 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at[(i, j, k)],
                         node_at[(i + 1, j, k)],
+                        element_type=spec.beam_element_type,
                         section_tag=spec.beam_section_tag,
                         transf_tag=spec.beam_transf_tag,
                         group="beam-x",
+                        integration_type=spec.beam_integration_type,
+                        integration_points=spec.beam_integration_points,
+                        mass_per_length=spec.beam_mass_per_length,
+                        consistent_mass=spec.beam_consistent_mass,
+                        hinge_i_section_tag=spec.beam_hinge_i_section_tag,
+                        hinge_j_section_tag=spec.beam_hinge_j_section_tag,
+                        interior_section_tag=spec.beam_interior_section_tag,
+                        hinge_i_length=spec.beam_hinge_i_length,
+                        hinge_j_length=spec.beam_hinge_j_length,
                     )
                     ele_tag += 1
 
@@ -154,15 +1244,1940 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at[(i, j, k)],
                         node_at[(i, j + 1, k)],
+                        element_type=spec.beam_element_type,
                         section_tag=spec.beam_section_tag,
                         transf_tag=spec.beam_transf_tag,
                         group="beam-y",
+                        integration_type=spec.beam_integration_type,
+                        integration_points=spec.beam_integration_points,
+                        mass_per_length=spec.beam_mass_per_length,
+                        consistent_mass=spec.beam_consistent_mass,
+                        hinge_i_section_tag=spec.beam_hinge_i_section_tag,
+                        hinge_j_section_tag=spec.beam_hinge_j_section_tag,
+                        interior_section_tag=spec.beam_interior_section_tag,
+                        hinge_i_length=spec.beam_hinge_i_length,
+                        hinge_j_length=spec.beam_hinge_j_length,
                     )
                     ele_tag += 1
 
     for j in range(spec.ny + 1):
         for i in range(spec.nx + 1):
             model.set_fixity(node_at[(i, j, 0)], (1, 1, 1, 1, 1, 1))
+
+
+def frame_joint_connection_count(spec: FrameGridSpec) -> int:
+    """Return the number of explicit joint connection objects to create."""
+    joint_model = str(spec.joint_model or "None")
+    if joint_model == "None" or not bool(spec.create_columns):
+        return 0
+
+    nx = int(spec.nx)
+    nz = int(spec.nz)
+    scope = str(spec.joint_scope or "all")
+
+    if joint_model in {
+        "Joint2D",
+        "BeamColumnJoint",
+        "KrawinklerPanelZone",
+    }:
+        if not spec.planar_2d or not spec.create_beams_x:
+            return 0
+        x_indices = range(nx + 1)
+        if scope == "interior":
+            x_indices = range(1, nx)
+        return len(tuple(x_indices)) * nz
+
+    if spec.planar_2d:
+        x_indices = range(nx + 1)
+        if scope == "interior":
+            x_indices = range(1, nx)
+        joint_nodes = len(tuple(x_indices)) * nz
+        return joint_nodes if spec.create_beams_x else 0
+
+    ny = int(spec.ny)
+    x_indices = range(nx + 1)
+    y_indices = range(ny + 1)
+    if scope == "interior":
+        x_indices = range(1, nx)
+        y_indices = range(1, ny)
+    joint_nodes = len(tuple(x_indices)) * len(tuple(y_indices)) * nz
+    per_joint = int(bool(spec.create_beams_x)) + int(bool(spec.create_beams_y))
+    return joint_nodes * per_joint
+
+
+def _frame_center_node_tag(
+    spec: FrameGridSpec,
+    i: int,
+    j: int,
+    k: int,
+) -> int:
+    if spec.planar_2d:
+        return int(spec.start_node_tag) + k * (int(spec.nx) + 1) + i
+    plane = (int(spec.nx) + 1) * (int(spec.ny) + 1)
+    return (
+        int(spec.start_node_tag)
+        + k * plane
+        + j * (int(spec.nx) + 1)
+        + i
+    )
+
+
+def apply_frame_zero_length_joints(project, spec: FrameGridSpec) -> dict[str, int]:
+    """Insert semi-rigid beam-column joints into an already-built frame grid.
+
+    The column/grid node remains the retained joint node.  Each active beam
+    family receives a coincident duplicate node. Beam elements are rewired to
+    that duplicate, all non-spring DOFs are tied back with equalDOF, and one
+    zeroLength rotational spring connects the duplicate to the column node.
+    """
+    validate_frame_grid_spec(spec)
+    if str(spec.joint_model or "None") != "ZeroLength":
+        return {
+            "joint_nodes": 0,
+            "joint_connections": 0,
+            "duplicate_nodes": 0,
+            "joint_constraints": 0,
+        }
+
+    material_tag = int(spec.joint_material_tag)
+    if material_tag not in project.materials:
+        raise ValueError(
+            f"Joint rotational material tag {material_tag} does not exist."
+        )
+
+    model = project.model
+    next_node_tag = max(model.nodes, default=0) + 1
+    next_connection_tag = max(
+        max(model.elements, default=0),
+        max(project.connections, default=0),
+    ) + 1
+    next_constraint_tag = max(project.constraints, default=0) + 1
+    nx = int(spec.nx)
+    ny = 1 if spec.planar_2d else int(spec.ny)
+    nz = int(spec.nz)
+    scope = str(spec.joint_scope or "all")
+
+    x_indices = list(range(nx + 1))
+    y_indices = [0] if spec.planar_2d else list(range(ny + 1))
+    if scope == "interior":
+        x_indices = list(range(1, nx))
+        if not spec.planar_2d:
+            y_indices = list(range(1, ny))
+
+    joint_nodes: set[int] = set()
+    connection_count = 0
+    constraint_count = 0
+    duplicate_count = 0
+
+    for k in range(1, nz + 1):
+        for j in y_indices:
+            for i in x_indices:
+                center_tag = _frame_center_node_tag(spec, i, j, k)
+                center = model.nodes.get(center_tag)
+                if center is None:
+                    continue
+
+                axes: list[tuple[str, int]] = []
+                if spec.create_beams_x:
+                    axes.append(("beam-2d" if spec.planar_2d else "beam-x", 5))
+                if not spec.planar_2d and spec.create_beams_y:
+                    axes.append(("beam-y", 4))
+
+                created_here = False
+                for group, spring_dof in axes:
+                    connected = [
+                        element
+                        for element in model.elements.values()
+                        if element.group == group
+                        and (element.i == center_tag or element.j == center_tag)
+                    ]
+                    if not connected:
+                        continue
+
+                    duplicate_tag = next_node_tag
+                    next_node_tag += 1
+                    duplicate = model.add_node(
+                        duplicate_tag,
+                        center.xyz[0],
+                        center.xyz[1],
+                        center.xyz[2],
+                        ndf=center.ndf,
+                    )
+                    duplicate.mass = (0.0,) * int(duplicate.ndf)
+
+                    for element in connected:
+                        if element.i == center_tag:
+                            element.i = duplicate_tag
+                        if element.j == center_tag:
+                            element.j = duplicate_tag
+
+                    tied_dofs = tuple(
+                        dof
+                        for dof in range(1, int(center.ndf) + 1)
+                        if dof != spring_dof
+                    )
+                    constraint = ConstraintData(
+                        tag=next_constraint_tag,
+                        name=(
+                            f"Frame joint tie N{center_tag}-{duplicate_tag}"
+                        ),
+                        constraint_type="equalDOF",
+                        retained_node=center_tag,
+                        constrained_nodes=[duplicate_tag],
+                        dofs=tied_dofs,
+                    )
+                    project.add_constraint(constraint)
+                    next_constraint_tag += 1
+                    constraint_count += 1
+
+                    connection = ConnectionData(
+                        tag=next_connection_tag,
+                        name=(
+                            f"Frame joint {group} N{center_tag}"
+                        ),
+                        connection_type="zeroLength",
+                        node_i=center_tag,
+                        node_j=duplicate_tag,
+                        materials_by_dof={spring_dof: material_tag},
+                        generated_constraint_tag=constraint.tag,
+                    )
+                    project.add_connection(connection)
+                    next_connection_tag += 1
+                    connection_count += 1
+                    duplicate_count += 1
+                    created_here = True
+
+                if created_here:
+                    joint_nodes.add(center_tag)
+
+    return {
+        "joint_nodes": len(joint_nodes),
+        "joint_connections": connection_count,
+        "duplicate_nodes": duplicate_count,
+        "joint_constraints": constraint_count,
+    }
+
+
+def _frame_add_member(
+    model: StructuralModel,
+    tag: int,
+    i_node: int,
+    j_node: int,
+    *,
+    role: str,
+    spec: FrameGridSpec,
+) -> None:
+    is_column = role == "column"
+    model.add_element(
+        tag,
+        i_node,
+        j_node,
+        element_type=(
+            spec.column_element_type if is_column else spec.beam_element_type
+        ),
+        section_tag=(
+            spec.column_section_tag if is_column else spec.beam_section_tag
+        ),
+        transf_tag=(
+            spec.column_transf_tag if is_column else spec.beam_transf_tag
+        ),
+        group="column-2d" if is_column else "beam-2d",
+        integration_type=(
+            spec.column_integration_type
+            if is_column else spec.beam_integration_type
+        ),
+        integration_points=(
+            spec.column_integration_points
+            if is_column else spec.beam_integration_points
+        ),
+        mass_per_length=(
+            spec.column_mass_per_length
+            if is_column else spec.beam_mass_per_length
+        ),
+        consistent_mass=(
+            spec.column_consistent_mass
+            if is_column else spec.beam_consistent_mass
+        ),
+        hinge_i_section_tag=(
+            spec.column_hinge_i_section_tag
+            if is_column else spec.beam_hinge_i_section_tag
+        ),
+        hinge_j_section_tag=(
+            spec.column_hinge_j_section_tag
+            if is_column else spec.beam_hinge_j_section_tag
+        ),
+        interior_section_tag=(
+            spec.column_interior_section_tag
+            if is_column else spec.beam_interior_section_tag
+        ),
+        hinge_i_length=(
+            spec.column_hinge_i_length
+            if is_column else spec.beam_hinge_i_length
+        ),
+        hinge_j_length=(
+            spec.column_hinge_j_length
+            if is_column else spec.beam_hinge_j_length
+        ),
+    )
+
+
+def _frame_macro_material_tags(spec: FrameGridSpec) -> set[int]:
+    model = str(spec.joint_model or "None")
+    tags: set[int] = set()
+    if model in {"Joint2D", "KrawinklerPanelZone"}:
+        if spec.joint_material_tag is not None:
+            tags.add(int(spec.joint_material_tag))
+    if model == "Joint2D":
+        tags.update(
+            int(tag)
+            for tag in spec.joint_interface_material_tags
+            if int(tag) > 0
+        )
+    if model == "BeamColumnJoint":
+        tags.update(int(tag) for tag in spec.joint_component_material_tags)
+    return tags
+
+
+def generate_frame_macro_joint_project(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Build a native 2D frame whose selected intersections are joint cores."""
+    validate_frame_grid_spec(spec)
+    joint_model = str(spec.joint_model)
+    if joint_model not in {
+        "Joint2D",
+        "BeamColumnJoint",
+        "KrawinklerPanelZone",
+    }:
+        raise ValueError("Macro-joint frame generator received a non-macro model.")
+
+    missing_materials = sorted(
+        tag
+        for tag in _frame_macro_material_tags(spec)
+        if tag not in project.materials
+    )
+    if missing_materials:
+        raise ValueError(
+            "Joint material tag(s) do not exist: "
+            + ", ".join(map(str, missing_materials))
+        )
+
+    x_coordinates, _, z_coordinates = frame_grid_coordinates(spec)
+    model = project.model
+    model.clear()
+    model.ndm = 2
+    model.ndf = 3
+
+    nx = int(spec.nx)
+    nz = int(spec.nz)
+    scope = str(spec.joint_scope or "all")
+    active_i = set(range(nx + 1))
+    if scope == "interior":
+        active_i = set(range(1, nx))
+
+    macro_points = {
+        (i, k)
+        for k in range(1, nz + 1)
+        for i in active_i
+    }
+    node_tag = int(spec.start_node_tag)
+    centers: dict[tuple[int, int], int] = {}
+    cores: dict[tuple[int, int], dict[str, int]] = {}
+    half_width = 0.5 * float(spec.joint_panel_width)
+    half_height = 0.5 * float(spec.joint_panel_height)
+
+    for k in range(nz + 1):
+        for i in range(nx + 1):
+            x = float(x_coordinates[i])
+            y = float(z_coordinates[k])
+            if (i, k) in macro_points:
+                core: dict[str, int] = {}
+                for key, px, py in (
+                    ("left", x - half_width, y),
+                    ("top", x, y + half_height),
+                    ("right", x + half_width, y),
+                    ("bottom", x, y - half_height),
+                ):
+                    model.add_node(node_tag, px, py, 0.0, ndf=3)
+                    core[key] = node_tag
+                    node_tag += 1
+                cores[(i, k)] = core
+            else:
+                model.add_node(node_tag, x, y, 0.0, ndf=3)
+                centers[(i, k)] = node_tag
+                node_tag += 1
+
+    def vertical_endpoint(i: int, k: int, *, leaving_up: bool) -> int:
+        core = cores.get((i, k))
+        if core is None:
+            return centers[(i, k)]
+        return core["top" if leaving_up else "bottom"]
+
+    def horizontal_endpoint(i: int, k: int, *, leaving_right: bool) -> int:
+        core = cores.get((i, k))
+        if core is None:
+            return centers[(i, k)]
+        return core["right" if leaving_right else "left"]
+
+    ele_tag = int(spec.start_element_tag)
+    if spec.create_columns:
+        for k in range(nz):
+            for i in range(nx + 1):
+                _frame_add_member(
+                    model,
+                    ele_tag,
+                    vertical_endpoint(i, k, leaving_up=True),
+                    vertical_endpoint(i, k + 1, leaving_up=False),
+                    role="column",
+                    spec=spec,
+                )
+                ele_tag += 1
+
+    if spec.create_beams_x:
+        for k in range(1, nz + 1):
+            for i in range(nx):
+                _frame_add_member(
+                    model,
+                    ele_tag,
+                    horizontal_endpoint(i, k, leaving_right=True),
+                    horizontal_endpoint(i + 1, k, leaving_right=False),
+                    role="beam",
+                    spec=spec,
+                )
+                ele_tag += 1
+
+    base_fixity = (
+        (1, 1, 1)
+        if spec.planar_base_support == "Fixed"
+        else (1, 1, 0)
+    )
+    for i in range(nx + 1):
+        model.set_fixity(centers[(i, 0)], base_fixity)
+
+    connection_tag = max(model.elements, default=0) + 1
+    for i, k in sorted(macro_points, key=lambda item: (item[1], item[0])):
+        core = cores[(i, k)]
+        external_nodes = [
+            core["left"],
+            core["top"],
+            core["right"],
+            core["bottom"],
+        ]
+        if joint_model == "BeamColumnJoint":
+            # OpenSees BeamColumnJoint uses opposite 1↔3 nodes along the
+            # vertical chord and 2↔4 along the horizontal chord.
+            external_nodes = [
+                core["top"],
+                core["right"],
+                core["bottom"],
+                core["left"],
+            ]
+        parameters: dict[str, object] = {
+            "external_nodes": external_nodes,
+        }
+        if joint_model == "Joint2D":
+            parameters.update({
+                "panel_material": int(spec.joint_material_tag),
+                "interface_materials": [
+                    int(tag) for tag in spec.joint_interface_material_tags
+                ],
+                "large_disp": int(spec.joint_large_disp),
+            })
+        elif joint_model == "BeamColumnJoint":
+            parameters.update({
+                "component_materials": [
+                    int(tag) for tag in spec.joint_component_material_tags
+                ],
+                "height_factor": float(spec.joint_height_factor),
+                "width_factor": float(spec.joint_width_factor),
+            })
+        else:
+            parameters.update({
+                "panel_material": int(spec.joint_material_tag),
+                "rigid_A": float(spec.joint_rigid_a),
+                "rigid_E": float(spec.joint_rigid_e),
+                "rigid_I": float(spec.joint_rigid_i),
+            })
+
+        project.add_connection(
+            ConnectionData(
+                tag=connection_tag,
+                name=f"Frame {joint_model} joint X{i + 1}-L{k}",
+                connection_type=joint_model,
+                node_i=core["left"],
+                node_j=core["right"],
+                materials_by_dof={},
+                parameters=parameters,
+            )
+        )
+        connection_tag += 1
+
+    return {
+        "joint_nodes": len(macro_points),
+        "joint_connections": len(macro_points),
+        "duplicate_nodes": 0,
+        "joint_constraints": 0,
+        "panel_external_nodes": 4 * len(macro_points),
+    }
+
+
+def frame_floor_levels(spec: FrameGridSpec) -> tuple[int, ...]:
+    """Return normalized elevated levels selected for rigid/shell floor action."""
+    if str(spec.diaphragm_mode or "None") not in {"Rigid", "Shell"}:
+        return ()
+    levels = tuple(sorted({int(level) for level in spec.diaphragm_levels}))
+    if levels:
+        return levels
+    return tuple(range(1, int(spec.nz) + 1))
+
+
+def frame_diaphragm_levels(spec: FrameGridSpec) -> tuple[int, ...]:
+    """Return normalized elevated floor levels selected for rigid diaphragm."""
+    if str(spec.diaphragm_mode or "None") != "Rigid":
+        return ()
+    return frame_floor_levels(spec)
+
+
+def frame_diaphragm_count(spec: FrameGridSpec) -> int:
+    """Return the number of rigid floor diaphragms requested."""
+    return len(frame_diaphragm_levels(spec))
+
+
+def frame_slab_count(spec: FrameGridSpec) -> int:
+    """Return the number of explicit shell slab floors requested."""
+    if str(spec.diaphragm_mode or "None") != "Shell":
+        return 0
+    return len(frame_floor_levels(spec))
+
+
+def apply_frame_rigid_diaphragms(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Create one centroid retained node and rigidDiaphragm MPC per floor."""
+    validate_frame_grid_spec(spec)
+    if str(spec.diaphragm_mode or "None") != "Rigid":
+        return {
+            "diaphragm_constraints": 0,
+            "diaphragm_master_nodes": 0,
+        }
+
+    model = project.model
+    if (int(model.ndm), int(model.ndf)) != (3, 6):
+        raise ValueError(
+            "Rigid floor diaphragms require the standard 3D/6DOF frame backend."
+        )
+
+    x_coordinates, y_coordinates, z_coordinates = frame_grid_coordinates(spec)
+    next_node_tag = max(model.nodes, default=0) + 1
+    next_constraint_tag = max(project.constraints, default=0) + 1
+    floor_mass = float(spec.diaphragm_floor_mass)
+    rotational_inertia = float(spec.diaphragm_rotational_inertia)
+    levels = frame_diaphragm_levels(spec)
+
+    x_center = 0.5 * (x_coordinates[0] + x_coordinates[-1])
+    y_center = 0.5 * (y_coordinates[0] + y_coordinates[-1])
+
+    for level in levels:
+        master_tag = next_node_tag
+        next_node_tag += 1
+        master = model.add_node(
+            master_tag,
+            x_center,
+            y_center,
+            z_coordinates[level],
+            ndf=6,
+        )
+        # rigidDiaphragm with perpDirn=3 couples UX, UY and RZ. Restrain
+        # unused retained-node DOFs to avoid free zero-stiffness modes.
+        model.set_fixity(master_tag, (0, 0, 1, 1, 1, 0))
+        master.mass = (
+            floor_mass,
+            floor_mass,
+            0.0,
+            0.0,
+            0.0,
+            rotational_inertia,
+        )
+
+        floor_nodes = [
+            _frame_center_node_tag(spec, i, j, level)
+            for j in range(int(spec.ny) + 1)
+            for i in range(int(spec.nx) + 1)
+        ]
+        project.add_constraint(
+            ConstraintData(
+                tag=next_constraint_tag,
+                name=f"Frame floor {level} rigid diaphragm",
+                constraint_type="rigidDiaphragm",
+                retained_node=master_tag,
+                constrained_nodes=floor_nodes,
+                perp_dirn=3,
+            )
+        )
+        next_constraint_tag += 1
+
+    return {
+        "diaphragm_constraints": len(levels),
+        "diaphragm_master_nodes": len(levels),
+    }
+
+
+def _frame_refined_axis(
+    coordinates: list[float],
+    divisions_per_bay: int,
+) -> list[float]:
+    result = [float(coordinates[0])]
+    divisions = int(divisions_per_bay)
+    for left, right in zip(coordinates[:-1], coordinates[1:]):
+        for index in range(1, divisions + 1):
+            ratio = index / divisions
+            result.append(
+                float(left) + ratio * (float(right) - float(left))
+            )
+    return result
+
+
+def _frame_coordinate_node_lookup(
+    model: StructuralModel,
+    *,
+    tolerance: float,
+) -> dict[tuple[int, int, int], int]:
+    lookup: dict[tuple[int, int, int], int] = {}
+    for tag, node in sorted(model.nodes.items()):
+        key = tuple(
+            int(round(float(value) / tolerance))
+            for value in node.xyz
+        )
+        lookup.setdefault(key, int(tag))
+    return lookup
+
+
+def _frame_find_or_create_node(
+    model: StructuralModel,
+    lookup: dict[tuple[int, int, int], int],
+    xyz: tuple[float, float, float],
+    *,
+    tolerance: float,
+) -> tuple[int, bool]:
+    key = tuple(
+        int(round(float(value) / tolerance))
+        for value in xyz
+    )
+    existing = lookup.get(key)
+    if existing is not None:
+        node = model.nodes.get(existing)
+        if (
+            node is not None
+            and sum(
+                (float(node.xyz[index]) - float(xyz[index])) ** 2
+                for index in range(3)
+            ) <= tolerance * tolerance
+        ):
+            return int(existing), False
+
+    tag = model.next_node_tag()
+    model.add_node(tag, *xyz, ndf=6)
+    lookup[key] = int(tag)
+    return int(tag), True
+
+
+def _frame_clone_member_segment(
+    model: StructuralModel,
+    source,
+    tag: int,
+    node_i: int,
+    node_j: int,
+) -> None:
+    model.add_element(
+        tag,
+        node_i,
+        node_j,
+        element_type=source.element_type,
+        section_tag=source.section_tag,
+        transf_tag=source.transf_tag,
+        group=source.group,
+        integration_type=source.integration_type,
+        integration_points=source.integration_points,
+        force_max_iter=source.force_max_iter,
+        force_tolerance=source.force_tolerance,
+        mass_per_length=source.mass_per_length,
+        consistent_mass=source.consistent_mass,
+        hinge_i_section_tag=source.hinge_i_section_tag,
+        hinge_j_section_tag=source.hinge_j_section_tag,
+        interior_section_tag=source.interior_section_tag,
+        hinge_i_length=source.hinge_i_length,
+        hinge_j_length=source.hinge_j_length,
+        beam_center_ratio=source.beam_center_ratio,
+    )
+
+
+def apply_frame_shell_slabs(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Mesh selected 3D floors with conforming quadrilateral shell elements."""
+    validate_frame_grid_spec(spec)
+    if str(spec.diaphragm_mode or "None") != "Shell":
+        return {
+            "slab_floors": 0,
+            "slab_elements": 0,
+            "slab_nodes_created": 0,
+            "slab_beam_segments_added": 0,
+            "slab_mass_nodes": 0,
+        }
+
+    section_tag = int(spec.slab_section_tag)
+    section = project.sections.get(section_tag)
+    if section is None:
+        raise ValueError(
+            f"Slab section tag {section_tag} does not exist in the project."
+        )
+    if section.section_type not in SHELL_SECTION_TYPES:
+        raise ValueError(
+            f"Slab section {section_tag} is not shell-compatible."
+        )
+
+    model = project.model
+    if (int(model.ndm), int(model.ndf)) != (3, 6):
+        raise ValueError(
+            "Explicit shell slabs require the standard 3D/6DOF frame backend."
+        )
+
+    x_base, y_base, z_coordinates = frame_grid_coordinates(spec)
+    x_mesh = _frame_refined_axis(x_base, int(spec.slab_divisions_x))
+    y_mesh = _frame_refined_axis(y_base, int(spec.slab_divisions_y))
+    levels = frame_floor_levels(spec)
+    span = max(
+        x_mesh[-1] - x_mesh[0],
+        y_mesh[-1] - y_mesh[0],
+        z_coordinates[-1] - z_coordinates[0],
+        1.0,
+    )
+    tolerance = 1.0e-9 * span
+    lookup = _frame_coordinate_node_lookup(
+        model,
+        tolerance=tolerance,
+    )
+
+    floor_grids: dict[int, list[list[int]]] = {}
+    created_count = 0
+    reused_count = 0
+    for level in levels:
+        z = float(z_coordinates[level])
+        grid: list[list[int]] = []
+        for y in y_mesh:
+            row: list[int] = []
+            for x in x_mesh:
+                node_tag, created = _frame_find_or_create_node(
+                    model,
+                    lookup,
+                    (float(x), float(y), z),
+                    tolerance=tolerance,
+                )
+                row.append(node_tag)
+                if created:
+                    created_count += 1
+                else:
+                    reused_count += 1
+            grid.append(row)
+        floor_grids[int(level)] = grid
+
+    # Refined slabs need matching nodes along every beam line. Split only
+    # elastic frame beams; validation prevents nonlinear hinge duplication.
+    split_count = 0
+    if int(spec.slab_divisions_x) > 1 or int(spec.slab_divisions_y) > 1:
+        original_beams = [
+            element
+            for element in list(model.elements.values())
+            if element.group in {"beam-x", "beam-y"}
+        ]
+        next_element_tag = max(model.elements, default=0) + 1
+        selected_z = {
+            round(float(z_coordinates[level]), 12)
+            for level in levels
+        }
+        for element in original_beams:
+            node_i = model.nodes[int(element.i)]
+            node_j = model.nodes[int(element.j)]
+            if round(float(node_i.xyz[2]), 12) not in selected_z:
+                continue
+            if abs(float(node_i.xyz[2]) - float(node_j.xyz[2])) > tolerance:
+                continue
+
+            divisions = (
+                int(spec.slab_divisions_x)
+                if element.group == "beam-x"
+                else int(spec.slab_divisions_y)
+            )
+            if divisions <= 1:
+                continue
+
+            points: list[int] = []
+            for index in range(divisions + 1):
+                ratio = index / divisions
+                xyz = tuple(
+                    float(node_i.xyz[axis])
+                    + ratio * (
+                        float(node_j.xyz[axis])
+                        - float(node_i.xyz[axis])
+                    )
+                    for axis in range(3)
+                )
+                tag, _created = _frame_find_or_create_node(
+                    model,
+                    lookup,
+                    xyz,
+                    tolerance=tolerance,
+                )
+                points.append(tag)
+
+            original_tag = int(element.tag)
+            model.elements.pop(original_tag)
+            _frame_clone_member_segment(
+                model,
+                element,
+                original_tag,
+                points[0],
+                points[1],
+            )
+            for left, right in zip(points[1:-1], points[2:]):
+                while next_element_tag in model.elements:
+                    next_element_tag += 1
+                _frame_clone_member_segment(
+                    model,
+                    element,
+                    next_element_tag,
+                    left,
+                    right,
+                )
+                next_element_tag += 1
+                split_count += 1
+
+    shell_count = 0
+    next_element_tag = max(model.elements, default=0) + 1
+    mass_per_area = float(spec.slab_mass_per_area)
+    mass_added: dict[int, float] = {}
+
+    for level in levels:
+        grid = floor_grids[int(level)]
+        for j in range(len(y_mesh) - 1):
+            for i in range(len(x_mesh) - 1):
+                n1 = grid[j][i]
+                n2 = grid[j][i + 1]
+                n3 = grid[j + 1][i + 1]
+                n4 = grid[j + 1][i]
+                while next_element_tag in model.elements:
+                    next_element_tag += 1
+                model.add_element(
+                    next_element_tag,
+                    n1,
+                    n2,
+                    element_type=str(spec.slab_element_type),
+                    section_tag=section_tag,
+                    group=f"slab:L{int(level)}",
+                    k=n3,
+                    l=n4,
+                    shell_corotational=(
+                        bool(spec.slab_corotational)
+                        if str(spec.slab_element_type) == "ASDShellQ4"
+                        else False
+                    ),
+                )
+                shell_count += 1
+
+                if mass_per_area > 0.0:
+                    area = (
+                        abs(float(x_mesh[i + 1]) - float(x_mesh[i]))
+                        * abs(float(y_mesh[j + 1]) - float(y_mesh[j]))
+                    )
+                    share = 0.25 * mass_per_area * area
+                    for node_tag in (n1, n2, n3, n4):
+                        mass_added[node_tag] = (
+                            mass_added.get(node_tag, 0.0) + share
+                        )
+                next_element_tag += 1
+
+    for node_tag, added_mass in mass_added.items():
+        node = model.nodes[int(node_tag)]
+        values = list(node.mass)
+        while len(values) < 6:
+            values.append(0.0)
+        for index in (0, 1, 2):
+            values[index] += float(added_mass)
+        node.mass = tuple(values[:6])
+
+    return {
+        "slab_floors": len(levels),
+        "slab_elements": shell_count,
+        "slab_nodes_created": created_count,
+        "slab_nodes_reused": reused_count,
+        "slab_beam_segments_added": split_count,
+        "slab_mass_nodes": len(mass_added),
+    }
+
+
+def frame_brace_x_bays(spec: FrameGridSpec) -> tuple[int, ...]:
+    values = tuple(sorted({int(value) for value in spec.brace_x_bays}))
+    return values if values else tuple(range(int(spec.nx)))
+
+
+def frame_brace_y_bays(spec: FrameGridSpec) -> tuple[int, ...]:
+    values = tuple(sorted({int(value) for value in spec.brace_y_bays}))
+    return values if values else tuple(range(int(spec.ny)))
+
+
+def frame_brace_storeys(spec: FrameGridSpec) -> tuple[int, ...]:
+    values = tuple(sorted({int(value) for value in spec.brace_storeys}))
+    return values if values else tuple(range(1, int(spec.nz) + 1))
+
+
+def frame_brace_y_grid_lines(spec: FrameGridSpec) -> tuple[int, ...]:
+    if spec.planar_2d:
+        return (0,)
+    ny = int(spec.ny)
+    scope = str(spec.brace_y_plane_scope or "All")
+    if scope == "YMin":
+        return (0,)
+    if scope == "YMax":
+        return (ny,)
+    if scope == "Exterior":
+        return (0,) if ny == 0 else (0, ny)
+    return tuple(range(ny + 1))
+
+
+def frame_brace_x_grid_lines(spec: FrameGridSpec) -> tuple[int, ...]:
+    nx = int(spec.nx)
+    scope = str(spec.brace_x_plane_scope or "All")
+    if scope == "XMin":
+        return (0,)
+    if scope == "XMax":
+        return (nx,)
+    if scope == "Exterior":
+        return (0,) if nx == 0 else (0, nx)
+    return tuple(range(nx + 1))
+
+
+def frame_brace_panel_pattern_map(
+    spec: FrameGridSpec,
+) -> dict[tuple[str, int, int, int], str]:
+    return {
+        (str(axis), int(plane), int(bay), int(storey)): str(pattern)
+        for axis, plane, bay, storey, pattern in spec.brace_panel_patterns
+    }
+
+
+def frame_brace_panels(
+    spec: FrameGridSpec,
+) -> tuple[tuple[str, int, int, int, str], ...]:
+    if str(spec.brace_mode or "None") != "Truss":
+        return ()
+    mode = str(spec.brace_plane_mode or "X")
+    overrides = frame_brace_panel_pattern_map(spec)
+    panels: list[tuple[str, int, int, int, str]] = []
+
+    if mode in {"X", "Both"}:
+        for storey in frame_brace_storeys(spec):
+            for plane in frame_brace_y_grid_lines(spec):
+                for bay in frame_brace_x_bays(spec):
+                    pattern = overrides.get(
+                        ("X", plane, bay, storey),
+                        str(spec.brace_pattern),
+                    )
+                    if pattern != "None":
+                        panels.append(
+                            ("X", plane, bay, storey, pattern)
+                        )
+
+    if mode in {"Y", "Both"} and not spec.planar_2d:
+        for storey in frame_brace_storeys(spec):
+            for plane in frame_brace_x_grid_lines(spec):
+                for bay in frame_brace_y_bays(spec):
+                    pattern = overrides.get(
+                        ("Y", plane, bay, storey),
+                        str(spec.brace_pattern),
+                    )
+                    if pattern != "None":
+                        panels.append(
+                            ("Y", plane, bay, storey, pattern)
+                        )
+
+    return tuple(panels)
+
+
+def frame_brace_panel_count(spec: FrameGridSpec) -> int:
+    return len(frame_brace_panels(spec))
+
+
+def frame_brace_element_count(spec: FrameGridSpec) -> int:
+    count = 0
+    for _axis, _plane, _bay, _storey, pattern in frame_brace_panels(spec):
+        count += 1 if pattern in {
+            "DiagonalForward",
+            "DiagonalBackward",
+        } else 2
+    return count
+
+
+def _frame_point_on_segment(
+    point: tuple[float, float, float],
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+    *,
+    tolerance: float,
+) -> bool:
+    ab = tuple(float(b[i]) - float(a[i]) for i in range(3))
+    ap = tuple(float(point[i]) - float(a[i]) for i in range(3))
+    length2 = sum(value * value for value in ab)
+    if length2 <= tolerance * tolerance:
+        return False
+    ratio = sum(ap[i] * ab[i] for i in range(3)) / length2
+    if ratio <= tolerance or ratio >= 1.0 - tolerance:
+        return False
+    closest = tuple(float(a[i]) + ratio * ab[i] for i in range(3))
+    return (
+        sum(
+            (float(point[i]) - closest[i]) ** 2
+            for i in range(3)
+        )
+        <= tolerance * tolerance
+    )
+
+
+def _frame_insert_member_midpoint_node(
+    model: StructuralModel,
+    point: tuple[float, float, float],
+    *,
+    groups: set[str],
+    tolerance: float,
+) -> tuple[int, int]:
+    lookup = _frame_coordinate_node_lookup(model, tolerance=tolerance)
+    node_tag, _ = _frame_find_or_create_node(
+        model,
+        lookup,
+        point,
+        tolerance=tolerance,
+    )
+
+    for element in model.elements.values():
+        if element.group not in groups:
+            continue
+        if node_tag in {int(element.i), int(element.j)}:
+            return int(node_tag), 0
+
+    target = None
+    for element in list(model.elements.values()):
+        if element.group not in groups:
+            continue
+        node_i = model.nodes[int(element.i)]
+        node_j = model.nodes[int(element.j)]
+        if _frame_point_on_segment(
+            point,
+            tuple(node_i.xyz),
+            tuple(node_j.xyz),
+            tolerance=tolerance,
+        ):
+            target = element
+            break
+    if target is None:
+        raise ValueError(
+            "Brace midpoint could not be inserted on a matching frame member."
+        )
+    if str(target.element_type) != "elasticBeamColumn":
+        raise ValueError(
+            "Brace midpoint insertion requires elasticBeamColumn frame members."
+        )
+
+    old_tag = int(target.tag)
+    old_j = int(target.j)
+    model.elements.pop(old_tag)
+    _frame_clone_member_segment(
+        model,
+        target,
+        old_tag,
+        int(target.i),
+        int(node_tag),
+    )
+    new_tag = max(model.elements, default=0) + 1
+    _frame_clone_member_segment(
+        model,
+        target,
+        new_tag,
+        int(node_tag),
+        old_j,
+    )
+    return int(node_tag), 1
+
+
+def apply_frame_bracing(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Create selected X-Z / Y-Z truss braces with per-panel patterns."""
+    validate_frame_grid_spec(spec)
+    if str(spec.brace_mode or "None") != "Truss":
+        return {
+            "brace_panels": 0,
+            "brace_elements": 0,
+            "brace_midpoint_nodes": 0,
+            "brace_member_splits": 0,
+            "brace_xz_panels": 0,
+            "brace_yz_panels": 0,
+        }
+
+    material_tag = int(spec.brace_material_tag)
+    if material_tag not in project.materials:
+        raise ValueError(
+            f"Brace material tag {material_tag} does not exist."
+        )
+
+    model = project.model
+    x_coordinates, y_coordinates, z_coordinates = frame_grid_coordinates(spec)
+    span = max(
+        x_coordinates[-1] - x_coordinates[0],
+        (y_coordinates[-1] - y_coordinates[0])
+        if len(y_coordinates) > 1 else 0.0,
+        z_coordinates[-1] - z_coordinates[0],
+        1.0,
+    )
+    tolerance = 1.0e-9 * span
+    next_element_tag = max(model.elements, default=0) + 1
+    midpoint_nodes: set[int] = set()
+    split_count = 0
+    brace_count = 0
+    xz_panels = 0
+    yz_panels = 0
+
+    def add_brace(
+        node_i: int,
+        node_j: int,
+        *,
+        axis: str,
+        panel_label: str,
+    ) -> None:
+        nonlocal next_element_tag, brace_count
+        while next_element_tag in model.elements:
+            next_element_tag += 1
+        model.add_element(
+            next_element_tag,
+            int(node_i),
+            int(node_j),
+            element_type=str(spec.brace_element_type),
+            group=f"brace-{axis.lower()}:{panel_label}",
+            truss_area=float(spec.brace_area),
+            truss_material_tag=material_tag,
+            mass_per_length=float(spec.brace_mass_per_length),
+            truss_do_rayleigh=bool(spec.brace_do_rayleigh),
+        )
+        next_element_tag += 1
+        brace_count += 1
+
+    for axis, plane, bay, storey, pattern in frame_brace_panels(spec):
+        lower_k = int(storey) - 1
+        upper_k = int(storey)
+
+        if axis == "X":
+            left = int(bay)
+            right = left + 1
+            n_bl = _frame_center_node_tag(spec, left, plane, lower_k)
+            n_br = _frame_center_node_tag(spec, right, plane, lower_k)
+            n_tl = _frame_center_node_tag(spec, left, plane, upper_k)
+            n_tr = _frame_center_node_tag(spec, right, plane, upper_k)
+            lower_left_xyz = (
+                x_coordinates[left],
+                y_coordinates[plane],
+                z_coordinates[lower_k],
+            )
+            lower_right_xyz = (
+                x_coordinates[right],
+                y_coordinates[plane],
+                z_coordinates[lower_k],
+            )
+            upper_left_xyz = (
+                x_coordinates[left],
+                y_coordinates[plane],
+                z_coordinates[upper_k],
+            )
+            upper_right_xyz = (
+                x_coordinates[right],
+                y_coordinates[plane],
+                z_coordinates[upper_k],
+            )
+            beam_groups = {"beam-2d", "beam-x"}
+            xz_panels += 1
+            label = f"S{storey}:X{bay + 1}:Y{plane + 1}"
+        else:
+            low = int(bay)
+            high = low + 1
+            n_bl = _frame_center_node_tag(spec, plane, low, lower_k)
+            n_br = _frame_center_node_tag(spec, plane, high, lower_k)
+            n_tl = _frame_center_node_tag(spec, plane, low, upper_k)
+            n_tr = _frame_center_node_tag(spec, plane, high, upper_k)
+            lower_left_xyz = (
+                x_coordinates[plane],
+                y_coordinates[low],
+                z_coordinates[lower_k],
+            )
+            lower_right_xyz = (
+                x_coordinates[plane],
+                y_coordinates[high],
+                z_coordinates[lower_k],
+            )
+            upper_left_xyz = (
+                x_coordinates[plane],
+                y_coordinates[low],
+                z_coordinates[upper_k],
+            )
+            upper_right_xyz = (
+                x_coordinates[plane],
+                y_coordinates[high],
+                z_coordinates[upper_k],
+            )
+            beam_groups = {"beam-y"}
+            yz_panels += 1
+            label = f"S{storey}:Y{bay + 1}:X{plane + 1}"
+
+        if pattern == "DiagonalForward":
+            add_brace(n_bl, n_tr, axis=axis, panel_label=label)
+        elif pattern == "DiagonalBackward":
+            add_brace(n_br, n_tl, axis=axis, panel_label=label)
+        elif pattern == "X":
+            add_brace(n_bl, n_tr, axis=axis, panel_label=label)
+            add_brace(n_br, n_tl, axis=axis, panel_label=label)
+        elif pattern in {"VUpper", "VLower"}:
+            target_xyz = (
+                tuple(
+                    0.5 * (
+                        upper_left_xyz[index]
+                        + upper_right_xyz[index]
+                    )
+                    for index in range(3)
+                )
+                if pattern == "VUpper"
+                else tuple(
+                    0.5 * (
+                        lower_left_xyz[index]
+                        + lower_right_xyz[index]
+                    )
+                    for index in range(3)
+                )
+            )
+            mid, split = _frame_insert_member_midpoint_node(
+                model,
+                target_xyz,
+                groups=beam_groups,
+                tolerance=tolerance,
+            )
+            midpoint_nodes.add(mid)
+            split_count += split
+            if pattern == "VUpper":
+                add_brace(n_bl, mid, axis=axis, panel_label=label)
+                add_brace(n_br, mid, axis=axis, panel_label=label)
+            else:
+                add_brace(n_tl, mid, axis=axis, panel_label=label)
+                add_brace(n_tr, mid, axis=axis, panel_label=label)
+        elif pattern in {"KLeft", "KRight"}:
+            side_xyz_a = (
+                lower_left_xyz if pattern == "KLeft" else lower_right_xyz
+            )
+            side_xyz_b = (
+                upper_left_xyz if pattern == "KLeft" else upper_right_xyz
+            )
+            point = tuple(
+                0.5 * (
+                    float(side_xyz_a[index])
+                    + float(side_xyz_b[index])
+                )
+                for index in range(3)
+            )
+            mid, split = _frame_insert_member_midpoint_node(
+                model,
+                point,
+                groups={"column-2d", "column"},
+                tolerance=tolerance,
+            )
+            midpoint_nodes.add(mid)
+            split_count += split
+            if pattern == "KLeft":
+                add_brace(mid, n_br, axis=axis, panel_label=label)
+                add_brace(mid, n_tr, axis=axis, panel_label=label)
+            else:
+                add_brace(mid, n_bl, axis=axis, panel_label=label)
+                add_brace(mid, n_tl, axis=axis, panel_label=label)
+
+    return {
+        "brace_panels": frame_brace_panel_count(spec),
+        "brace_elements": brace_count,
+        "brace_midpoint_nodes": len(midpoint_nodes),
+        "brace_member_splits": split_count,
+        "brace_xz_panels": xz_panels,
+        "brace_yz_panels": yz_panels,
+    }
+
+
+def frame_load_storeys(spec: FrameGridSpec) -> tuple[int, ...]:
+    values = tuple(sorted({int(value) for value in spec.load_storeys}))
+    return values if values else tuple(range(1, int(spec.nz) + 1))
+
+
+def _frame_element_storey(
+    model: StructuralModel,
+    element,
+    z_coordinates: list[float],
+    *,
+    tolerance: float,
+) -> int | None:
+    node_i = model.nodes.get(int(element.i))
+    node_j = model.nodes.get(int(element.j))
+    if node_i is None or node_j is None:
+        return None
+    zi = float(node_i.xyz[2])
+    zj = float(node_j.xyz[2])
+    if abs(zi - zj) > tolerance:
+        return None
+    for storey in range(1, len(z_coordinates)):
+        if abs(zi - float(z_coordinates[storey])) <= tolerance:
+            return storey
+    return None
+
+
+def _frame_self_weight_targets(model: StructuralModel) -> list:
+    groups = {
+        "column",
+        "column-2d",
+        "beam-x",
+        "beam-y",
+        "beam-2d",
+    }
+    return [
+        element
+        for element in model.elements.values()
+        if element.group in groups
+    ]
+
+
+def _frame_beam_udl_targets(
+    model: StructuralModel,
+    spec: FrameGridSpec,
+) -> list:
+    _x, _y, z_coordinates = frame_grid_coordinates(spec)
+    span = max(
+        z_coordinates[-1] - z_coordinates[0],
+        1.0,
+    )
+    tolerance = 1.0e-9 * span
+    selected_storeys = set(frame_load_storeys(spec))
+    scope = str(spec.load_beam_scope or "Both")
+    groups: set[str] = set()
+    if scope in {"X", "Both"}:
+        groups.update({"beam-x", "beam-2d"})
+    if not spec.planar_2d and scope in {"Y", "Both"}:
+        groups.add("beam-y")
+
+    targets = []
+    for element in model.elements.values():
+        if element.group not in groups:
+            continue
+        storey = _frame_element_storey(
+            model,
+            element,
+            z_coordinates,
+            tolerance=tolerance,
+        )
+        if storey in selected_storeys:
+            targets.append(element)
+    return targets
+
+
+def _frame_tributary_width(
+    coordinates: list[float],
+    index: int,
+) -> float:
+    if len(coordinates) < 2:
+        return 0.0
+    index = int(index)
+    if index <= 0:
+        return 0.5 * float(coordinates[1] - coordinates[0])
+    if index >= len(coordinates) - 1:
+        return 0.5 * float(coordinates[-1] - coordinates[-2])
+    return 0.5 * float(
+        coordinates[index + 1] - coordinates[index - 1]
+    )
+
+
+def _frame_floor_area_load_targets(
+    model: StructuralModel,
+    spec: FrameGridSpec,
+) -> list[tuple[object, float]]:
+    if not bool(spec.load_floor_area) or spec.planar_2d:
+        return []
+
+    x_coordinates, y_coordinates, z_coordinates = frame_grid_coordinates(spec)
+    scale = max(
+        x_coordinates[-1] - x_coordinates[0],
+        y_coordinates[-1] - y_coordinates[0],
+        z_coordinates[-1] - z_coordinates[0],
+        1.0,
+    )
+    tolerance = 1.0e-9 * scale
+    selected_storeys = set(frame_load_storeys(spec))
+    direction = str(spec.load_floor_area_direction or "X")
+    group = "beam-x" if direction == "X" else "beam-y"
+    transverse = y_coordinates if direction == "X" else x_coordinates
+
+    targets: list[tuple[object, float]] = []
+    for element in model.elements.values():
+        if element.group != group:
+            continue
+        storey = _frame_element_storey(
+            model,
+            element,
+            z_coordinates,
+            tolerance=tolerance,
+        )
+        if storey not in selected_storeys:
+            continue
+        node_i = model.nodes.get(int(element.i))
+        node_j = model.nodes.get(int(element.j))
+        if node_i is None or node_j is None:
+            continue
+        coordinate = (
+            0.5 * (float(node_i.xyz[1]) + float(node_j.xyz[1]))
+            if direction == "X"
+            else 0.5 * (float(node_i.xyz[0]) + float(node_j.xyz[0]))
+        )
+        grid_index = min(
+            range(len(transverse)),
+            key=lambda idx: abs(float(transverse[idx]) - coordinate),
+        )
+        if abs(float(transverse[grid_index]) - coordinate) > tolerance:
+            continue
+        width = _frame_tributary_width(transverse, grid_index)
+        if width > 0.0:
+            targets.append((element, width))
+    return targets
+
+
+def _preflight_frame_self_weight(
+    project,
+    spec: FrameGridSpec,
+    targets: list,
+) -> None:
+    density_override = float(spec.load_self_weight_density)
+    for element in targets:
+        if element.section_tag is None:
+            raise ValueError(
+                f"Automatic self-weight: element {element.tag} has no section."
+            )
+        section = project.sections.get(int(element.section_tag))
+        if section is None:
+            raise ValueError(
+                f"Automatic self-weight: section {element.section_tag} "
+                "does not exist."
+            )
+        if section.section_type != "Elastic":
+            raise ValueError(
+                "Automatic self-weight currently requires Elastic frame "
+                f"sections; element {element.tag} uses {section.section_type}."
+            )
+        if element.transf_tag is None or int(element.transf_tag) not in (
+            project.transformations
+        ):
+            raise ValueError(
+                f"Automatic self-weight: element {element.tag} needs a valid "
+                "geometric transformation."
+            )
+        if density_override <= 0.0:
+            if section.material_tag is None:
+                raise ValueError(
+                    "Automatic self-weight needs a positive density override "
+                    f"or section {section.tag} linked to material density."
+                )
+            material = project.materials.get(int(section.material_tag))
+            if material is None or float(material.density) <= 0.0:
+                raise ValueError(
+                    "Automatic self-weight needs a positive density override "
+                    f"or positive linked material density for section "
+                    f"{section.tag}."
+                )
+
+
+def apply_frame_static_loads(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Create one static Plain pattern for frame self-weight and beam UDL."""
+    validate_frame_grid_spec(spec)
+    if str(spec.load_mode or "None") != "Static":
+        return {
+            "load_patterns": 0,
+            "load_pattern_tag": 0,
+            "self_weight_loads": 0,
+            "beam_udl_loads": 0,
+            "floor_area_loads": 0,
+        }
+
+    model = project.model
+    self_weight_targets = (
+        _frame_self_weight_targets(model)
+        if bool(spec.load_self_weight)
+        else []
+    )
+    udl_targets = (
+        _frame_beam_udl_targets(model, spec)
+        if bool(spec.load_beam_udl)
+        else []
+    )
+    floor_area_targets = _frame_floor_area_load_targets(model, spec)
+    if self_weight_targets:
+        _preflight_frame_self_weight(
+            project,
+            spec,
+            self_weight_targets,
+        )
+
+    time_series_tag = max(project.time_series, default=0) + 1
+    pattern_tag = max(project.load_patterns, default=0) + 1
+    project.add_time_series(
+        TimeSeriesData(
+            tag=time_series_tag,
+            name="Frame Wizard static",
+            series_type="Linear",
+            factor=1.0,
+        )
+    )
+    project.add_load_pattern(
+        LoadPatternData(
+            tag=pattern_tag,
+            name="Frame Wizard gravity / beam / floor area load",
+            pattern_type="Plain",
+            time_series_tag=time_series_tag,
+        )
+    )
+
+    next_load_tag = max(project.element_loads, default=0) + 1
+    self_weight_count = 0
+    for element in sorted(
+        self_weight_targets,
+        key=lambda item: int(item.tag),
+    ):
+        project.add_element_load(
+            ElementLoadData(
+                tag=next_load_tag,
+                name=f"Frame self-weight E{element.tag}",
+                pattern_tag=pattern_tag,
+                element_tag=int(element.tag),
+                load_type="SelfWeight",
+                gravity=(0.0, 0.0, -9.81),
+                density_override=float(spec.load_self_weight_density),
+                coordinate_system="global",
+            )
+        )
+        next_load_tag += 1
+        self_weight_count += 1
+
+    udl_count = 0
+    wx, wy, wz = (
+        float(value) for value in spec.load_beam_udl_vector
+    )
+    for element in sorted(
+        udl_targets,
+        key=lambda item: int(item.tag),
+    ):
+        project.add_element_load(
+            ElementLoadData(
+                tag=next_load_tag,
+                name=f"Frame beam UDL E{element.tag}",
+                pattern_tag=pattern_tag,
+                element_tag=int(element.tag),
+                load_type="Uniform",
+                wx=wx,
+                wy=wy,
+                wz=wz,
+                coordinate_system=str(
+                    spec.load_beam_udl_coordinate_system
+                ).lower(),
+            )
+        )
+        next_load_tag += 1
+        udl_count += 1
+
+    floor_area_count = 0
+    floor_pressure = float(spec.load_floor_area_pressure)
+    for element, tributary_width in sorted(
+        floor_area_targets,
+        key=lambda item: int(item[0].tag),
+    ):
+        line_load = floor_pressure * float(tributary_width)
+        project.add_element_load(
+            ElementLoadData(
+                tag=next_load_tag,
+                name=f"Frame floor area load E{element.tag}",
+                pattern_tag=pattern_tag,
+                element_tag=int(element.tag),
+                load_type="Uniform",
+                wx=0.0,
+                wy=0.0,
+                wz=-line_load,
+                coordinate_system="global",
+            )
+        )
+        next_load_tag += 1
+        floor_area_count += 1
+
+    return {
+        "load_patterns": 1,
+        "load_pattern_tag": int(pattern_tag),
+        "self_weight_loads": self_weight_count,
+        "beam_udl_loads": udl_count,
+        "floor_area_loads": floor_area_count,
+    }
+
+
+def apply_frame_mass_source(
+    project,
+    spec: FrameGridSpec,
+    *,
+    static_pattern_tag: int | None = None,
+) -> dict[str, int | float]:
+    """Create and apply one FEWIZ mass source after frame/load generation."""
+    validate_frame_grid_spec(spec)
+    if str(spec.mass_source_mode or "None") != "Source":
+        return {
+            "mass_sources": 0,
+            "mass_source_tag": 0,
+            "mass_nodes": 0,
+            "generated_nodal_mass": 0.0,
+        }
+
+    load_factors: dict[int, float] = {}
+    if bool(spec.mass_include_static_loads):
+        if static_pattern_tag is None or int(static_pattern_tag) <= 0:
+            raise ValueError(
+                "Frame Wizard mass source expected the generated static load "
+                "pattern but no valid pattern tag was produced."
+            )
+        load_factors[int(static_pattern_tag)] = float(
+            spec.mass_static_load_factor
+        )
+
+    source_tag = max(project.mass_sources, default=0) + 1
+    source = MassSourceData(
+        tag=source_tag,
+        name="Frame Wizard seismic mass",
+        include_self_mass=bool(spec.mass_include_self),
+        load_factors=load_factors,
+        gravity_axis=int(spec.mass_gravity_axis),
+        directions=tuple(
+            sorted({int(value) for value in spec.mass_directions})
+        ),
+    )
+    project.add_mass_source(source)
+    summary = apply_mass_source(project, source)
+    return {
+        "mass_sources": 1,
+        "mass_source_tag": int(source_tag),
+        "mass_nodes": int(summary.active_nodes),
+        "generated_nodal_mass": float(summary.total_mass),
+    }
+
+
+def apply_frame_modal_template(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Create FEWIZ's standard modal analysis and mode-shape result requests."""
+    validate_frame_grid_spec(spec)
+    if str(spec.modal_mode or "None") != "Modal":
+        return {
+            "modal_analyses": 0,
+            "modal_analysis_tag": 0,
+            "modal_results": 0,
+        }
+
+    has_nodal_mass = any(
+        any(abs(float(value)) > 1.0e-15 for value in node.mass[:3])
+        for node in project.model.nodes.values()
+    )
+    has_element_mass = any(
+        float(element.mass_per_length) > 1.0e-15
+        for element in project.model.elements.values()
+    )
+    if not has_nodal_mass and not has_element_mass:
+        raise ValueError(
+            "Frame Wizard Modal setup generated no usable translational mass. "
+            "Check the Mass Source, member mass, or floor/slab mass settings."
+        )
+
+    plan = build_modal_template(
+        project,
+        name="Frame Wizard Modal",
+        num_modes=int(spec.modal_num_modes),
+        eigen_solver=str(spec.modal_eigen_solver),
+        require_nodal_mass=False,
+    )
+    project.add_analysis(plan.analysis)
+    for result in plan.results:
+        project.add_solution_result(result)
+    project.set_active_analysis(plan.analysis.tag)
+
+    return {
+        "modal_analyses": 1,
+        "modal_analysis_tag": int(plan.analysis.tag),
+        "modal_results": len(plan.results),
+    }
+
+
+def frame_foundation_count(spec: FrameGridSpec) -> int:
+    """Return the number of base foundation spring connections requested."""
+    if str(spec.foundation_mode or "Direct") != "Springs":
+        return 0
+    if not bool(spec.create_columns):
+        return 0
+    if spec.planar_2d:
+        return int(spec.nx) + 1
+    return (int(spec.nx) + 1) * (int(spec.ny) + 1)
+
+
+def frame_foundation_profiles(
+    spec: FrameGridSpec,
+) -> tuple[tuple[int, ...], ...]:
+    """Return normalized A/B/C equivalent foundation spring profiles."""
+    profiles = tuple(
+        tuple(int(tag) for tag in profile)
+        for profile in spec.foundation_profile_material_tags
+    )
+    if profiles:
+        return profiles
+    return (
+        tuple(int(tag) for tag in spec.foundation_material_tags),
+    )
+
+
+def frame_foundation_profile_assignments(
+    spec: FrameGridSpec,
+) -> tuple[int, ...]:
+    """Return one normalized profile index per frame base, row-major in X/Y."""
+    count = frame_foundation_count(spec)
+    if count <= 0:
+        return ()
+    if str(spec.foundation_assignment_mode or "Uniform") == "PerBase":
+        values = tuple(
+            int(value) for value in spec.foundation_base_profile_indices
+        )
+        if values:
+            return values
+    return (0,) * count
+
+
+def apply_frame_foundation_springs(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Attach frame bases to fixed ground through assigned spring profiles."""
+    validate_frame_grid_spec(spec)
+    if str(spec.foundation_mode or "Direct") != "Springs":
+        return {
+            "foundation_connections": 0,
+            "foundation_ground_nodes": 0,
+            "foundation_constraints": 0,
+            "foundation_profiles_used": 0,
+        }
+
+    model = project.model
+    if (int(model.ndm), int(model.ndf)) != (3, 6):
+        raise ValueError(
+            "Foundation springs require the standard 3D/6DOF frame backend."
+        )
+
+    profiles = frame_foundation_profiles(spec)
+    assignments = frame_foundation_profile_assignments(spec)
+    active_dofs = (
+        (1, 3, 5)
+        if spec.planar_2d
+        else (1, 2, 3, 4, 5, 6)
+    )
+
+    used_profile_indices = sorted(set(assignments))
+    missing = sorted({
+        int(tag)
+        for profile_index in used_profile_indices
+        for dof, tag in enumerate(
+            profiles[profile_index],
+            start=1,
+        )
+        if (
+            dof in active_dofs
+            and int(tag) > 0
+            and int(tag) not in project.materials
+        )
+    })
+    if missing:
+        raise ValueError(
+            "Foundation spring material tag(s) do not exist: "
+            + ", ".join(map(str, missing))
+        )
+
+    if spec.planar_2d:
+        base_nodes = [
+            _frame_center_node_tag(spec, i, 0, 0)
+            for i in range(int(spec.nx) + 1)
+        ]
+    else:
+        base_nodes = [
+            _frame_center_node_tag(spec, i, j, 0)
+            for j in range(int(spec.ny) + 1)
+            for i in range(int(spec.nx) + 1)
+        ]
+
+    next_node_tag = max(model.nodes, default=0) + 1
+    next_connection_tag = max(
+        max(model.elements, default=0),
+        max(project.connections, default=0),
+    ) + 1
+    next_constraint_tag = max(project.constraints, default=0) + 1
+    connection_count = 0
+    constraint_count = 0
+
+    for base_index, base_tag in enumerate(base_nodes):
+        base = model.nodes.get(int(base_tag))
+        if base is None:
+            continue
+
+        profile_index = int(assignments[base_index])
+        material_tags = profiles[profile_index]
+        spring_materials = {
+            dof: int(material_tags[dof - 1])
+            for dof in active_dofs
+            if int(material_tags[dof - 1]) > 0
+        }
+        profile_label = chr(ord("A") + profile_index)
+
+        if spec.planar_2d:
+            model.set_fixity(base_tag, (0, 1, 0, 1, 0, 1))
+        else:
+            model.set_fixity(base_tag, (0, 0, 0, 0, 0, 0))
+
+        ground_tag = next_node_tag
+        next_node_tag += 1
+        model.add_node(
+            ground_tag,
+            float(base.xyz[0]),
+            float(base.xyz[1]),
+            float(base.xyz[2]),
+            ndf=6,
+        )
+        model.set_fixity(ground_tag, (1, 1, 1, 1, 1, 1))
+
+        rigid_dofs = tuple(
+            dof for dof in active_dofs
+            if dof not in spring_materials
+        )
+        generated_constraint_tag = None
+        if rigid_dofs:
+            constraint = ConstraintData(
+                tag=next_constraint_tag,
+                name=(
+                    f"Foundation rigid transfer {profile_label} N{base_tag}"
+                ),
+                constraint_type="equalDOF",
+                retained_node=ground_tag,
+                constrained_nodes=[base_tag],
+                dofs=rigid_dofs,
+            )
+            project.add_constraint(constraint)
+            generated_constraint_tag = int(constraint.tag)
+            next_constraint_tag += 1
+            constraint_count += 1
+
+        connection = ConnectionData(
+            tag=next_connection_tag,
+            name=(
+                f"Foundation spring {profile_label} N{base_tag}"
+            ),
+            connection_type="zeroLength",
+            node_i=ground_tag,
+            node_j=base_tag,
+            materials_by_dof=dict(spring_materials),
+            generated_ground_node=ground_tag,
+            generated_constraint_tag=generated_constraint_tag,
+            parameters={
+                "foundation_profile_index": profile_index,
+                "foundation_profile_label": profile_label,
+            },
+        )
+        project.add_connection(connection)
+        next_connection_tag += 1
+        connection_count += 1
+
+    return {
+        "foundation_connections": connection_count,
+        "foundation_ground_nodes": connection_count,
+        "foundation_constraints": constraint_count,
+        "foundation_profiles_used": len(used_profile_indices),
+    }
+
+
+def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int | float]:
+    """Replace model-linked project data with one Frame Wizard model."""
+    validate_frame_grid_spec(spec)
+    project.clear_model_linked_data()
+    joint_model = str(spec.joint_model or "None")
+    if joint_model in {
+        "Joint2D",
+        "BeamColumnJoint",
+        "KrawinklerPanelZone",
+    }:
+        return generate_frame_macro_joint_project(project, spec)
+
+    # Standard/zeroLength modes retain FEWIZ's 3D/6DOF frame backend.
+    project.model.ndm = 3
+    project.model.ndf = 6
+    generate_frame_grid(project.model, spec)
+
+    if joint_model == "ZeroLength":
+        result = apply_frame_zero_length_joints(project, spec)
+    else:
+        result = {
+            "joint_nodes": 0,
+            "joint_connections": 0,
+            "duplicate_nodes": 0,
+            "joint_constraints": 0,
+            "panel_external_nodes": 0,
+        }
+
+    floor_mode = str(spec.diaphragm_mode or "None")
+    if floor_mode == "Rigid":
+        result.update(apply_frame_rigid_diaphragms(project, spec))
+    elif floor_mode == "Shell":
+        result.update(apply_frame_shell_slabs(project, spec))
+
+    if str(spec.brace_mode or "None") == "Truss":
+        result.update(apply_frame_bracing(project, spec))
+
+    if str(spec.foundation_mode or "Direct") == "Springs":
+        result.update(apply_frame_foundation_springs(project, spec))
+
+    static_pattern_tag: int | None = None
+    if str(spec.load_mode or "None") == "Static":
+        load_result = apply_frame_static_loads(project, spec)
+        result.update(load_result)
+        tag = int(load_result.get("load_pattern_tag", 0))
+        static_pattern_tag = tag if tag > 0 else None
+
+    if str(spec.mass_source_mode or "None") == "Source":
+        result.update(
+            apply_frame_mass_source(
+                project,
+                spec,
+                static_pattern_tag=static_pattern_tag,
+            )
+        )
+
+    if str(spec.modal_mode or "None") == "Modal":
+        result.update(apply_frame_modal_template(project, spec))
+    return result
 
 
 def material_source_comments(material: MaterialData) -> list[str]:
@@ -272,7 +3287,28 @@ def material_to_openseespy(
     stress = unit_system.stress_from_pa
 
     if material.material_type == "Elastic":
-        return f"ops.uniaxialMaterial('Elastic', {material.tag}, {stress(p['E']):g})"
+        source = material.source if isinstance(material.source, dict) else {}
+        dimensions = source.get("parameter_dimensions", {})
+        stiffness_parameter = (
+            isinstance(dimensions, dict)
+            and str(dimensions.get("E", "")).strip().lower()
+            in {"stiffness", "force_per_length", "force/length"}
+        )
+        if stiffness_parameter:
+            # OpenSees MVLEM/MVLEM_3D feed the shear material a relative
+            # displacement and read its stress as a force. Its tangent is
+            # therefore F/L, not material stress F/L^2.
+            elastic_e = (
+                float(p["E"])
+                * unit_system.length_to_m
+                / unit_system.force_to_n
+            )
+        else:
+            elastic_e = stress(p["E"])
+        return (
+            "ops.uniaxialMaterial('Elastic', "
+            f"{material.tag}, {elastic_e:g})"
+        )
 
     if material.material_type == "Steel01":
         return (
@@ -342,6 +3378,29 @@ def material_to_openseespy(
             f"{material.tag}, {stress(p['fc']):g}, {p['epsc']:g}, "
             f"{p['epscu']:g}, {stress(p['Ec']):g}, {stress(p['fct']):g}, "
             f"{p['et']:g}, {p['beta']:g})"
+        )
+
+    if material.material_type == "ConcreteCM":
+        return (
+            "ops.uniaxialMaterial('ConcreteCM', "
+            f"{material.tag}, {stress(p['fpcc']):g}, {p['epcc']:g}, "
+            f"{stress(p['Ec']):g}, {p['rc']:g}, {p['xcrn']:g}, "
+            f"{stress(p['ft']):g}, {p['et']:g}, {p['rt']:g}, "
+            f"{p['xcrp']:g}, '-GapClose', "
+            f"{int(round(p['GapClose']))})"
+        )
+
+    if material.material_type == "Masonry":
+        return (
+            "ops.uniaxialMaterial('Masonry', "
+            f"{material.tag}, {stress(p['Fm']):g}, {stress(p['Ft']):g}, "
+            f"{p['Um']:g}, {p['Uult']:g}, {p['Ucl']:g}, "
+            f"{stress(p['Emo']):g}, {p['L']:g}, {p['A1']:g}, "
+            f"{p['A2']:g}, {p['D1']:g}, {p['D2']:g}, "
+            f"{p['Ach']:g}, {p['Are']:g}, {p['Ba']:g}, "
+            f"{p['Bch']:g}, {p['Gun']:g}, {p['Gplu']:g}, "
+            f"{p['Gplr']:g}, {p['Exp1']:g}, {p['Exp2']:g}, "
+            f"{int(round(p['IENV']))})"
         )
 
     if material.material_type == "Hysteretic":
@@ -694,6 +3753,26 @@ def nd_material_to_openseespy(
             f"{value('ratio2'):g}, {value('orientation'):g})"
         )
 
+    if material.material_type == "FSAM":
+        return (
+            "ops.nDMaterial('FSAM', "
+            f"{material.tag}, {value('rho'):g}, "
+            f"{int(round(value('sX')))}, {int(round(value('sY')))}, "
+            f"{int(round(value('conc')))}, {value('rouX'):g}, "
+            f"{value('rouY'):g}, {value('nu'):g}, "
+            f"{value('alfadow'):g})"
+        )
+
+    if material.material_type in {
+        "ContactMaterial2D",
+        "ContactMaterial3D",
+    }:
+        return (
+            f"ops.nDMaterial('{material.material_type}', "
+            f"{material.tag}, {value('mu'):g}, {value('G'):g}, "
+            f"{value('c'):g}, {value('t'):g})"
+        )
+
     raise ValueError(
         f"Unsupported nDMaterial type: {material.material_type}"
     )
@@ -809,6 +3888,31 @@ def section_to_openseespy(
             f"{section.tag}, {p['E']:g}, {p['A']:g}, "
             f"{p['Iz']:g}, {p['Iy']:g}, {p['G']:g}, {p['J']:g})"
         ]
+
+    if section.section_type == "FiberInt":
+        n1 = int(round(p["nStrip1"]))
+        n2 = int(round(p["nStrip2"]))
+        n3 = int(round(p["nStrip3"]))
+        lines = [
+            "ops.section('FiberInt', "
+            f"{section.tag}, '-NStrip', "
+            f"{n1}, {p['thick1']:g}, "
+            f"{n2}, {p['thick2']:g}, "
+            f"{n3}, {p['thick3']:g})"
+        ]
+        for fiber in section.fibers:
+            lines.append(
+                "ops.fiber("
+                f"{fiber.y:g}, {fiber.z:g}, {fiber.area:g}, "
+                f"{fiber.material_tag})"
+            )
+        for fiber in section.horizontal_fibers:
+            lines.append(
+                "ops.Hfiber("
+                f"{fiber.y:g}, {fiber.z:g}, {fiber.area:g}, "
+                f"{fiber.material_tag})"
+            )
+        return lines
 
     if section.section_type == "Fiber":
         lines = [
@@ -1223,6 +4327,7 @@ def connection_to_openseespy(
         rigid_i = float(connection.parameters["rigid_I"])
         p = f"_sare_pz_{connection.tag}"
         rayleigh = 1 if connection.do_rayleigh else 0
+        rotation_dof = 6
 
         # The macro follows the Gupta-Krawinkler topology used by the
         # OpenSees panel-zone example: eight very-stiff elastic frame
@@ -1308,7 +4413,7 @@ def connection_to_openseespy(
             (
                 f"ops.element('zeroLength', {connection.tag}, "
                 f"{p}_tlh, {p}_tlv, '-mat', {panel_material}, "
-                f"'-dir', 6, '-doRayleigh', {rayleigh})"
+                f"'-dir', {rotation_dof}, '-doRayleigh', {rayleigh})"
             ),
         ])
 
@@ -2020,6 +5125,7 @@ def analysis_to_openseespy(
     frame_history_tags: list[int] | None = None,
     shell_force_history_tags: list[int] | None = None,
     shell_deformation_history_tags: list[int] | None = None,
+    masonry_history_tags: list[int] | None = None,
     mefi_crack_specs: dict[int, dict[str, object]] | None = None,
     support_node_tags: list[int] | None = None,
     plain_pattern_tags: list[int] | None = None,
@@ -2050,6 +5156,9 @@ def analysis_to_openseespy(
     })
     shell_deformation_history_tags = sorted({
         int(tag) for tag in (shell_deformation_history_tags or [])
+    })
+    masonry_history_tags = sorted({
+        int(tag) for tag in (masonry_history_tags or [])
     })
     mefi_crack_specs = {
         int(tag): dict(spec)
@@ -2120,6 +5229,14 @@ def analysis_to_openseespy(
     }
     shell_deformation_history = {
         str(tag): [] for tag in shell_deformation_history_tags
+    }
+    masonry_history = {
+        str(tag): {
+            "shear": [],
+            "strut_forces": [],
+            "strut_strains": [],
+        }
+        for tag in masonry_history_tags
     }
     system_command = (
         "ops.system('SparseGeneral', '-piv')"
@@ -2217,7 +5334,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm, _norms",
         "",
         "_studio_results = {",
-        "    'schema_version': 13,",
+        "    'schema_version': 14,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -2275,6 +5392,7 @@ def analysis_to_openseespy(
             str(tag): dict(spec)
             for tag, spec in sorted(mefi_crack_specs.items())
         }) + ",",
+        "    'masonry_elements': " + repr(masonry_history_tags) + ",",
         "    'final': {},",
         "    'convergence': {",
         f"        'test': {settings.test!r},",
@@ -2296,6 +5414,7 @@ def analysis_to_openseespy(
         "'element_local_forces': " + repr(frame_force_history) + ", "
         "'shell_section_forces': " + repr(shell_force_history) + ", "
         "'shell_section_deformations': " + repr(shell_deformation_history) + ", "
+        "'masonry': " + repr(masonry_history) + ", "
         "'moment_curvature': {'force': [], 'deformation': []}, "
         "'section_responses': " + repr(section_response_history) + ", "
         "'mefi_panel_strains': " + repr(mefi_panel_history) + ", "
@@ -2321,6 +5440,7 @@ def analysis_to_openseespy(
         f"_studio_frame_history_tags = {frame_history_tags!r}",
         f"_studio_shell_force_history_tags = {shell_force_history_tags!r}",
         f"_studio_shell_deformation_history_tags = {shell_deformation_history_tags!r}",
+        f"_studio_masonry_history_tags = {masonry_history_tags!r}",
         f"_studio_mefi_crack_specs = {mefi_crack_specs!r}",
         f"_studio_support_node_tags = {support_node_tags!r}",
         f"_studio_plain_pattern_tags = {plain_pattern_tags!r}",
@@ -3524,6 +6644,55 @@ def analysis_to_openseespy(
         "        _studio_results['history']['shell_section_deformations']"
         "[str(_studio_element)].append(_studio_average)"
     )
+    lines.append("    for _studio_element in _studio_masonry_history_tags:")
+    lines.append("        _studio_key = str(_studio_element)")
+    lines.append(
+        "        _studio_masonry = "
+        "_studio_results['history']['masonry'][_studio_key]"
+    )
+    lines.append("        try:")
+    lines.append(
+        "            _studio_shear = ops.eleResponse("
+        "_studio_element, 'Shear') or []"
+    )
+    lines.append(
+        "            _studio_shear = [float(v) for v in _studio_shear[:2]]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_shear = []")
+    lines.append("        try:")
+    lines.append(
+        "            _studio_strut_forces = ops.eleResponse("
+        "_studio_element, 'localForce') or []"
+    )
+    lines.append(
+        "            _studio_strut_forces = "
+        "[float(v) for v in _studio_strut_forces[:6]]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_strut_forces = []")
+    lines.append("        try:")
+    lines.append(
+        "            _studio_strut_strains = ops.eleResponse("
+        "_studio_element, 'deformation') or []"
+    )
+    lines.append(
+        "            _studio_strut_strains = "
+        "[float(v) for v in _studio_strut_strains[:6]]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_strut_strains = []")
+    lines.append(
+        "        _studio_masonry['shear'].append(_studio_shear)"
+    )
+    lines.append(
+        "        _studio_masonry['strut_forces'].append("
+        "_studio_strut_forces)"
+    )
+    lines.append(
+        "        _studio_masonry['strut_strains'].append("
+        "_studio_strut_strains)"
+    )
     lines.append(
         "    for _studio_mefi_tag, _studio_mefi_spec in "
         "_studio_mefi_crack_specs.items():"
@@ -4074,6 +7243,37 @@ def analysis_to_openseespy(
         "        'section_tag': _studio_section_tag,",
         "        'sections': _studio_sections,",
         "    }",
+        "_studio_masonry_responses = {}",
+        "for _studio_element in _studio_masonry_history_tags:",
+        "    _studio_key = str(_studio_element)",
+        "    try:",
+        "        _studio_shear = ops.eleResponse(_studio_element, 'Shear') or []",
+        "        _studio_shear = [float(v) for v in _studio_shear[:2]]",
+        "    except Exception:",
+        "        _studio_shear = []",
+        "    try:",
+        "        _studio_strut_forces = ops.eleResponse(",
+        "            _studio_element, 'localForce'",
+        "        ) or []",
+        "        _studio_strut_forces = [",
+        "            float(v) for v in _studio_strut_forces[:6]",
+        "        ]",
+        "    except Exception:",
+        "        _studio_strut_forces = []",
+        "    try:",
+        "        _studio_strut_strains = ops.eleResponse(",
+        "            _studio_element, 'deformation'",
+        "        ) or []",
+        "        _studio_strut_strains = [",
+        "            float(v) for v in _studio_strut_strains[:6]",
+        "        ]",
+        "    except Exception:",
+        "        _studio_strut_strains = []",
+        "    _studio_masonry_responses[_studio_key] = {",
+        "        'shear': _studio_shear,",
+        "        'strut_forces': _studio_strut_forces,",
+        "        'strut_strains': _studio_strut_strains,",
+        "    }",
         "_studio_load_factors = {}",
         "for _studio_pattern in _studio_plain_pattern_tags:",
         "    try:",
@@ -4091,6 +7291,7 @@ def analysis_to_openseespy(
         "    'shell_section_forces': _studio_shell_section_forces,",
         "    'shell_section_deformations': _studio_shell_section_deformations,",
         "    'mefi_panel_strains': _studio_mefi_panel_strains,",
+        "    'masonry': _studio_masonry_responses,",
         "    'element_fiber_responses': _studio_element_fiber_responses,",
         "    'load_factors': _studio_load_factors,",
         "}",
@@ -4104,6 +7305,12 @@ def transformation_to_openseespy(
     ndm: int = 3,
     model: StructuralModel | None = None,
 ) -> str:
+    if transformation.transformation_type == "LinearInt":
+        if int(ndm) != 2:
+            raise ValueError(
+                "LinearInt geometric transformation is available only in 2D."
+            )
+        return f"ops.geomTransf('LinearInt', {transformation.tag})"
     if int(ndm) == 2:
         return (
             f"ops.geomTransf('{transformation.transformation_type}', "
@@ -4255,6 +7462,33 @@ def build_joint_response_specs(
     }
 
 
+def friction_model_to_openseespy(
+    model: FrictionModelData,
+    units: dict[str, str] | None = None,
+) -> str:
+    p = model.parameters
+    if model.friction_type == "Coulomb":
+        return (
+            "ops.frictionModel('Coulomb', "
+            f"{model.tag}, {float(p['mu']):g})"
+        )
+    if model.friction_type == "VelDependent":
+        unit_system = UnitSystem.from_mapping(units)
+        trans_rate = (
+            float(p["transRate"])
+            * unit_system.length_to_m
+            / unit_system.time_to_s
+        )
+        return (
+            "ops.frictionModel('VelDependent', "
+            f"{model.tag}, {float(p['muSlow']):g}, "
+            f"{float(p['muFast']):g}, {trans_rate:g})"
+        )
+    raise ValueError(
+        f"Unsupported friction model type: {model.friction_type}"
+    )
+
+
 def to_openseespy(
     model: StructuralModel,
     materials: dict[int, MaterialData] | None = None,
@@ -4273,6 +7507,7 @@ def to_openseespy(
     units: dict[str, str] | None = None,
     solution_results: dict[int, object] | None = None,
     nd_materials: dict[int, NDMaterialData] | None = None,
+    friction_models: dict[int, FrictionModelData] | None = None,
 ) -> str:
     active_analysis = (
         analyses.get(active_analysis_tag)
@@ -4359,7 +7594,12 @@ def to_openseespy(
                 ) ** 2
                 for index in range(3)
             )
-            if length2 <= 1.0e-24:
+            if (
+                length2 <= 1.0e-24
+                and element.element_type not in (
+                    BEARING_ELEMENT_TYPES | CONTACT_TWO_NODE_ELEMENT_TYPES
+                )
+            ):
                 geometry_reference_errors.append(
                     f"element {element.tag} -> zero length"
                 )
@@ -4431,6 +7671,28 @@ def to_openseespy(
                 + ", ".join(map(str, missing))
             )
 
+    nd_material_catalog = set(nd_materials or {})
+    for element in model.elements.values():
+        if element.element_type in BEAM_CONTACT_ELEMENT_TYPES:
+            nd_tag = int(element.special_parameters["nd_material_tag"])
+            if nd_tag not in nd_material_catalog:
+                material_reference_errors.append(
+                    f"{element.element_type} element {element.tag} "
+                    f"-> missing nDMaterial {nd_tag}"
+                )
+            if (
+                element.element_type == "BeamContact3D"
+                and (
+                    transformations is None
+                    or int(element.special_parameters["transf_tag"])
+                    not in transformations
+                )
+            ):
+                material_reference_errors.append(
+                    f"BeamContact3D element {element.tag} -> missing "
+                    f"transformation {element.special_parameters['transf_tag']}"
+                )
+
     for section in (sections or {}).values():
         referenced_materials: set[int] = set()
         if section.material_tag is not None:
@@ -4458,6 +7720,54 @@ def to_openseespy(
                 f"truss element {element.tag} -> missing material "
                 f"{element.truss_material_tag}"
             )
+        if element.element_type == "elastomericBearingPlasticity":
+            referenced = {
+                int(value)
+                for key in (
+                    "p_mat_tag", "t_mat_tag", "my_mat_tag", "mz_mat_tag"
+                )
+                for value in [element.special_parameters.get(key)]
+                if value is not None
+            }
+            missing = sorted(
+                tag for tag in referenced
+                if material_catalog is not None and tag not in material_catalog
+            )
+            if missing:
+                material_reference_errors.append(
+                    f"bearing element {element.tag} -> missing material "
+                    + ", ".join(map(str, missing))
+                )
+        if element.element_type == "TripleFrictionPendulum":
+            referenced = {
+                int(element.special_parameters[key])
+                for key in (
+                    "vertMatTag", "rotZMatTag",
+                    "rotXMatTag", "rotYMatTag",
+                )
+            }
+            missing = sorted(
+                tag for tag in referenced
+                if material_catalog is None or tag not in material_catalog
+            )
+            if missing:
+                material_reference_errors.append(
+                    f"TripleFrictionPendulum element {element.tag} "
+                    "-> missing material "
+                    + ", ".join(map(str, missing))
+                )
+            friction_catalog = set(friction_models or {})
+            missing_friction = sorted(
+                int(element.special_parameters[key])
+                for key in ("frnTag1", "frnTag2", "frnTag3")
+                if int(element.special_parameters[key]) not in friction_catalog
+            )
+            if missing_friction:
+                material_reference_errors.append(
+                    f"TripleFrictionPendulum element {element.tag} "
+                    "-> missing friction model "
+                    + ", ".join(map(str, missing_friction))
+                )
 
     for connection in (connections or {}).values():
         missing = sorted({
@@ -4497,8 +7807,10 @@ def to_openseespy(
     )
     frame_element_types = {
         "elasticBeamColumn",
+        "ElasticTimoshenkoBeam",
         "forceBeamColumn",
         "dispBeamColumn",
+        "dispBeamColumnInt",
     }
     for element in model.elements.values():
         if element.element_type not in frame_element_types:
@@ -5203,11 +8515,24 @@ def to_openseespy(
         "# Nodes",
     ]
 
+    current_ndf = int(model.ndf)
     for tag in sorted(model.nodes):
         node = model.nodes[tag]
+        node_ndf = int(node.ndf)
+        if node_ndf != current_ndf:
+            lines.append(
+                f"ops.model('basic', '-ndm', {model.ndm}, "
+                f"'-ndf', {node_ndf})"
+            )
+            current_ndf = node_ndf
         coordinates = tuple(node.xyz[:model.ndm])
         coordinate_text = ", ".join(f"{value:g}" for value in coordinates)
         lines.append(f"ops.node({tag}, {coordinate_text})")
+    if current_ndf != int(model.ndf):
+        lines.append(
+            f"ops.model('basic', '-ndm', {model.ndm}, "
+            f"'-ndf', {model.ndf})"
+        )
 
     mass_nodes = [
         tag for tag, node in model.nodes.items()
@@ -5218,7 +8543,7 @@ def to_openseespy(
         for tag in sorted(mass_nodes):
             mass = ", ".join(
                 f"{value:g}"
-                for value in model.nodes[tag].mass[:model.ndf]
+                for value in model.nodes[tag].mass[:int(model.nodes[tag].ndf)]
             )
             lines.append(f"ops.mass({tag}, {mass})")
 
@@ -5227,7 +8552,7 @@ def to_openseespy(
         node = model.nodes[tag]
         if any(node.fixity):
             fix = ", ".join(
-                str(v) for v in node.fixity[:model.ndf]
+                str(v) for v in node.fixity[:int(node.ndf)]
             )
             lines.append(f"ops.fix({tag}, {fix})")
 
@@ -5242,6 +8567,16 @@ def to_openseespy(
             material = materials[tag]
             lines.extend(material_source_comments(material))
             lines.append(material_to_openseespy(material, units))
+
+    if friction_models:
+        lines.extend(["", "# Friction models"])
+        for tag in sorted(friction_models):
+            lines.append(
+                friction_model_to_openseespy(
+                    friction_models[tag],
+                    units,
+                )
+            )
 
     if nd_materials:
         lines.extend(["", "# nD Materials"])
@@ -5285,6 +8620,260 @@ def to_openseespy(
     ])
     for tag in sorted(model.elements):
         e = model.elements[tag]
+
+        if e.element_type == "zeroLengthContact2D":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            kn = float(p["Kn"]) * u.length_to_m / u.force_to_n
+            kt = float(p["Kt"]) * u.length_to_m / u.force_to_n
+            nx, ny = (float(value) for value in p["normal"])
+            lines.append(
+                "ops.element('zeroLengthContact2D', "
+                f"{tag}, {e.i}, {e.j}, {kn:g}, {kt:g}, "
+                f"{float(p['mu']):g}, '-normal', {nx:g}, {ny:g})"
+            )
+            continue
+
+        if e.element_type == "zeroLengthContact3D":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            kn = float(p["Kn"]) * u.length_to_m / u.force_to_n
+            kt = float(p["Kt"]) * u.length_to_m / u.force_to_n
+            cohesion = u.force_from_n(float(p["cohesion"]))
+            lines.append(
+                "ops.element('zeroLengthContact3D', "
+                f"{tag}, {e.i}, {e.j}, {kn:g}, {kt:g}, "
+                f"{float(p['mu']):g}, {cohesion:g}, {int(p['dir'])})"
+            )
+            continue
+
+        if e.element_type == "BeamContact2D":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            width = u.length_from_m(float(p["width"]))
+            gtol = u.length_from_m(float(p["gTol"]))
+            ftol = u.force_from_n(float(p["fTol"]))
+            lines.append(
+                "ops.element('BeamContact2D', "
+                f"{tag}, {e.i}, {e.j}, {int(e.k)}, {int(e.l)}, "
+                f"{int(p['nd_material_tag'])}, {width:g}, "
+                f"{gtol:g}, {ftol:g}, {int(p['cFlag'])})"
+            )
+            continue
+
+        if e.element_type == "BeamContact3D":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            radius = u.length_from_m(float(p["radius"]))
+            gtol = u.length_from_m(float(p["gTol"]))
+            ftol = u.force_from_n(float(p["fTol"]))
+            lines.append(
+                "ops.element('BeamContact3D', "
+                f"{tag}, {e.i}, {e.j}, {int(e.k)}, {int(e.l)}, "
+                f"{radius:g}, {int(p['transf_tag'])}, "
+                f"{int(p['nd_material_tag'])}, {gtol:g}, "
+                f"{ftol:g}, {int(p['cFlag'])})"
+            )
+            continue
+
+        if e.element_type in CABLE_ELEMENT_TYPES:
+            p = e.special_parameters
+            unit_system = UnitSystem.from_mapping(units)
+            weight = (
+                float(p["weight"])
+                * unit_system.length_to_m
+                / unit_system.force_to_n
+            )
+            elastic_modulus = unit_system.stress_from_pa(float(p["E"]))
+            area = float(p["A"]) / (unit_system.length_to_m ** 2)
+            unstressed_length = unit_system.length_from_m(float(p["L0"]))
+            rho = (
+                float(p["rho"])
+                * unit_system.length_to_m
+                / unit_system.mass_unit_kg
+            )
+            error_tol = unit_system.length_from_m(float(p["errorTol"]))
+            lines.append(
+                "ops.element('CatenaryCable', "
+                f"{tag}, {e.i}, {e.j}, {weight:g}, "
+                f"{elastic_modulus:g}, {area:g}, {unstressed_length:g}, "
+                f"{float(p['alpha']):g}, "
+                f"{float(p['temperature_change']):g}, {rho:g}, "
+                f"{error_tol:g}, {int(p['Nsubsteps'])}, "
+                f"{int(p['massType'])})"
+            )
+            continue
+
+        if e.element_type == "LeadRubberX":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            fy = u.force_from_n(float(p["Fy"]))
+            gr = u.stress_from_pa(float(p["Gr"]))
+            kbulk = u.stress_from_pa(float(p["Kbulk"]))
+            lengths = [
+                u.length_from_m(float(p[key]))
+                for key in ("D1", "D2", "ts", "tr")
+            ]
+            args = (
+                "ops.element('LeadRubberX', "
+                f"{tag}, {e.i}, {e.j}, {fy:g}, "
+                f"{float(p['alpha']):g}, {gr:g}, {kbulk:g}, "
+                + ", ".join(f"{value:g}" for value in lengths)
+                + f", {int(p['n'])}"
+            )
+            orientation = p.get("orientation")
+            if orientation is not None:
+                args += ", " + ", ".join(
+                    f"{float(value):g}" for value in orientation
+                )
+            mass = float(p["mass"]) / u.mass_unit_kg
+            tc = u.length_from_m(float(p["tc"]))
+            ql = (
+                float(p["qL"])
+                * u.length_to_m**3
+                / u.mass_unit_kg
+            )
+            cl = (
+                float(p["cL"])
+                * u.mass_unit_kg
+                / (u.force_to_n * u.length_to_m)
+            )
+            ks = (
+                float(p["kS"])
+                * u.time_to_s
+                / u.force_to_n
+            )
+            a_s = (
+                float(p["aS"])
+                * u.time_to_s
+                / (u.length_to_m**2)
+            )
+            args += (
+                f", {float(p['kc']):g}, {float(p['PhiM']):g}, "
+                f"{float(p['ac']):g}, {float(p['sDratio']):g}, "
+                f"{mass:g}, {float(p['cd']):g}, {tc:g}, "
+                f"{ql:g}, {cl:g}, {ks:g}, {a_s:g}, "
+                f"{int(p['tag1'])}, {int(p['tag2'])}, "
+                f"{int(p['tag3'])}, {int(p['tag4'])}, "
+                f"{int(p['tag5'])})"
+            )
+            lines.append(args)
+            continue
+
+        if e.element_type == "TripleFrictionPendulum":
+            p = e.special_parameters
+            u = UnitSystem.from_mapping(units)
+            lengths = [
+                u.length_from_m(float(p[key]))
+                for key in ("L1", "L2", "L3", "d1", "d2", "d3")
+            ]
+            w = u.force_from_n(float(p["W"]))
+            uy = u.length_from_m(float(p["uy"]))
+            kvt = (
+                float(p["kvt"])
+                * u.length_to_m
+                / u.force_to_n
+            )
+            min_fv = u.force_from_n(float(p["minFv"]))
+            lines.append(
+                "ops.element('TripleFrictionPendulum', "
+                f"{tag}, {e.i}, {e.j}, "
+                f"{int(p['frnTag1'])}, {int(p['frnTag2'])}, "
+                f"{int(p['frnTag3'])}, {int(p['vertMatTag'])}, "
+                f"{int(p['rotZMatTag'])}, {int(p['rotXMatTag'])}, "
+                f"{int(p['rotYMatTag'])}, "
+                + ", ".join(f"{value:g}" for value in lengths)
+                + f", {w:g}, {uy:g}, {kvt:g}, {min_fv:g}, "
+                f"{float(p['tol']):g})"
+            )
+            continue
+
+        if e.element_type in FRICTION_BEARING_ELEMENT_TYPES:
+            p = e.special_parameters
+            unit_system = UnitSystem.from_mapping(units)
+            k_init = (
+                float(p["kInit"])
+                * unit_system.length_to_m
+                / unit_system.force_to_n
+            )
+            args = (
+                f"ops.element('{e.element_type}', "
+                f"{tag}, {e.i}, {e.j}, {int(p['frn_model_tag'])}, "
+            )
+            if e.element_type == "singleFPBearing":
+                args += (
+                    f"{unit_system.length_from_m(float(p['Reff'])):g}, "
+                )
+            args += (
+                f"{k_init:g}, '-P', {int(p['p_mat_tag'])}"
+            )
+            if int(model.ndm) == 3:
+                args += (
+                    f", '-T', {int(p['t_mat_tag'])}, "
+                    f"'-My', {int(p['my_mat_tag'])}"
+                )
+            args += f", '-Mz', {int(p['mz_mat_tag'])}"
+            orientation = p.get("orientation")
+            if orientation is not None:
+                args += ", '-orient', " + ", ".join(
+                    f"{float(value):g}" for value in orientation
+                )
+            if abs(float(p["shearDist"])) > 1.0e-12:
+                args += f", '-shearDist', {float(p['shearDist']):g}"
+            if bool(p["doRayleigh"]):
+                args += ", '-doRayleigh'"
+            if float(p["mass"]) > 0.0:
+                mass = float(p["mass"]) / unit_system.mass_unit_kg
+                args += f", '-mass', {mass:g}"
+            if (
+                int(p["maxIter"]) != 20
+                or abs(float(p["tol"]) - 1.0e-8) > 1.0e-16
+            ):
+                args += (
+                    f", '-iter', {int(p['maxIter'])}, "
+                    f"{float(p['tol']):g}"
+                )
+            args += ")"
+            lines.append(args)
+            continue
+
+        if e.element_type == "elastomericBearingPlasticity":
+            p = e.special_parameters
+            unit_system = UnitSystem.from_mapping(units)
+            k_init = (
+                float(p["kInit"])
+                * unit_system.length_to_m
+                / unit_system.force_to_n
+            )
+            qd = unit_system.force_from_n(float(p["qd"]))
+            args = (
+                "ops.element('elastomericBearingPlasticity', "
+                f"{tag}, {e.i}, {e.j}, {k_init:g}, {qd:g}, "
+                f"{float(p['alpha1']):g}, {float(p['alpha2']):g}, "
+                f"{float(p['mu']):g}, '-P', {int(p['p_mat_tag'])}"
+            )
+            if int(model.ndm) == 3:
+                args += (
+                    f", '-T', {int(p['t_mat_tag'])}, "
+                    f"'-My', {int(p['my_mat_tag'])}"
+                )
+            args += f", '-Mz', {int(p['mz_mat_tag'])}"
+            orientation = p.get("orientation")
+            if orientation is not None:
+                values = tuple(float(value) for value in orientation)
+                args += ", '-orient', " + ", ".join(
+                    f"{value:g}" for value in values
+                )
+            if abs(float(p["shearDist"]) - 0.5) > 1.0e-12:
+                args += f", '-shearDist', {float(p['shearDist']):g}"
+            if bool(p["doRayleigh"]):
+                args += ", '-doRayleigh'"
+            if float(p["mass"]) > 0.0:
+                mass = float(p["mass"]) / unit_system.mass_unit_kg
+                args += f", '-mass', {mass:g}"
+            args += ")"
+            lines.append(args)
+            continue
 
         if e.element_type in EMBEDDED_ELEMENT_TYPES:
             if e.k is None or e.l is None:
@@ -5363,6 +8952,214 @@ def to_openseespy(
             )
             continue
 
+        if e.element_type in WALL_MACRO_ELEMENT_TYPES:
+            m = len(e.wall_widths)
+            thick = ", ".join(
+                f"{float(value):g}" for value in e.wall_thicknesses
+            )
+            widths = ", ".join(
+                f"{float(value):g}" for value in e.wall_widths
+            )
+            if e.element_type == "SFI_MVLEM":
+                missing = [
+                    int(mat_tag)
+                    for mat_tag in e.wall_nd_material_tags
+                    if nd_materials is None or int(mat_tag) not in nd_materials
+                ]
+                if missing:
+                    lines.append(
+                        f"# ERROR: SFI_MVLEM element {tag} references "
+                        "missing nDMaterial tag(s) "
+                        + ", ".join(map(str, sorted(set(missing))))
+                        + "; element not generated."
+                    )
+                    continue
+                mats = ", ".join(
+                    str(int(value)) for value in e.wall_nd_material_tags
+                )
+                lines.append(
+                    "ops.element('SFI_MVLEM', "
+                    f"{tag}, {e.i}, {e.j}, {m}, "
+                    f"{e.wall_center_ratio:g}, '-thick', {thick}, "
+                    f"'-width', {widths}, '-mat', {mats})"
+                )
+                continue
+
+            direct_tags = {*e.wall_concrete_tags, *e.wall_steel_tags}
+            if e.wall_shear_tag is not None:
+                direct_tags.add(int(e.wall_shear_tag))
+            missing = [
+                int(mat_tag)
+                for mat_tag in direct_tags
+                if materials is None or int(mat_tag) not in materials
+            ]
+            if missing:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} references "
+                    "missing uniaxial material tag(s) "
+                    + ", ".join(map(str, sorted(set(missing))))
+                    + "; element not generated."
+                )
+                continue
+            rhos = ", ".join(f"{float(value):g}" for value in e.wall_rhos)
+            concrete = ", ".join(
+                str(int(value)) for value in e.wall_concrete_tags
+            )
+            steel = ", ".join(
+                str(int(value)) for value in e.wall_steel_tags
+            )
+            if e.element_type == "MVLEM":
+                lines.append(
+                    "ops.element('MVLEM', "
+                    f"{tag}, {e.wall_density:g}, {e.i}, {e.j}, "
+                    f"{m}, {e.wall_center_ratio:g}, "
+                    f"'-thick', {thick}, '-width', {widths}, "
+                    f"'-rho', {rhos}, '-matConcrete', {concrete}, "
+                    f"'-matSteel', {steel}, '-matShear', "
+                    f"{int(e.wall_shear_tag)})"
+                )
+            else:
+                if e.k is None or e.l is None:
+                    lines.append(
+                        f"# ERROR: MVLEM_3D element {tag} is missing "
+                        "K/L nodes; element not generated."
+                    )
+                    continue
+                lines.append(
+                    "ops.element('MVLEM_3D', "
+                    f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, {m}, "
+                    f"'-thick', {thick}, '-width', {widths}, "
+                    f"'-rho', {rhos}, '-matConcrete', {concrete}, "
+                    f"'-matSteel', {steel}, '-matShear', "
+                    f"{int(e.wall_shear_tag)}, '-CoR', "
+                    f"{e.wall_center_ratio:g}, '-ThickMod', "
+                    f"{e.wall_thick_mod:g}, '-Poisson', "
+                    f"{e.wall_poisson:g}, '-Density', "
+                    f"{e.wall_density:g})"
+                )
+            continue
+
+        if e.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
+            if e.k is None or e.l is None:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} is missing "
+                    "K/L nodes; element not generated."
+                )
+                continue
+            if e.continuum_material_tag is None:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} has no "
+                    "nDMaterial assigned; element not generated."
+                )
+                continue
+            if (
+                nd_materials is None
+                or int(e.continuum_material_tag) not in nd_materials
+            ):
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} references "
+                    f"missing nDMaterial {e.continuum_material_tag}; "
+                    "element not generated."
+                )
+                continue
+            b1, b2 = e.continuum_body_force
+            if e.element_type == "quad":
+                args = (
+                    "ops.element('quad', "
+                    f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, "
+                    f"{e.continuum_thickness:g}, "
+                    f"'{e.continuum_type}', "
+                    f"{e.continuum_material_tag}"
+                )
+                if any((
+                    abs(float(e.continuum_pressure)) > 0.0,
+                    abs(float(e.continuum_density)) > 0.0,
+                    abs(float(b1)) > 0.0,
+                    abs(float(b2)) > 0.0,
+                )):
+                    args += (
+                        f", {e.continuum_pressure:g}, "
+                        f"{e.continuum_density:g}, "
+                        f"{b1:g}, {b2:g}"
+                    )
+                args += ")"
+                lines.append(args)
+            elif e.element_type == "SSPquad":
+                lines.append(
+                    "ops.element('SSPquad', "
+                    f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, "
+                    f"{e.continuum_material_tag}, "
+                    f"'{e.continuum_type}', "
+                    f"{e.continuum_thickness:g}, {b1:g}, {b2:g})"
+                )
+            elif e.element_type == "bbarQuad":
+                lines.append(
+                    "ops.element('bbarQuad', "
+                    f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, "
+                    f"{e.continuum_thickness:g}, "
+                    f"{e.continuum_material_tag})"
+                )
+            else:
+                lines.append(
+                    "ops.element('enhancedQuad', "
+                    f"{tag}, {e.i}, {e.j}, {e.k}, {e.l}, "
+                    f"{e.continuum_thickness:g}, "
+                    f"'{e.continuum_type}', "
+                    f"{e.continuum_material_tag})"
+                )
+            continue
+
+        if e.element_type in MASONRY_PANEL_ELEMENT_TYPES:
+            node_tags = e.node_tags()
+            if len(node_tags) != 12:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} requires "
+                    "twelve nodes; element not generated."
+                )
+                continue
+            p = e.special_parameters
+            node_args = ", ".join(str(int(value)) for value in node_tags)
+            lines.append(
+                "ops.element('MasonPan12', "
+                f"{tag}, {node_args}, "
+                f"{int(p['mat_1'])}, {int(p['mat_2'])}, "
+                f"{float(p['thick']):g}, {float(p['w_tot']):g}, "
+                f"{float(p['w_1']):g})"
+            )
+            continue
+
+        if e.element_type in SOLID_ELEMENT_TYPES:
+            node_tags = e.node_tags()
+            if len(node_tags) != 8:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} is missing "
+                    "brick nodes; element not generated."
+                )
+                continue
+            if e.solid_material_tag is None:
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} has no "
+                    "nDMaterial assigned; element not generated."
+                )
+                continue
+            if (
+                nd_materials is None
+                or int(e.solid_material_tag) not in nd_materials
+            ):
+                lines.append(
+                    f"# ERROR: {e.element_type} element {tag} references "
+                    f"missing nDMaterial {e.solid_material_tag}; "
+                    "element not generated."
+                )
+                continue
+            nodes = ", ".join(str(int(value)) for value in node_tags)
+            b1, b2, b3 = e.solid_body_force
+            lines.append(
+                f"ops.element('{e.element_type}', {tag}, {nodes}, "
+                f"{e.solid_material_tag}, {b1:g}, {b2:g}, {b3:g})"
+            )
+            continue
+
         if e.element_type in SHELL_ELEMENT_TYPES:
             if e.section_tag is None:
                 lines.append(
@@ -5416,38 +9213,74 @@ def to_openseespy(
             continue
 
         if e.element_type in TRUSS_ELEMENT_TYPES:
-            if e.truss_area <= 0.0:
-                lines.append(
-                    f"# ERROR: Truss element {tag} has non-positive area; "
-                    "element not generated."
+            if e.element_type in TRUSS_SECTION_ELEMENT_TYPES:
+                if e.section_tag is None:
+                    lines.append(
+                        f"# ERROR: {e.element_type} element {tag} has no "
+                        "section assigned; element not generated."
+                    )
+                    continue
+                assigned_section = (
+                    sections.get(int(e.section_tag))
+                    if sections is not None
+                    else None
                 )
-                continue
-            if e.truss_material_tag is None:
-                lines.append(
-                    f"# ERROR: Truss element {tag} has no material assigned; "
-                    "element not generated."
+                if assigned_section is None:
+                    lines.append(
+                        f"# ERROR: {e.element_type} element {tag} references "
+                        f"missing section {e.section_tag}; element not generated."
+                    )
+                    continue
+                if assigned_section.section_type in (
+                    SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES
+                ):
+                    lines.append(
+                        f"# ERROR: {e.element_type} element {tag} cannot use "
+                        f"shell section {e.section_tag}; element not generated."
+                    )
+                    continue
+                command = (
+                    "TrussSection"
+                    if e.element_type == "trussSection"
+                    else "corotTrussSection"
                 )
-                continue
-            if (
-                materials is None
-                or e.truss_material_tag not in materials
-            ):
-                lines.append(
-                    f"# ERROR: Truss element {tag} references missing material "
-                    f"{e.truss_material_tag}; element not generated."
+                args = (
+                    f"ops.element('{command}', "
+                    f"{tag}, {e.i}, {e.j}, {int(e.section_tag)}"
                 )
-                continue
+            else:
+                if e.truss_area <= 0.0:
+                    lines.append(
+                        f"# ERROR: Truss element {tag} has non-positive area; "
+                        "element not generated."
+                    )
+                    continue
+                if e.truss_material_tag is None:
+                    lines.append(
+                        f"# ERROR: Truss element {tag} has no material assigned; "
+                        "element not generated."
+                    )
+                    continue
+                if (
+                    materials is None
+                    or e.truss_material_tag not in materials
+                ):
+                    lines.append(
+                        f"# ERROR: Truss element {tag} references missing material "
+                        f"{e.truss_material_tag}; element not generated."
+                    )
+                    continue
 
-            command = (
-                "Truss"
-                if e.element_type == "truss"
-                else "corotTruss"
-            )
-            args = (
-                f"ops.element('{command}', "
-                f"{tag}, {e.i}, {e.j}, {e.truss_area:g}, "
-                f"{e.truss_material_tag}"
-            )
+                command = (
+                    "Truss"
+                    if e.element_type == "truss"
+                    else "corotTruss"
+                )
+                args = (
+                    f"ops.element('{command}', "
+                    f"{tag}, {e.i}, {e.j}, {e.truss_area:g}, "
+                    f"{e.truss_material_tag}"
+                )
             if e.mass_per_length > 0.0:
                 args += f", '-rho', {e.mass_per_length:g}"
             if e.consistent_mass:
@@ -5490,10 +9323,10 @@ def to_openseespy(
             )
             continue
 
-        if e.element_type == "elasticBeamColumn":
+        if e.element_type in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}:
             if assigned_section.section_type != "Elastic":
                 lines.append(
-                    f"# ERROR: elasticBeamColumn element {tag} requires an "
+                    f"# ERROR: {e.element_type} element {tag} requires an "
                     "Elastic section in the current Studio generator; "
                     "element not generated."
                 )
@@ -5503,7 +9336,42 @@ def to_openseespy(
                 materials,
                 units,
             )
-            if int(model.ndm) == 2:
+            if e.element_type == "ElasticTimoshenkoBeam":
+                required = (
+                    ("E", "G", "A", "Iz", "Avy")
+                    if int(model.ndm) == 2
+                    else (
+                        "E", "G", "A", "J", "Iy", "Iz", "Avy", "Avz"
+                    )
+                )
+                invalid = [
+                    key for key in required
+                    if float(p.get(key, 0.0)) <= 0.0
+                ]
+                if invalid:
+                    lines.append(
+                        f"# ERROR: ElasticTimoshenkoBeam element {tag} "
+                        "requires positive Elastic section parameter(s): "
+                        + ", ".join(invalid)
+                        + "; element not generated."
+                    )
+                    continue
+                if int(model.ndm) == 2:
+                    args = (
+                        "ops.element('ElasticTimoshenkoBeam', "
+                        f"{tag}, {e.i}, {e.j}, {p['E']:g}, {p['G']:g}, "
+                        f"{p['A']:g}, {p['Iz']:g}, {p['Avy']:g}, "
+                        f"{transf_tag}"
+                    )
+                else:
+                    args = (
+                        "ops.element('ElasticTimoshenkoBeam', "
+                        f"{tag}, {e.i}, {e.j}, {p['E']:g}, {p['G']:g}, "
+                        f"{p['A']:g}, {p['J']:g}, {p['Iy']:g}, "
+                        f"{p['Iz']:g}, {p['Avy']:g}, {p['Avz']:g}, "
+                        f"{transf_tag}"
+                    )
+            elif int(model.ndm) == 2:
                 args = (
                     "ops.element('elasticBeamColumn', "
                     f"{tag}, {e.i}, {e.j}, {p['A']:g}, {p['E']:g}, "
@@ -5520,6 +9388,38 @@ def to_openseespy(
                 args += f", '-mass', {e.mass_per_length:g}"
                 if e.consistent_mass:
                     args += ", '-cMass'"
+            args += ")"
+            lines.append(args)
+            continue
+
+        if e.element_type == "dispBeamColumnInt":
+            if (int(model.ndm), int(model.ndf)) != (2, 3):
+                lines.append(
+                    f"# ERROR: dispBeamColumnInt element {tag} requires "
+                    "ndm=2/ndf=3; element not generated."
+                )
+                continue
+            if assigned_section.section_type != "FiberInt":
+                lines.append(
+                    f"# ERROR: dispBeamColumnInt element {tag} requires "
+                    "a FiberInt section; element not generated."
+                )
+                continue
+            transformation = transformations.get(transf_tag)
+            if transformation.transformation_type != "LinearInt":
+                lines.append(
+                    f"# ERROR: dispBeamColumnInt element {tag} requires "
+                    "a LinearInt transformation; element not generated."
+                )
+                continue
+            args = (
+                "ops.element('dispBeamColumnInt', "
+                f"{tag}, {e.i}, {e.j}, {e.integration_points}, "
+                f"{assigned_section.tag}, {transf_tag}, "
+                f"{e.beam_center_ratio:g}"
+            )
+            if e.mass_per_length > 0.0:
+                args += f", '-mass', {e.mass_per_length:g}"
             args += ")"
             lines.append(args)
             continue
@@ -6052,6 +9952,12 @@ def to_openseespy(
         frame_history_tags: set[int] = set()
         shell_force_history_tags: set[int] = set()
         shell_deformation_history_tags: set[int] = set()
+        masonry_history_tags: set[int] = set()
+        masonry_tags = {
+            int(tag)
+            for tag, element in model.elements.items()
+            if element.element_type == "MasonPan12"
+        }
         for result_request in (solution_results or {}).values():
             if int(getattr(result_request, "analysis_tag", -1)) != int(active.tag):
                 continue
@@ -6078,6 +9984,14 @@ def to_openseespy(
                 candidates = set(shell_tags)
                 shell_deformation_history_tags.update(
                     (scope & candidates) if scope else candidates
+                )
+            elif result_type in {
+                "MasonryPanelShear",
+                "MasonryStrutForce",
+                "MasonryStrutStrain",
+            }:
+                masonry_history_tags.update(
+                    (scope & masonry_tags) if scope else masonry_tags
                 )
 
         response_spectrum_components = _response_spectrum_sources(
@@ -6107,6 +10021,7 @@ def to_openseespy(
                 shell_deformation_history_tags=sorted(
                     shell_deformation_history_tags
                 ),
+                masonry_history_tags=sorted(masonry_history_tags),
                 mefi_crack_specs=mefi_crack_specs,
                 support_node_tags=support_node_tags,
                 plain_pattern_tags=sorted(

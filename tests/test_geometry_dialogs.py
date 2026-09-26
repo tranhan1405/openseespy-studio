@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
+from openseespy_studio.model import StructuralModel
 from openseespy_studio.project import MaterialData, SectionData, TransformationData
 from openseespy_studio.ui.geometry_dialogs import ElementDialog, TrussDialog
 
@@ -147,5 +148,102 @@ def test_truss_dialog_uses_unit_aware_default_area():
     try:
         # 0.001 m² = 1000 mm².
         assert dialog.area.value() == 1000.0
+    finally:
+        _close(dialog)
+
+
+
+def test_truss_dialog_switches_between_material_and_section_formulations():
+    materials = {
+        4: MaterialData(
+            4,
+            "Truss steel",
+            "Elastic",
+            parameters={"E": 200.0e9},
+        )
+    }
+    sections = {
+        7: SectionData(7, "Axial elastic", "Elastic"),
+        8: SectionData(8, "Axial fiber", "Fiber"),
+        9: SectionData(
+            9,
+            "Shell plate",
+            "ElasticMembranePlate",
+        ),
+    }
+    dialog = TrussDialog(
+        31,
+        node_i=2,
+        node_j=5,
+        materials=materials,
+        sections=sections,
+        units={"length": "m", "force": "N", "time": "s"},
+    )
+    try:
+        assert dialog.formulation.currentData() == "truss"
+        assert dialog.area.isEnabled()
+        assert dialog.material_holder.isEnabled()
+        assert not dialog.section_holder.isEnabled()
+
+        index = dialog.formulation.findData("trussSection")
+        assert index >= 0
+        dialog.formulation.setCurrentIndex(index)
+        _APP.processEvents()
+
+        assert not dialog.area.isEnabled()
+        assert not dialog.material_holder.isEnabled()
+        assert dialog.section_holder.isEnabled()
+        assert dialog.section.findData(7) >= 0
+        assert dialog.section.findData(8) >= 0
+        assert dialog.section.findData(9) < 0
+
+        dialog.section.setCurrentIndex(dialog.section.findData(7))
+        values = dialog.values()
+        assert values[:3] == (31, 2, 5)
+        assert values[3] == 0.0
+        assert values[4] is None
+        assert values[9] == "trussSection"
+        assert values[10] == 7
+    finally:
+        _close(dialog)
+
+
+def test_truss_dialog_edits_existing_section_based_formulation():
+    model = StructuralModel(ndm=2, ndf=2)
+    model.add_node(1, 0.0, 0.0)
+    model.add_node(2, 2.0, 0.0)
+    model.add_element(
+        44,
+        1,
+        2,
+        element_type="corotTrussSection",
+        section_tag=7,
+        group="brace",
+        mass_per_length=3.2,
+        consistent_mass=True,
+        truss_do_rayleigh=True,
+    )
+    sections = {
+        7: SectionData(7, "Axial elastic", "Elastic"),
+    }
+    dialog = TrussDialog(
+        44,
+        materials={},
+        sections=sections,
+        units={"length": "m", "force": "N", "time": "s"},
+        element=model.elements[44],
+    )
+    try:
+        assert not dialog.tag.isEnabled()
+        assert dialog.formulation.currentData() == "corotTrussSection"
+        assert dialog.section.currentData() == 7
+        assert dialog.group.currentText() == "brace"
+        assert dialog.rho.value() == 3.2
+        assert dialog.consistent_mass.isChecked()
+        assert dialog.do_rayleigh.isChecked()
+
+        values = dialog.values()
+        assert values[9] == "corotTrussSection"
+        assert values[10] == 7
     finally:
         _close(dialog)

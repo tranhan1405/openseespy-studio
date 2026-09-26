@@ -8,27 +8,60 @@ from PySide6.QtGui import (
     QColor,
     QIcon,
     QPainter,
-    QPainterPath,
     QPen,
     QPixmap,
+    QPolygonF,
 )
 
 _ICON_DIR = Path(__file__).resolve().parent.parent / "resources" / "icons"
 
 
 def studio_icon(name: str) -> QIcon:
-    """Return a bundled SARE command SVG icon by stem name."""
+    """Return a bundled FEWIZ command SVG icon by stem name."""
     path = _ICON_DIR / f"{name}.svg"
     return QIcon(str(path))
 
 
-def _visual_icon_pixmap(size: int = 256) -> QPixmap:
-    """Draw the SARE application mark using only Qt vector primitives.
+def _node(
+    painter: QPainter,
+    point: QPointF,
+    radius: float,
+    *,
+    fill: QColor,
+    outline: QColor,
+    width: float = 2.5,
+) -> None:
+    painter.setPen(QPen(outline, width))
+    painter.setBrush(QBrush(fill))
+    painter.drawEllipse(point, radius, radius)
 
-    The mark is intentionally simple:
-    - navy structural-response S = SARE / structural analysis
-    - red response curve = earthquake / nonlinear dynamic response
-    - light field = readable at 16 px as well as large splash sizes
+
+def _spark(painter: QPainter, x: float, y: float, color: QColor) -> None:
+    """Draw the small four-point generation spark used by the FEWIZ brand."""
+    path = QPolygonF(
+        [
+            QPointF(x, y - 13),
+            QPointF(x + 4, y - 4),
+            QPointF(x + 13, y),
+            QPointF(x + 4, y + 4),
+            QPointF(x, y + 13),
+            QPointF(x - 4, y + 4),
+            QPointF(x - 13, y),
+            QPointF(x - 4, y - 4),
+        ]
+    )
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(color))
+    painter.drawPolygon(path)
+
+
+def _visual_icon_pixmap(size: int = 256) -> QPixmap:
+    """Draw the FEWIZ mesh-W mark using only Qt vector primitives.
+
+    The full mark is a finite-element ribbon: two node rows, member edges and
+    alternating triangular mesh faces form a W. Blue is the existing/model
+    side, orange is the Wizard-generated side, and a single small spark marks
+    automated generation. At 16-32 px the mesh is intentionally simplified.
     """
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -40,62 +73,124 @@ def _visual_icon_pixmap(size: int = 256) -> QPixmap:
     scale = float(size) / 256.0
     p.scale(scale, scale)
 
-    navy = QColor("#0B315C")
-    navy_dark = QColor("#082643")
-    red = QColor("#E5252A")
-    field = QColor("#F7FAFC")
-    border = QColor("#DCE5EE")
+    navy = QColor("#0A2E55")
+    blue = QColor("#0B5DAA")
+    cyan = QColor("#2D86D1")
+    orange = QColor("#F28C00")
+    orange_dark = QColor("#C96E00")
+    white = QColor("#FFFFFF")
+    face_blue = QColor(65, 139, 202, 72)
+    face_orange = QColor(242, 140, 0, 70)
 
-    # Quiet engineering-style field. No gradients are used so the icon
-    # remains crisp and reproducible across platforms and DPI settings.
-    p.setPen(QPen(border, 2.0))
-    p.setBrush(QBrush(field))
-    p.drawRoundedRect(QRectF(12, 12, 232, 232), 42, 42)
+    # Dark engineering field, matching the selected app-icon family.
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(navy))
+    p.drawRoundedRect(QRectF(10, 10, 236, 236), 44, 44)
 
-    # Geometric S mark. A single heavy centreline is deliberately used
-    # instead of a font glyph so branding is independent of installed fonts.
-    s_path = QPainterPath()
-    s_path.moveTo(190, 66)
-    s_path.cubicTo(164, 48, 92, 48, 68, 70)
-    s_path.cubicTo(45, 91, 55, 118, 82, 124)
-    s_path.cubicTo(106, 129, 155, 123, 180, 138)
-    s_path.cubicTo(207, 154, 202, 185, 178, 199)
-    s_path.cubicTo(151, 216, 86, 212, 61, 193)
+    top = [
+        QPointF(42, 64),
+        QPointF(77, 150),
+        QPointF(124, 92),
+        QPointF(164, 150),
+        QPointF(205, 62),
+    ]
+    bottom = [
+        QPointF(59, 84),
+        QPointF(92, 176),
+        QPointF(130, 120),
+        QPointF(180, 176),
+        QPointF(220, 82),
+    ]
 
-    s_pen = QPen(navy, 32.0)
-    s_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    s_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    p.setPen(s_pen)
-    p.setBrush(Qt.BrushStyle.NoBrush)
-    p.drawPath(s_path)
+    if size <= 32:
+        # Small-size glyph: preserve the same silhouette without tiny mesh.
+        center = [
+            QPointF(50, 70),
+            QPointF(85, 169),
+            QPointF(127, 106),
+            QPointF(172, 169),
+            QPointF(213, 70),
+        ]
+        left_pen = QPen(white, 14.0)
+        left_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        left_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(left_pen)
+        for a, b in zip(center[:3], center[1:4]):
+            p.drawLine(a, b)
+        right_pen = QPen(orange, 14.0)
+        right_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        right_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(right_pen)
+        p.drawLine(center[3], center[4])
+        for point in center[:4]:
+            _node(p, point, 7.0, fill=white, outline=white, width=1.0)
+        _node(p, center[4], 7.0, fill=orange, outline=orange, width=1.0)
+        p.end()
+        return pixmap
 
-    # Small darker terminal accents give a structural/member feel.
-    accent_pen = QPen(navy_dark, 7.0)
-    accent_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    p.setPen(accent_pen)
-    p.drawLine(QPointF(167, 58), QPointF(192, 68))
-    p.drawLine(QPointF(60, 192), QPointF(84, 203))
+    # Alternating triangular faces make the W read as an FE mesh, not a logo
+    # made from generic connected dots.
+    p.setPen(Qt.PenStyle.NoPen)
+    for i in range(4):
+        fill = face_blue if i < 2 else face_orange
+        p.setBrush(QBrush(fill))
+        if i % 2 == 0:
+            p.drawPolygon(QPolygonF([top[i], bottom[i], top[i + 1]]))
+            p.drawPolygon(
+                QPolygonF([bottom[i], bottom[i + 1], top[i + 1]])
+            )
+        else:
+            p.drawPolygon(QPolygonF([top[i], bottom[i], bottom[i + 1]]))
+            p.drawPolygon(
+                QPolygonF([top[i], bottom[i + 1], top[i + 1]])
+            )
 
-    # Response/deformation curve crossing the S. At large size it reads as
-    # seismic response; at small size it remains a clean red deformation arc.
-    response = QPainterPath()
-    response.moveTo(38, 154)
-    response.cubicTo(69, 154, 84, 151, 104, 136)
-    response.cubicTo(119, 124, 129, 111, 143, 116)
-    response.cubicTo(156, 120, 163, 143, 178, 150)
-    response.cubicTo(190, 156, 204, 155, 218, 153)
+    # Edge rows: white/blue on the existing-model half and orange on the
+    # Wizard-generated half.
+    for row in (top, bottom):
+        for i in range(4):
+            color = white if i < 2 else orange
+            pen = QPen(color, 5.2)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
+            p.drawLine(row[i], row[i + 1])
 
-    response_pen = QPen(red, 9.0)
-    response_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    response_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    p.setPen(response_pen)
-    p.drawPath(response)
+    # Cross-members and panel diagonals.
+    for i in range(5):
+        color = cyan if i < 3 else orange_dark
+        p.setPen(QPen(color, 3.3))
+        p.drawLine(top[i], bottom[i])
+    for i in range(4):
+        color = cyan if i < 2 else orange_dark
+        p.setPen(QPen(color, 3.0))
+        if i % 2 == 0:
+            p.drawLine(bottom[i], top[i + 1])
+        else:
+            p.drawLine(top[i], bottom[i + 1])
 
+    # Nodes: model side uses white/blue, generated side orange.
+    for i, point in enumerate(top + bottom):
+        original_index = i if i < 5 else i - 5
+        if original_index < 3:
+            _node(p, point, 5.2, fill=white, outline=blue, width=2.2)
+        else:
+            _node(
+                p,
+                point,
+                5.2,
+                fill=orange,
+                outline=orange_dark,
+                width=2.0,
+            )
+
+    _spark(p, 218, 43, orange)
     p.end()
     return pixmap
 
+
 def create_visual_icon(size: int = 256) -> QIcon:
-    """Return the SARE icon at the requested size."""
+    """Return the FEWIZ icon at the requested size."""
     return QIcon(_visual_icon_pixmap(size))
 
 

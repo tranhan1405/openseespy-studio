@@ -327,11 +327,28 @@ class LineGeometryDialog(QDialog):
         recipe_form.addRow("Beam integration:", self.integration)
 
         self.integration_points = QSpinBox()
-        self.integration_points.setRange(2, 20)
+        self.integration_points.setRange(1, 20)
         self.integration_points.setValue(
             line.integration_points if line else 5
         )
         recipe_form.addRow("Integration points:", self.integration_points)
+
+        self.center_rotation = _float_spin(
+            line.center_rotation if line else 0.4,
+            low=0.0,
+            high=1.0,
+        )
+        self.center_rotation.setToolTip(
+            "dispBeamColumnInt center-of-rotation ratio cRot (0..1)."
+        )
+        recipe_form.addRow("cRot (dispBeamColumnInt):", self.center_rotation)
+
+        self.formulation_note = QLabel()
+        self.formulation_note.setWordWrap(True)
+        self.formulation_note.setStyleSheet(
+            "padding: 6px; background: #f3f6f9; color: #526476;"
+        )
+        recipe_form.addRow("", self.formulation_note)
 
         self.mass_per_length = _float_spin(
             line.mass_per_length if line else 0.0,
@@ -382,8 +399,10 @@ class LineGeometryDialog(QDialog):
         root.addWidget(buttons)
 
         self.family.currentTextChanged.connect(self._sync_family)
+        self.frame_type.currentTextChanged.connect(self._sync_frame_type)
         self.mesh_mode.currentIndexChanged.connect(self._sync_mesh)
         self._sync_family()
+        self._sync_frame_type()
         self._sync_mesh()
 
     @staticmethod
@@ -401,8 +420,24 @@ class LineGeometryDialog(QDialog):
         wanted = select_tag if select_tag is not None else current
         self.section.clear()
         self.section.addItem("Select Section...", None)
+        formulation = (
+            self.frame_type.currentText()
+            if hasattr(self, "frame_type")
+            else "elasticBeamColumn"
+        )
         for tag in sorted(self._sections):
             section = self._sections[tag]
+            if (
+                formulation
+                in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
+                and section.section_type != "Elastic"
+            ):
+                continue
+            if (
+                formulation == "dispBeamColumnInt"
+                and section.section_type != "FiberInt"
+            ):
+                continue
             self.section.addItem(
                 f"{tag} - {section.name} ({section.section_type})",
                 int(tag),
@@ -421,8 +456,23 @@ class LineGeometryDialog(QDialog):
         wanted = select_tag if select_tag is not None else current
         self.transformation.clear()
         self.transformation.addItem("Select Transformation...", None)
+        formulation = (
+            self.frame_type.currentText()
+            if hasattr(self, "frame_type")
+            else "elasticBeamColumn"
+        )
         for tag in sorted(self._transformations):
             transformation = self._transformations[tag]
+            if (
+                formulation == "dispBeamColumnInt"
+                and transformation.transformation_type != "LinearInt"
+            ):
+                continue
+            if (
+                formulation != "dispBeamColumnInt"
+                and transformation.transformation_type == "LinearInt"
+            ):
+                continue
             self.transformation.addItem(
                 f"{tag} - {transformation.name} "
                 f"({transformation.transformation_type})",
@@ -480,6 +530,7 @@ class LineGeometryDialog(QDialog):
             self.transformation_new,
             self.integration,
             self.integration_points,
+            self.center_rotation,
         ):
             widget.setEnabled(frame)
         for widget in (
@@ -489,6 +540,54 @@ class LineGeometryDialog(QDialog):
             self.do_rayleigh,
         ):
             widget.setEnabled(not frame)
+        if frame:
+            self._sync_frame_type()
+
+    def _sync_frame_type(self, *_args) -> None:
+        if not hasattr(self, "frame_type"):
+            return
+        formulation = self.frame_type.currentText()
+        frame = self.family.currentText() == "Frame"
+        nonlinear = formulation in {"forceBeamColumn", "dispBeamColumn"}
+        interaction = formulation == "dispBeamColumnInt"
+        self.integration.setEnabled(frame and nonlinear)
+        self.integration_points.setEnabled(frame and (nonlinear or interaction))
+        self.integration_points.setMinimum(1 if interaction else 2)
+        self.center_rotation.setEnabled(frame and interaction)
+        self.consistent_mass.setEnabled(frame and not interaction)
+        if interaction:
+            self.consistent_mass.setChecked(False)
+
+        if not frame:
+            self.formulation_note.setText(
+                "Truss recipe: assign a uniaxial material and cross-sectional "
+                "area. Frame-only formulation controls are disabled."
+            )
+        elif interaction:
+            self.formulation_note.setText(
+                "dispBeamColumnInt line recipe requires a FiberInt section "
+                "and LinearInt transformation. cRot is stored on every "
+                "generated element; no separate beamIntegration tag is used."
+            )
+        elif formulation == "ElasticTimoshenkoBeam":
+            self.formulation_note.setText(
+                "Elastic Timoshenko line recipe includes shear deformation. "
+                "Use an Elastic section with the required shear properties."
+            )
+        elif formulation == "elasticBeamColumn":
+            self.formulation_note.setText(
+                "Elastic Euler-Bernoulli line recipe. Shear deformation is "
+                "neglected."
+            )
+        else:
+            self.formulation_note.setText(
+                "Distributed-plasticity frame recipe. The selected section, "
+                "transformation and beam integration are copied to generated "
+                "elements."
+            )
+
+        self._refresh_section_choices()
+        self._refresh_transformation_choices()
 
     def _sync_mesh(self, *_args) -> None:
         target = self.mesh_mode.currentData() == "target_size"
@@ -576,6 +675,7 @@ class LineGeometryDialog(QDialog):
             integration_points=self.integration_points.value(),
             mass_per_length=self.mass_per_length.value(),
             consistent_mass=self.consistent_mass.isChecked(),
+            center_rotation=self.center_rotation.value(),
             do_rayleigh=self.do_rayleigh.isChecked(),
             generated_node_tags=(
                 list(self._line.generated_node_tags)

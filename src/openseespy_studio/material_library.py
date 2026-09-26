@@ -66,7 +66,7 @@ class MaterialLibraryRecord:
 
     def source_metadata(self) -> dict[str, Any]:
         return {
-            "library": "SARE verified material library",
+            "library": "FEWIZ verified material library",
             "record_id": self.id,
             "status": "verified" if self.is_verified else "unverified",
             "family": self.family,
@@ -243,7 +243,7 @@ def _record_from_dict(raw: dict[str, Any]) -> MaterialLibraryRecord:
 def load_verified_material_library() -> tuple[MaterialLibraryRecord, ...]:
     payload = json.loads(_resource_text())
     if int(payload.get("schema_version", 0)) != 1:
-        raise ValueError("Unsupported SARE material-library schema version.")
+        raise ValueError("Unsupported FEWIZ material-library schema version.")
     records = tuple(
         _record_from_dict(dict(raw))
         for raw in payload.get("records", [])

@@ -9,6 +9,12 @@ Vec3 = Tuple[float, float, float]
 
 FRAME_ELEMENT_TYPES = {
     "elasticBeamColumn",
+    "ElasticTimoshenkoBeam",
+    "forceBeamColumn",
+    "dispBeamColumn",
+    "dispBeamColumnInt",
+}
+BEAM_INTEGRATION_ELEMENT_TYPES = {
     "forceBeamColumn",
     "dispBeamColumn",
 }
@@ -19,13 +25,65 @@ SHELL_ELEMENT_TYPES = {
     "ShellNLDKGQ",
 }
 MEMBRANE_ELEMENT_TYPES = {"MEFI"}
-TRUSS_ELEMENT_TYPES = {"truss", "corotTruss"}
+CONTINUUM_QUAD_ELEMENT_TYPES = {
+    "quad",
+    "SSPquad",
+    "bbarQuad",
+    "enhancedQuad",
+}
+SOLID_ELEMENT_TYPES = {"stdBrick", "SSPbrick", "bbarBrick"}
+MASONRY_PANEL_ELEMENT_TYPES = {"MasonPan12"}
+WALL_MACRO_2D_ELEMENT_TYPES = {"MVLEM", "SFI_MVLEM"}
+WALL_MACRO_3D_ELEMENT_TYPES = {"MVLEM_3D"}
+WALL_MACRO_ELEMENT_TYPES = (
+    WALL_MACRO_2D_ELEMENT_TYPES | WALL_MACRO_3D_ELEMENT_TYPES
+)
+TRUSS_MATERIAL_ELEMENT_TYPES = {"truss", "corotTruss"}
+TRUSS_SECTION_ELEMENT_TYPES = {"trussSection", "corotTrussSection"}
+TRUSS_ELEMENT_TYPES = TRUSS_MATERIAL_ELEMENT_TYPES | TRUSS_SECTION_ELEMENT_TYPES
+CABLE_ELEMENT_TYPES = {"CatenaryCable"}
+FRICTION_BEARING_ELEMENT_TYPES = {
+    "flatSliderBearing",
+    "singleFPBearing",
+}
+BEARING_ELEMENT_TYPES = {
+    "elastomericBearingPlasticity",
+    "LeadRubberX",
+    "TripleFrictionPendulum",
+    *FRICTION_BEARING_ELEMENT_TYPES,
+}
+CONTACT_TWO_NODE_ELEMENT_TYPES = {
+    "zeroLengthContact2D",
+    "zeroLengthContact3D",
+}
+BEAM_CONTACT_ELEMENT_TYPES = {
+    "BeamContact2D",
+    "BeamContact3D",
+}
+CONTACT_ELEMENT_TYPES = (
+    CONTACT_TWO_NODE_ELEMENT_TYPES | BEAM_CONTACT_ELEMENT_TYPES
+)
+SPECIAL_TWO_NODE_ELEMENT_TYPES = (
+    CABLE_ELEMENT_TYPES
+    | BEARING_ELEMENT_TYPES
+    | CONTACT_TWO_NODE_ELEMENT_TYPES
+)
 EMBEDDED_ELEMENT_TYPES = {"ASDEmbeddedNodeElement"}
-QUAD_ELEMENT_TYPES = SHELL_ELEMENT_TYPES | MEMBRANE_ELEMENT_TYPES
+QUAD_ELEMENT_TYPES = (
+    SHELL_ELEMENT_TYPES
+    | MEMBRANE_ELEMENT_TYPES
+    | CONTINUUM_QUAD_ELEMENT_TYPES
+    | WALL_MACRO_3D_ELEMENT_TYPES
+)
 SUPPORTED_ELEMENT_TYPES = (
     FRAME_ELEMENT_TYPES
     | QUAD_ELEMENT_TYPES
+    | SOLID_ELEMENT_TYPES
+    | MASONRY_PANEL_ELEMENT_TYPES
+    | WALL_MACRO_2D_ELEMENT_TYPES
     | TRUSS_ELEMENT_TYPES
+    | SPECIAL_TWO_NODE_ELEMENT_TYPES
+    | BEAM_CONTACT_ELEMENT_TYPES
     | EMBEDDED_ELEMENT_TYPES
 )
 
@@ -57,6 +115,678 @@ def _strict_bool(value: object, label: str) -> bool:
         if normalized in {"false", "0", "no", "off"}:
             return False
     raise ValueError(f"{label} must be a boolean.")
+
+
+def _normalize_special_element_parameters(
+    element_type: str,
+    parameters: object,
+) -> dict[str, object]:
+    if element_type not in (
+        SPECIAL_TWO_NODE_ELEMENT_TYPES
+        | BEAM_CONTACT_ELEMENT_TYPES
+        | MASONRY_PANEL_ELEMENT_TYPES
+    ):
+        return {}
+    if not isinstance(parameters, dict):
+        raise ValueError(
+            f"{element_type} special parameters must be an object."
+        )
+    raw = dict(parameters)
+
+    if element_type == "MasonPan12":
+        required = ("mat_1", "mat_2", "thick", "w_tot", "w_1")
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "MasonPan12 requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                "Unsupported MasonPan12 parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {
+            "mat_1": _strict_int(raw["mat_1"], "MasonPan12 central material"),
+            "mat_2": _strict_int(raw["mat_2"], "MasonPan12 lateral material"),
+            "thick": float(raw["thick"]),
+            "w_tot": float(raw["w_tot"]),
+            "w_1": float(raw["w_1"]),
+        }
+        if int(result["mat_1"]) <= 0 or int(result["mat_2"]) <= 0:
+            raise ValueError("MasonPan12 material tags must be positive.")
+        for key in ("thick", "w_tot", "w_1"):
+            if not math.isfinite(float(result[key])):
+                raise ValueError(f"MasonPan12 {key} must be finite.")
+        if float(result["thick"]) <= 0.0:
+            raise ValueError("MasonPan12 thickness must be positive.")
+        if float(result["w_tot"]) <= 0.0:
+            raise ValueError("MasonPan12 total-width ratio must be positive.")
+        if not 0.0 < float(result["w_1"]) <= 1.0:
+            raise ValueError(
+                "MasonPan12 central-width ratio must satisfy 0 < w_1 <= 1."
+            )
+        return result
+
+    if element_type == "CatenaryCable":
+        required = (
+            "weight", "E", "A", "L0", "alpha", "temperature_change",
+            "rho", "errorTol", "Nsubsteps", "massType",
+        )
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "CatenaryCable requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                "Unsupported CatenaryCable parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result: dict[str, object] = {
+            key: float(raw[key])
+            for key in (
+                "weight", "E", "A", "L0", "alpha",
+                "temperature_change", "rho", "errorTol",
+            )
+        }
+        result["Nsubsteps"] = _strict_int(
+            raw["Nsubsteps"],
+            "CatenaryCable Nsubsteps",
+        )
+        result["massType"] = _strict_int(
+            raw["massType"],
+            "CatenaryCable massType",
+        )
+        if any(
+            not math.isfinite(float(result[key]))
+            for key in (
+                "weight", "E", "A", "L0", "alpha",
+                "temperature_change", "rho", "errorTol",
+            )
+        ):
+            raise ValueError("CatenaryCable parameters must be finite.")
+        for key in ("E", "A", "L0", "errorTol"):
+            if float(result[key]) <= 0.0:
+                raise ValueError(
+                    f"CatenaryCable {key} must be positive."
+                )
+        if float(result["rho"]) < 0.0:
+            raise ValueError("CatenaryCable rho cannot be negative.")
+        if int(result["Nsubsteps"]) < 1:
+            raise ValueError(
+                "CatenaryCable Nsubsteps must be at least 1."
+            )
+        if int(result["massType"]) != 0:
+            raise ValueError(
+                "CatenaryCable currently supports massType=0 "
+                "(lumped mass) only."
+            )
+        return result
+
+    if element_type == "LeadRubberX":
+        required = (
+            "Fy", "alpha", "Gr", "Kbulk", "D1", "D2", "ts", "tr", "n",
+        )
+        optional = {
+            "orientation", "kc", "PhiM", "ac", "sDratio", "mass", "cd",
+            "tc", "qL", "cL", "kS", "aS",
+            "tag1", "tag2", "tag3", "tag4", "tag5",
+        }
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "LeadRubberX requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required) - optional)
+        if extra:
+            raise ValueError(
+                "Unsupported LeadRubberX parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {
+            key: float(raw[key])
+            for key in ("Fy", "alpha", "Gr", "Kbulk", "D1", "D2", "ts", "tr")
+        }
+        result["n"] = _strict_int(raw["n"], "LeadRubberX rubber layers")
+        defaults = {
+            "kc": 10.0,
+            "PhiM": 0.5,
+            "ac": 1.0,
+            "sDratio": 0.5,
+            "mass": 0.0,
+            "cd": 0.0,
+            "tc": 0.0,
+            "qL": 11200.0,
+            "cL": 130.0,
+            "kS": 50.0,
+            "aS": 1.41e-5,
+        }
+        for key, default in defaults.items():
+            result[key] = float(raw.get(key, default))
+        for key in ("tag1", "tag2", "tag3", "tag4", "tag5"):
+            result[key] = _strict_int(
+                raw.get(key, 0),
+                f"LeadRubberX {key}",
+            )
+        orientation = raw.get("orientation")
+        if orientation is None:
+            result["orientation"] = None
+        else:
+            try:
+                values = tuple(float(value) for value in orientation)
+            except TypeError as exc:
+                raise ValueError(
+                    "LeadRubberX orientation must contain six values."
+                ) from exc
+            if len(values) != 6 or any(
+                not math.isfinite(value) for value in values
+            ):
+                raise ValueError(
+                    "LeadRubberX orientation must contain six finite values."
+                )
+            x = values[:3]
+            y = values[3:]
+            x_norm2 = sum(value * value for value in x)
+            y_norm2 = sum(value * value for value in y)
+            cross = (
+                x[1] * y[2] - x[2] * y[1],
+                x[2] * y[0] - x[0] * y[2],
+                x[0] * y[1] - x[1] * y[0],
+            )
+            if (
+                x_norm2 <= 1.0e-24
+                or y_norm2 <= 1.0e-24
+                or sum(value * value for value in cross)
+                <= 1.0e-16 * x_norm2 * y_norm2
+            ):
+                raise ValueError(
+                    "LeadRubberX orientation x/y vectors must be "
+                    "non-zero and non-parallel."
+                )
+            result["orientation"] = values
+        finite_keys = (
+            "Fy", "alpha", "Gr", "Kbulk", "D1", "D2", "ts", "tr",
+            "kc", "PhiM", "ac", "sDratio", "mass", "cd", "tc",
+            "qL", "cL", "kS", "aS",
+        )
+        if any(
+            not math.isfinite(float(result[key]))
+            for key in finite_keys
+        ):
+            raise ValueError("LeadRubberX parameters must be finite.")
+        for key in ("Fy", "Gr", "Kbulk", "D2", "ts", "tr", "qL", "cL", "kS", "aS"):
+            if float(result[key]) <= 0.0:
+                raise ValueError(f"LeadRubberX {key} must be positive.")
+        if float(result["D1"]) < 0.0 or float(result["D1"]) >= float(result["D2"]):
+            raise ValueError("LeadRubberX requires 0 <= D1 < D2.")
+        if int(result["n"]) < 1:
+            raise ValueError("LeadRubberX n must be at least 1.")
+        if not 0.0 <= float(result["sDratio"]) <= 1.0:
+            raise ValueError("LeadRubberX sDratio must satisfy 0 <= value <= 1.")
+        if float(result["mass"]) < 0.0 or float(result["tc"]) < 0.0:
+            raise ValueError("LeadRubberX mass/tc cannot be negative.")
+        return result
+
+    if element_type == "TripleFrictionPendulum":
+        required = (
+            "frnTag1", "frnTag2", "frnTag3",
+            "vertMatTag", "rotZMatTag", "rotXMatTag", "rotYMatTag",
+            "L1", "L2", "L3", "d1", "d2", "d3",
+            "W", "uy", "kvt", "minFv", "tol",
+        )
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "TripleFrictionPendulum requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                "Unsupported TripleFrictionPendulum parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {}
+        for key in (
+            "frnTag1", "frnTag2", "frnTag3",
+            "vertMatTag", "rotZMatTag", "rotXMatTag", "rotYMatTag",
+        ):
+            result[key] = _strict_int(
+                raw[key],
+                f"TripleFrictionPendulum {key}",
+            )
+            if int(result[key]) <= 0:
+                raise ValueError(
+                    f"TripleFrictionPendulum {key} must be positive."
+                )
+        for key in (
+            "L1", "L2", "L3", "d1", "d2", "d3",
+            "W", "uy", "kvt", "minFv", "tol",
+        ):
+            result[key] = float(raw[key])
+            if not math.isfinite(float(result[key])):
+                raise ValueError(
+                    f"TripleFrictionPendulum {key} must be finite."
+                )
+        for key in ("L1", "L2", "L3", "uy", "kvt", "tol"):
+            if float(result[key]) <= 0.0:
+                raise ValueError(
+                    f"TripleFrictionPendulum {key} must be positive."
+                )
+        for key in ("d1", "d2", "d3", "W", "minFv"):
+            if float(result[key]) < 0.0:
+                raise ValueError(
+                    f"TripleFrictionPendulum {key} cannot be negative."
+                )
+        return result
+
+    if element_type == "zeroLengthContact2D":
+        required = ("Kn", "Kt", "mu", "normal")
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "zeroLengthContact2D requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                "Unsupported zeroLengthContact2D parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {
+            "Kn": float(raw["Kn"]),
+            "Kt": float(raw["Kt"]),
+            "mu": float(raw["mu"]),
+        }
+        try:
+            normal = tuple(float(value) for value in raw["normal"])
+        except TypeError as exc:
+            raise ValueError(
+                "zeroLengthContact2D normal must contain two values."
+            ) from exc
+        if len(normal) != 2 or any(not math.isfinite(v) for v in normal):
+            raise ValueError(
+                "zeroLengthContact2D normal must contain two finite values."
+            )
+        norm2 = sum(v * v for v in normal)
+        if norm2 <= 1.0e-24:
+            raise ValueError("zeroLengthContact2D normal cannot be zero.")
+        result["normal"] = normal
+        if (
+            not math.isfinite(result["Kn"])
+            or not math.isfinite(result["Kt"])
+            or not math.isfinite(result["mu"])
+        ):
+            raise ValueError("zeroLengthContact2D parameters must be finite.")
+        if result["Kn"] <= 0.0 or result["Kt"] <= 0.0:
+            raise ValueError(
+                "zeroLengthContact2D Kn and Kt must be positive."
+            )
+        if result["mu"] < 0.0:
+            raise ValueError("zeroLengthContact2D mu cannot be negative.")
+        return result
+
+    if element_type == "zeroLengthContact3D":
+        required = ("Kn", "Kt", "mu", "cohesion", "dir")
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "zeroLengthContact3D requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                "Unsupported zeroLengthContact3D parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {
+            "Kn": float(raw["Kn"]),
+            "Kt": float(raw["Kt"]),
+            "mu": float(raw["mu"]),
+            "cohesion": float(raw["cohesion"]),
+            "dir": _strict_int(raw["dir"], "zeroLengthContact3D dir"),
+        }
+        if any(
+            not math.isfinite(float(result[key]))
+            for key in ("Kn", "Kt", "mu", "cohesion")
+        ):
+            raise ValueError("zeroLengthContact3D parameters must be finite.")
+        if result["Kn"] <= 0.0 or result["Kt"] <= 0.0:
+            raise ValueError(
+                "zeroLengthContact3D Kn and Kt must be positive."
+            )
+        if result["mu"] < 0.0 or result["cohesion"] < 0.0:
+            raise ValueError(
+                "zeroLengthContact3D mu/cohesion cannot be negative."
+            )
+        if int(result["dir"]) not in {1, 2, 3}:
+            raise ValueError("zeroLengthContact3D dir must be 1, 2, or 3.")
+        return result
+
+    if element_type in BEAM_CONTACT_ELEMENT_TYPES:
+        common = ("nd_material_tag", "gTol", "fTol", "cFlag")
+        required = (
+            common + ("width",)
+            if element_type == "BeamContact2D"
+            else common + ("radius", "transf_tag")
+        )
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                f"{element_type} requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                f"Unsupported {element_type} parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {
+            "nd_material_tag": _strict_int(
+                raw["nd_material_tag"],
+                f"{element_type} nD material tag",
+            ),
+            "gTol": float(raw["gTol"]),
+            "fTol": float(raw["fTol"]),
+            "cFlag": _strict_int(raw["cFlag"], f"{element_type} cFlag"),
+        }
+        size_key = "width" if element_type == "BeamContact2D" else "radius"
+        result[size_key] = float(raw[size_key])
+        if element_type == "BeamContact3D":
+            result["transf_tag"] = _strict_int(
+                raw["transf_tag"],
+                "BeamContact3D transformation tag",
+            )
+        if any(
+            not math.isfinite(float(result[key]))
+            for key in ("gTol", "fTol", size_key)
+        ):
+            raise ValueError(f"{element_type} parameters must be finite.")
+        if int(result["nd_material_tag"]) <= 0:
+            raise ValueError(f"{element_type} nD material tag must be positive.")
+        if float(result[size_key]) <= 0.0:
+            raise ValueError(f"{element_type} {size_key} must be positive.")
+        if float(result["gTol"]) <= 0.0 or float(result["fTol"]) <= 0.0:
+            raise ValueError(f"{element_type} tolerances must be positive.")
+        if int(result["cFlag"]) not in {0, 1}:
+            raise ValueError(f"{element_type} cFlag must be 0 or 1.")
+        if (
+            element_type == "BeamContact3D"
+            and int(result["transf_tag"]) <= 0
+        ):
+            raise ValueError("BeamContact3D transformation tag must be positive.")
+        return result
+
+    if element_type in FRICTION_BEARING_ELEMENT_TYPES:
+        required = {"frn_model_tag", "kInit", "p_mat_tag", "mz_mat_tag"}
+        if element_type == "singleFPBearing":
+            required.add("Reff")
+        optional = {
+            "t_mat_tag", "my_mat_tag", "orientation", "shearDist",
+            "doRayleigh", "mass", "maxIter", "tol",
+        }
+        missing = sorted(required - set(raw))
+        if missing:
+            raise ValueError(
+                f"{element_type} requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - required - optional)
+        if extra:
+            raise ValueError(
+                f"Unsupported {element_type} parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+
+        result = {
+            "frn_model_tag": _strict_int(
+                raw["frn_model_tag"],
+                f"{element_type} friction model tag",
+            ),
+            "kInit": float(raw["kInit"]),
+            "p_mat_tag": _strict_int(
+                raw["p_mat_tag"],
+                f"{element_type} axial material tag",
+            ),
+            "mz_mat_tag": _strict_int(
+                raw["mz_mat_tag"],
+                f"{element_type} Mz material tag",
+            ),
+            "shearDist": float(raw.get("shearDist", 0.0)),
+            "doRayleigh": _strict_bool(
+                raw.get("doRayleigh", False),
+                f"{element_type} Rayleigh flag",
+            ),
+            "mass": float(raw.get("mass", 0.0)),
+            "maxIter": _strict_int(
+                raw.get("maxIter", 20),
+                f"{element_type} maxIter",
+            ),
+            "tol": float(raw.get("tol", 1.0e-8)),
+        }
+        if element_type == "singleFPBearing":
+            result["Reff"] = float(raw["Reff"])
+        for key, label in (
+            ("t_mat_tag", "torsion material tag"),
+            ("my_mat_tag", "My material tag"),
+        ):
+            value = raw.get(key)
+            result[key] = (
+                None
+                if value is None
+                else _strict_int(value, f"{element_type} {label}")
+            )
+
+        orientation = raw.get("orientation")
+        if orientation is None:
+            result["orientation"] = None
+        else:
+            try:
+                values = tuple(float(value) for value in orientation)
+            except TypeError as exc:
+                raise ValueError(
+                    f"{element_type} orientation must contain six values."
+                ) from exc
+            if len(values) != 6 or any(
+                not math.isfinite(value) for value in values
+            ):
+                raise ValueError(
+                    f"{element_type} orientation must contain six finite values."
+                )
+            x = values[:3]
+            y = values[3:]
+            cross = (
+                x[1] * y[2] - x[2] * y[1],
+                x[2] * y[0] - x[0] * y[2],
+                x[0] * y[1] - x[1] * y[0],
+            )
+            if (
+                sum(value * value for value in x) <= 1.0e-24
+                or sum(value * value for value in y) <= 1.0e-24
+                or sum(value * value for value in cross) <= 1.0e-24
+            ):
+                raise ValueError(
+                    f"{element_type} orientation x/y vectors must be "
+                    "non-zero and non-parallel."
+                )
+            result["orientation"] = values
+
+        numeric_keys = ["kInit", "shearDist", "mass", "tol"]
+        if element_type == "singleFPBearing":
+            numeric_keys.append("Reff")
+        if any(
+            not math.isfinite(float(result[key]))
+            for key in numeric_keys
+        ):
+            raise ValueError(f"{element_type} parameters must be finite.")
+        if int(result["frn_model_tag"]) <= 0:
+            raise ValueError(f"{element_type} friction model tag must be positive.")
+        for key in ("p_mat_tag", "mz_mat_tag", "t_mat_tag", "my_mat_tag"):
+            value = result.get(key)
+            if value is not None and int(value) <= 0:
+                raise ValueError(f"{element_type} material tags must be positive.")
+        if float(result["kInit"]) <= 0.0:
+            raise ValueError(f"{element_type} kInit must be positive.")
+        if (
+            element_type == "singleFPBearing"
+            and float(result["Reff"]) <= 0.0
+        ):
+            raise ValueError("singleFPBearing Reff must be positive.")
+        if not 0.0 <= float(result["shearDist"]) <= 1.0:
+            raise ValueError(
+                f"{element_type} shearDist must satisfy 0 <= value <= 1."
+            )
+        if float(result["mass"]) < 0.0:
+            raise ValueError(f"{element_type} mass cannot be negative.")
+        if int(result["maxIter"]) < 1:
+            raise ValueError(f"{element_type} maxIter must be at least 1.")
+        if float(result["tol"]) <= 0.0:
+            raise ValueError(f"{element_type} tol must be positive.")
+        return result
+
+    required = (
+        "kInit", "qd", "alpha1", "alpha2", "mu",
+        "p_mat_tag", "mz_mat_tag",
+    )
+    optional = {
+        "t_mat_tag",
+        "my_mat_tag",
+        "orientation",
+        "shearDist",
+        "doRayleigh",
+        "mass",
+    }
+    missing = [key for key in required if key not in raw]
+    if missing:
+        raise ValueError(
+            "elastomericBearingPlasticity requires parameter(s): "
+            + ", ".join(missing)
+            + "."
+        )
+    extra = sorted(set(raw) - set(required) - optional)
+    if extra:
+        raise ValueError(
+            "Unsupported elastomericBearingPlasticity parameter(s): "
+            + ", ".join(extra)
+            + "."
+        )
+
+    result = {
+        key: float(raw[key])
+        for key in ("kInit", "qd", "alpha1", "alpha2", "mu")
+    }
+    result["p_mat_tag"] = _strict_int(
+        raw["p_mat_tag"],
+        "Bearing axial material tag",
+    )
+    result["mz_mat_tag"] = _strict_int(
+        raw["mz_mat_tag"],
+        "Bearing Mz material tag",
+    )
+    for key, label in (
+        ("t_mat_tag", "Bearing torsion material tag"),
+        ("my_mat_tag", "Bearing My material tag"),
+    ):
+        value = raw.get(key)
+        result[key] = (
+            None if value is None else _strict_int(value, label)
+        )
+    result["shearDist"] = float(raw.get("shearDist", 0.5))
+    result["doRayleigh"] = _strict_bool(
+        raw.get("doRayleigh", False),
+        "Bearing Rayleigh flag",
+    )
+    result["mass"] = float(raw.get("mass", 0.0))
+
+    orientation = raw.get("orientation")
+    if orientation is None:
+        result["orientation"] = None
+    else:
+        try:
+            values = tuple(float(value) for value in orientation)
+        except TypeError as exc:
+            raise ValueError(
+                "Bearing orientation must contain six values."
+            ) from exc
+        if len(values) != 6 or any(
+            not math.isfinite(value) for value in values
+        ):
+            raise ValueError(
+                "Bearing orientation must contain six finite values."
+            )
+        x = values[:3]
+        y = values[3:]
+        x_norm2 = sum(value * value for value in x)
+        y_norm2 = sum(value * value for value in y)
+        cross = (
+            x[1] * y[2] - x[2] * y[1],
+            x[2] * y[0] - x[0] * y[2],
+            x[0] * y[1] - x[1] * y[0],
+        )
+        if (
+            x_norm2 <= 1.0e-24
+            or y_norm2 <= 1.0e-24
+            or sum(value * value for value in cross)
+            <= 1.0e-16 * x_norm2 * y_norm2
+        ):
+            raise ValueError(
+                "Bearing orientation x/y vectors must be non-zero "
+                "and non-parallel."
+            )
+        result["orientation"] = values
+
+    if any(
+        not math.isfinite(float(result[key]))
+        for key in (
+            "kInit", "qd", "alpha1", "alpha2", "mu",
+            "shearDist", "mass",
+        )
+    ):
+        raise ValueError(
+            "elastomericBearingPlasticity parameters must be finite."
+        )
+    if float(result["kInit"]) <= 0.0:
+        raise ValueError("Bearing kInit must be positive.")
+    if float(result["qd"]) < 0.0:
+        raise ValueError("Bearing qd cannot be negative.")
+    if float(result["alpha1"]) < 0.0 or float(result["alpha2"]) < 0.0:
+        raise ValueError("Bearing alpha1/alpha2 cannot be negative.")
+    if float(result["mu"]) <= 0.0:
+        raise ValueError("Bearing mu must be positive.")
+    if not 0.0 <= float(result["shearDist"]) <= 1.0:
+        raise ValueError("Bearing shearDist must satisfy 0 <= value <= 1.")
+    if float(result["mass"]) < 0.0:
+        raise ValueError("Bearing mass cannot be negative.")
+    for key in ("p_mat_tag", "mz_mat_tag", "t_mat_tag", "my_mat_tag"):
+        value = result.get(key)
+        if value is not None and int(value) <= 0:
+            raise ValueError("Bearing material tags must be positive.")
+    return result
+
 
 FIXITY_PRESETS: dict[str, Tuple[int, ...]] = {
     "Fixed": (1, 1, 1, 1, 1, 1),
@@ -154,6 +884,7 @@ class Node:
     xyz: Vec3
     fixity: Tuple[int, ...] = (0, 0, 0, 0, 0, 0)
     mass: Tuple[float, ...] = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    ndf: int | None = None
 
     def __post_init__(self) -> None:
         self.tag = _strict_int(self.tag, "Node tag")
@@ -166,14 +897,30 @@ class Node:
         if any(not math.isfinite(value) for value in self.xyz):
             raise ValueError("Node coordinates must be finite.")
 
+        self.ndf = (
+            len(self.fixity)
+            if self.ndf is None
+            else _strict_int(self.ndf, "Node ndf")
+        )
+        if self.ndf < 1 or self.ndf > 6:
+            raise ValueError("Node ndf must be between 1 and 6.")
+
         self.fixity = tuple(
             _strict_int(value, "Fixity value")
             for value in self.fixity
         )
+        if len(self.fixity) != self.ndf:
+            raise ValueError(
+                f"Node {self.tag} fixity count must match ndf={self.ndf}."
+            )
         if any(value not in {0, 1} for value in self.fixity):
             raise ValueError("Fixity values must be 0 or 1.")
 
         self.mass = tuple(float(value) for value in self.mass)
+        if len(self.mass) != self.ndf:
+            raise ValueError(
+                f"Node {self.tag} mass count must match ndf={self.ndf}."
+            )
         if any(not math.isfinite(value) for value in self.mass):
             raise ValueError("Nodal mass values must be finite.")
         if any(value < 0.0 for value in self.mass):
@@ -214,6 +961,32 @@ class Element:
     mefi_section_tags: tuple[int, ...] = ()
     embedded_penalty: float | None = None
     embedded_constrain_rotation: bool = False
+    continuum_thickness: float = 1.0
+    continuum_material_tag: int | None = None
+    continuum_type: str = "PlaneStrain"
+    continuum_pressure: float = 0.0
+    continuum_density: float = 0.0
+    continuum_body_force: tuple[float, float] = (0.0, 0.0)
+    m: int | None = None
+    n: int | None = None
+    p: int | None = None
+    q: int | None = None
+    solid_material_tag: int | None = None
+    solid_body_force: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    wall_center_ratio: float = 0.4
+    wall_density: float = 0.0
+    wall_thicknesses: tuple[float, ...] = ()
+    wall_widths: tuple[float, ...] = ()
+    wall_rhos: tuple[float, ...] = ()
+    wall_concrete_tags: tuple[int, ...] = ()
+    wall_steel_tags: tuple[int, ...] = ()
+    wall_shear_tag: int | None = None
+    wall_nd_material_tags: tuple[int, ...] = ()
+    wall_thick_mod: float = 0.63
+    wall_poisson: float = 0.25
+    beam_center_ratio: float = 0.4
+    special_parameters: dict[str, object] = field(default_factory=dict)
+    additional_node_tags: tuple[int, ...] = ()
 
     @property
     def is_shell(self) -> bool:
@@ -227,8 +1000,43 @@ class Element:
     def is_embedded(self) -> bool:
         return self.element_type in EMBEDDED_ELEMENT_TYPES
 
+    @property
+    def is_continuum_quad(self) -> bool:
+        return self.element_type in CONTINUUM_QUAD_ELEMENT_TYPES
+
+    @property
+    def is_solid(self) -> bool:
+        return self.element_type in SOLID_ELEMENT_TYPES
+
+    @property
+    def is_wall_macro(self) -> bool:
+        return self.element_type in WALL_MACRO_ELEMENT_TYPES
+
+    @property
+    def is_masonry_panel(self) -> bool:
+        return self.element_type in MASONRY_PANEL_ELEMENT_TYPES
+
     def node_tags(self) -> tuple[int, ...]:
-        if self.is_quad or self.is_embedded:
+        if self.is_masonry_panel:
+            return (
+                self.i,
+                self.j,
+                *(int(value) for value in self.additional_node_tags),
+            )
+        if self.is_solid:
+            tail = (self.k, self.l, self.m, self.n, self.p, self.q)
+            if any(value is None for value in tail):
+                return (self.i, self.j)
+            return (
+                self.i,
+                self.j,
+                *(int(value) for value in tail if value is not None),
+            )
+        if (
+            self.is_quad
+            or self.is_embedded
+            or self.element_type in BEAM_CONTACT_ELEMENT_TYPES
+        ):
             if self.k is None or self.l is None:
                 return (self.i, self.j)
             return (self.i, self.j, self.k, self.l)
@@ -314,7 +1122,7 @@ class Element:
                     self.truss_material_tag,
                     "Truss material tag",
                 )
-                if self.element_type in TRUSS_ELEMENT_TYPES
+                if self.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
                 else int(self.truss_material_tag)
             )
         )
@@ -357,7 +1165,47 @@ class Element:
                     "Shell local X vector cannot be zero."
                 )
             self.shell_local_x = values
-        if self.is_quad or self.is_embedded:
+        if self.is_masonry_panel:
+            values = tuple(
+                _strict_int(value, "Masonry panel node tag")
+                for value in self.additional_node_tags
+            )
+            if len(values) != 10:
+                raise ValueError(
+                    f"{self.element_type} requires twelve node tags."
+                )
+            self.additional_node_tags = values
+            if len(set((self.i, self.j, *values))) != 12:
+                raise ValueError(
+                    f"{self.element_type} requires twelve distinct node tags."
+                )
+            self.k = None
+            self.l = None
+            self.m = None
+            self.n = None
+            self.p = None
+            self.q = None
+        elif self.is_solid:
+            tail = (self.k, self.l, self.m, self.n, self.p, self.q)
+            if any(value is None for value in tail):
+                raise ValueError(
+                    f"{self.element_type} requires eight node tags."
+                )
+            self.k = _strict_int(self.k, "Element K-node tag")
+            self.l = _strict_int(self.l, "Element L-node tag")
+            self.m = _strict_int(self.m, "Element M-node tag")
+            self.n = _strict_int(self.n, "Element N-node tag")
+            self.p = _strict_int(self.p, "Element P-node tag")
+            self.q = _strict_int(self.q, "Element Q-node tag")
+            if len(set(self.node_tags())) != 8:
+                raise ValueError(
+                    f"{self.element_type} requires eight distinct node tags."
+                )
+        elif (
+            self.is_quad
+            or self.is_embedded
+            or self.element_type in BEAM_CONTACT_ELEMENT_TYPES
+        ):
             if self.k is None or self.l is None:
                 raise ValueError(
                     f"{self.element_type} requires four node tags."
@@ -368,11 +1216,22 @@ class Element:
                 raise ValueError(
                     f"{self.element_type} requires four distinct node tags."
                 )
+            self.m = None
+            self.n = None
+            self.p = None
+            self.q = None
         else:
             self.k = None
             self.l = None
+            self.m = None
+            self.n = None
+            self.p = None
+            self.q = None
 
-        if not self.is_quad:
+        if not self.is_masonry_panel:
+            self.additional_node_tags = ()
+
+        if not self.is_shell:
             self.shell_corotational = False
             self.shell_local_x = None
             self.shell_no_eas = False
@@ -427,9 +1286,271 @@ class Element:
             self.embedded_penalty = None
             self.embedded_constrain_rotation = False
 
+        self.continuum_type = str(self.continuum_type)
+        self.continuum_thickness = float(self.continuum_thickness)
+        self.continuum_pressure = float(self.continuum_pressure)
+        self.continuum_density = float(self.continuum_density)
+        self.continuum_body_force = tuple(
+            float(value) for value in self.continuum_body_force
+        )
+        if self.is_continuum_quad:
+            if self.continuum_type not in {"PlaneStress", "PlaneStrain"}:
+                raise ValueError(
+                    "2D continuum type must be PlaneStress or PlaneStrain."
+                )
+            if (
+                not math.isfinite(self.continuum_thickness)
+                or self.continuum_thickness <= 0.0
+            ):
+                raise ValueError(
+                    "2D continuum thickness must be finite and positive."
+                )
+            if self.continuum_material_tag is None:
+                raise ValueError(
+                    f"{self.element_type} requires an nDMaterial tag."
+                )
+            self.continuum_material_tag = _strict_int(
+                self.continuum_material_tag,
+                "2D continuum nDMaterial tag",
+            )
+            if self.continuum_material_tag <= 0:
+                raise ValueError(
+                    "2D continuum nDMaterial tag must be positive."
+                )
+            if len(self.continuum_body_force) != 2 or any(
+                not math.isfinite(value)
+                for value in self.continuum_body_force
+            ):
+                raise ValueError(
+                    "2D continuum body force needs two finite values."
+                )
+            if (
+                not math.isfinite(self.continuum_pressure)
+                or not math.isfinite(self.continuum_density)
+                or self.continuum_density < 0.0
+            ):
+                raise ValueError(
+                    "2D continuum pressure/density values are invalid."
+                )
+            if (
+                self.element_type == "bbarQuad"
+                and self.continuum_type != "PlaneStrain"
+            ):
+                raise ValueError(
+                    "bbarQuad supports PlaneStrain material behavior only."
+                )
+            if self.element_type in {"SSPquad", "bbarQuad", "enhancedQuad"}:
+                self.continuum_pressure = 0.0
+                self.continuum_density = 0.0
+            if self.element_type in {"bbarQuad", "enhancedQuad"}:
+                self.continuum_body_force = (0.0, 0.0)
+        else:
+            self.continuum_thickness = 1.0
+            self.continuum_material_tag = None
+            self.continuum_type = "PlaneStrain"
+            self.continuum_pressure = 0.0
+            self.continuum_density = 0.0
+            self.continuum_body_force = (0.0, 0.0)
+
+        self.solid_body_force = tuple(
+            float(value) for value in self.solid_body_force
+        )
+        if self.is_solid:
+            if self.solid_material_tag is None:
+                raise ValueError(
+                    f"{self.element_type} requires an nDMaterial tag."
+                )
+            self.solid_material_tag = _strict_int(
+                self.solid_material_tag,
+                "3D solid nDMaterial tag",
+            )
+            if self.solid_material_tag <= 0:
+                raise ValueError(
+                    "3D solid nDMaterial tag must be positive."
+                )
+            if len(self.solid_body_force) != 3 or any(
+                not math.isfinite(value)
+                for value in self.solid_body_force
+            ):
+                raise ValueError(
+                    "3D solid body force needs three finite values."
+                )
+        else:
+            self.solid_material_tag = None
+            self.solid_body_force = (0.0, 0.0, 0.0)
+
+        self.wall_center_ratio = float(self.wall_center_ratio)
+        self.wall_density = float(self.wall_density)
+        self.wall_thicknesses = tuple(
+            float(value) for value in self.wall_thicknesses
+        )
+        self.wall_widths = tuple(
+            float(value) for value in self.wall_widths
+        )
+        self.wall_rhos = tuple(float(value) for value in self.wall_rhos)
+        self.wall_concrete_tags = tuple(
+            _strict_int(value, "MVLEM concrete material tag")
+            for value in self.wall_concrete_tags
+        )
+        self.wall_steel_tags = tuple(
+            _strict_int(value, "MVLEM steel material tag")
+            for value in self.wall_steel_tags
+        )
+        self.wall_nd_material_tags = tuple(
+            _strict_int(value, "SFI_MVLEM nDMaterial tag")
+            for value in self.wall_nd_material_tags
+        )
+        self.wall_thick_mod = float(self.wall_thick_mod)
+        self.wall_poisson = float(self.wall_poisson)
+        if self.is_wall_macro:
+            fiber_count = len(self.wall_widths)
+            if fiber_count < 2:
+                raise ValueError(
+                    f"{self.element_type} requires at least two macro-fibers."
+                )
+            if len(self.wall_thicknesses) != fiber_count:
+                raise ValueError(
+                    f"{self.element_type} requires one thickness per "
+                    "macro-fiber."
+                )
+            if any(
+                not math.isfinite(value) or value <= 0.0
+                for value in (*self.wall_widths, *self.wall_thicknesses)
+            ):
+                raise ValueError(
+                    "Wall macro-fiber widths/thicknesses must be finite "
+                    "and positive."
+                )
+            if (
+                not math.isfinite(self.wall_center_ratio)
+                or not 0.0 <= self.wall_center_ratio <= 1.0
+            ):
+                raise ValueError(
+                    "Wall center-of-rotation ratio c must satisfy 0 <= c <= 1."
+                )
+            if (
+                not math.isfinite(self.wall_density)
+                or self.wall_density < 0.0
+            ):
+                raise ValueError(
+                    "Wall macro-element density must be finite and "
+                    "non-negative."
+                )
+
+            if self.element_type == "SFI_MVLEM":
+                if len(self.wall_nd_material_tags) != fiber_count:
+                    raise ValueError(
+                        "SFI_MVLEM requires one FSAM nDMaterial tag per "
+                        "macro-fiber."
+                    )
+                if any(tag <= 0 for tag in self.wall_nd_material_tags):
+                    raise ValueError(
+                        "SFI_MVLEM nDMaterial tags must be positive."
+                    )
+                self.wall_rhos = ()
+                self.wall_concrete_tags = ()
+                self.wall_steel_tags = ()
+                self.wall_shear_tag = None
+                self.wall_density = 0.0
+            else:
+                if (
+                    len(self.wall_rhos) != fiber_count
+                    or len(self.wall_concrete_tags) != fiber_count
+                    or len(self.wall_steel_tags) != fiber_count
+                ):
+                    raise ValueError(
+                        f"{self.element_type} requires rho, concrete, and "
+                        "steel values for every macro-fiber."
+                    )
+                if any(
+                    not math.isfinite(value) or not 0.0 <= value <= 1.0
+                    for value in self.wall_rhos
+                ):
+                    raise ValueError(
+                        "MVLEM reinforcement ratios must satisfy 0 <= rho <= 1."
+                    )
+                if any(
+                    tag <= 0
+                    for tag in (
+                        *self.wall_concrete_tags,
+                        *self.wall_steel_tags,
+                    )
+                ):
+                    raise ValueError(
+                        "MVLEM concrete/steel material tags must be positive."
+                    )
+                if self.wall_shear_tag is None:
+                    raise ValueError(
+                        f"{self.element_type} requires a shear material tag."
+                    )
+                self.wall_shear_tag = _strict_int(
+                    self.wall_shear_tag,
+                    "MVLEM shear material tag",
+                )
+                if self.wall_shear_tag <= 0:
+                    raise ValueError(
+                        "MVLEM shear material tag must be positive."
+                    )
+                self.wall_nd_material_tags = ()
+
+            if self.element_type == "MVLEM_3D":
+                if (
+                    not math.isfinite(self.wall_thick_mod)
+                    or self.wall_thick_mod <= 0.0
+                ):
+                    raise ValueError(
+                        "MVLEM_3D thickness modifier must be positive."
+                    )
+                if not -1.0 < self.wall_poisson < 0.5:
+                    raise ValueError(
+                        "MVLEM_3D Poisson ratio must satisfy -1 < nu < 0.5."
+                    )
+            else:
+                self.wall_thick_mod = 0.63
+                self.wall_poisson = 0.25
+        else:
+            self.wall_center_ratio = 0.4
+            self.wall_density = 0.0
+            self.wall_thicknesses = ()
+            self.wall_widths = ()
+            self.wall_rhos = ()
+            self.wall_concrete_tags = ()
+            self.wall_steel_tags = ()
+            self.wall_shear_tag = None
+            self.wall_nd_material_tags = ()
+            self.wall_thick_mod = 0.63
+            self.wall_poisson = 0.25
+
+        self.beam_center_ratio = float(self.beam_center_ratio)
+        if self.element_type == "dispBeamColumnInt":
+            if (
+                not math.isfinite(self.beam_center_ratio)
+                or not 0.0 <= self.beam_center_ratio <= 1.0
+            ):
+                raise ValueError(
+                    "dispBeamColumnInt center-of-rotation ratio cRot "
+                    "must satisfy 0 <= cRot <= 1."
+                )
+            if self.integration_points < 1:
+                raise ValueError(
+                    "dispBeamColumnInt needs at least one integration point."
+                )
+            self.consistent_mass = False
+        else:
+            self.beam_center_ratio = 0.4
+
+        self.special_parameters = _normalize_special_element_parameters(
+            self.element_type,
+            self.special_parameters,
+        )
+
         uses_section_reference = self.element_type not in (
-            TRUSS_ELEMENT_TYPES
+            TRUSS_MATERIAL_ELEMENT_TYPES
             | EMBEDDED_ELEMENT_TYPES
+            | CONTINUUM_QUAD_ELEMENT_TYPES
+            | SOLID_ELEMENT_TYPES
+            | WALL_MACRO_ELEMENT_TYPES
+            | SPECIAL_TWO_NODE_ELEMENT_TYPES
             | {"MEFI"}
         )
         uses_frame_reference = self.element_type in FRAME_ELEMENT_TYPES
@@ -454,10 +1575,23 @@ class Element:
                 else int(self.transf_tag)
             )
         )
-        if self.is_quad or self.is_embedded:
+        if (
+            self.is_quad
+            or self.is_embedded
+            or self.is_solid
+            or self.is_wall_macro
+            or self.element_type in SPECIAL_TWO_NODE_ELEMENT_TYPES
+        ):
             self.transf_tag = None
+        if self.element_type in SPECIAL_TWO_NODE_ELEMENT_TYPES:
+            self.section_tag = None
+        if self.element_type in TRUSS_MATERIAL_ELEMENT_TYPES:
+            self.section_tag = None
+        elif self.element_type in TRUSS_SECTION_ELEMENT_TYPES:
+            self.truss_area = 0.0
+            self.truss_material_tag = None
 
-        if self.element_type in FRAME_ELEMENT_TYPES and self.integration_type not in {
+        if self.element_type in BEAM_INTEGRATION_ELEMENT_TYPES and self.integration_type not in {
             "Lobatto",
             "Legendre",
             "Radau",
@@ -477,13 +1611,13 @@ class Element:
             "HingeEndpoint",
         }
         if (
-            self.element_type in FRAME_ELEMENT_TYPES
+            self.element_type in BEAM_INTEGRATION_ELEMENT_TYPES
             and self.integration_type in {"Lobatto", "Legendre", "Radau"}
         ):
             if self.integration_points < 2:
                 raise ValueError("Beam integration needs at least 2 points.")
         elif (
-            self.element_type in FRAME_ELEMENT_TYPES
+            self.element_type in BEAM_INTEGRATION_ELEMENT_TYPES
             and self.integration_type in beam_hinge_types
         ):
             if (
@@ -497,7 +1631,7 @@ class Element:
             if self.hinge_i_length < 0.0 or self.hinge_j_length < 0.0:
                 raise ValueError("Plastic hinge lengths cannot be negative.")
         elif (
-            self.element_type in FRAME_ELEMENT_TYPES
+            self.element_type in BEAM_INTEGRATION_ELEMENT_TYPES
             and self.integration_type == "ConcentratedPlasticity"
         ):
             if (
@@ -553,7 +1687,15 @@ class StructuralModel:
         self.nodes.clear()
         self.elements.clear()
 
-    def add_node(self, tag: int, x: float, y: float, z: float = 0.0) -> Node:
+    def add_node(
+        self,
+        tag: int,
+        x: float,
+        y: float,
+        z: float = 0.0,
+        *,
+        ndf: int | None = None,
+    ) -> Node:
         tag = _strict_int(tag, "Node tag")
         if tag < 0:
             raise ValueError("Node tag must be a non-negative integer.")
@@ -562,11 +1704,15 @@ class StructuralModel:
         xyz = (float(x), float(y), float(z))
         if not all(math.isfinite(value) for value in xyz):
             raise ValueError("Node coordinates must be finite.")
+        node_ndf = self.ndf if ndf is None else _strict_int(ndf, "Node ndf")
+        if node_ndf < 1 or node_ndf > 6:
+            raise ValueError("Node ndf must be between 1 and 6.")
         node = Node(
             tag,
             xyz,
-            fixity=(0,) * self.ndf,
-            mass=(0.0,) * self.ndf,
+            fixity=(0,) * node_ndf,
+            mass=(0.0,) * node_ndf,
+            ndf=node_ndf,
         )
         self.nodes[tag] = node
         return node
@@ -619,6 +1765,34 @@ class StructuralModel:
         mefi_section_tags: tuple[int, ...] | list[int] = (),
         embedded_penalty: float | None = None,
         embedded_constrain_rotation: bool = False,
+        continuum_thickness: float = 1.0,
+        continuum_material_tag: int | None = None,
+        continuum_type: str = "PlaneStrain",
+        continuum_pressure: float = 0.0,
+        continuum_density: float = 0.0,
+        continuum_body_force: tuple[float, float] | list[float] = (0.0, 0.0),
+        m: int | None = None,
+        n: int | None = None,
+        p: int | None = None,
+        q: int | None = None,
+        solid_material_tag: int | None = None,
+        solid_body_force: tuple[float, float, float] | list[float] = (
+            0.0, 0.0, 0.0
+        ),
+        wall_center_ratio: float = 0.4,
+        wall_density: float = 0.0,
+        wall_thicknesses: tuple[float, ...] | list[float] = (),
+        wall_widths: tuple[float, ...] | list[float] = (),
+        wall_rhos: tuple[float, ...] | list[float] = (),
+        wall_concrete_tags: tuple[int, ...] | list[int] = (),
+        wall_steel_tags: tuple[int, ...] | list[int] = (),
+        wall_shear_tag: int | None = None,
+        wall_nd_material_tags: tuple[int, ...] | list[int] = (),
+        wall_thick_mod: float = 0.63,
+        wall_poisson: float = 0.25,
+        beam_center_ratio: float = 0.4,
+        special_parameters: dict[str, object] | None = None,
+        additional_node_tags: tuple[int, ...] | list[int] = (),
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -633,8 +1807,34 @@ class StructuralModel:
         is_shell = element_type in SHELL_ELEMENT_TYPES
         is_quad = element_type in QUAD_ELEMENT_TYPES
         is_embedded = element_type in EMBEDDED_ELEMENT_TYPES
+        is_solid = element_type in SOLID_ELEMENT_TYPES
+        is_beam_contact = element_type in BEAM_CONTACT_ELEMENT_TYPES
+        is_masonry_panel = element_type in MASONRY_PANEL_ELEMENT_TYPES
         raw_nodes = [i, j]
-        if is_quad or is_embedded:
+        if is_masonry_panel:
+            extra_nodes = tuple(
+                _strict_int(value, "Masonry panel node tag")
+                for value in additional_node_tags
+            )
+            if len(extra_nodes) != 10:
+                raise ValueError(
+                    f"{element_type} element {tag} requires twelve nodes."
+                )
+            raw_nodes.extend(extra_nodes)
+        elif is_solid:
+            tail = (k, l, m, n, p, q)
+            if any(value is None for value in tail):
+                raise ValueError(
+                    f"{element_type} element {tag} requires eight nodes."
+                )
+            k = _strict_int(k, "Element K-node tag")
+            l = _strict_int(l, "Element L-node tag")
+            m = _strict_int(m, "Element M-node tag")
+            n = _strict_int(n, "Element N-node tag")
+            p = _strict_int(p, "Element P-node tag")
+            q = _strict_int(q, "Element Q-node tag")
+            raw_nodes.extend([k, l, m, n, p, q])
+        elif is_quad or is_embedded or is_beam_contact:
             if k is None or l is None:
                 raise ValueError(
                     f"{element_type} element {tag} requires four nodes."
@@ -643,7 +1843,17 @@ class StructuralModel:
             l = _strict_int(l, "Element L-node tag")
             raw_nodes.extend([k, l])
         if len(set(raw_nodes)) != len(raw_nodes):
-            if is_quad or is_embedded:
+            if is_masonry_panel:
+                raise ValueError(
+                    f"{element_type} element {tag} requires twelve distinct "
+                    "node tags."
+                )
+            if is_solid:
+                raise ValueError(
+                    f"{element_type} element {tag} requires eight distinct "
+                    "node tags."
+                )
+            if is_quad or is_embedded or is_beam_contact:
                 raise ValueError(
                     f"{element_type} element {tag} requires four distinct "
                     "node tags."
@@ -662,6 +1872,140 @@ class StructuralModel:
                 f"{element_type} requires a 3D/6DOF model; got "
                 f"ndm={self.ndm}, ndf={self.ndf}."
             )
+        if is_solid and (self.ndm, self.ndf) != (3, 3):
+            raise ValueError(
+                f"{element_type} requires ndm=3/ndf=3; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        node_ndfs = {
+            node_tag: int(self.nodes[node_tag].ndf)
+            for node_tag in raw_nodes
+        }
+        if element_type == "zeroLengthContact2D":
+            if int(self.ndm) != 2 or any(
+                value != 2 for value in node_ndfs.values()
+            ):
+                raise ValueError(
+                    "zeroLengthContact2D requires ndm=2 and both nodes ndf=2."
+                )
+        if element_type == "zeroLengthContact3D":
+            if int(self.ndm) != 3 or any(
+                value != 3 for value in node_ndfs.values()
+            ):
+                raise ValueError(
+                    "zeroLengthContact3D requires ndm=3 and both nodes ndf=3."
+                )
+        if element_type == "BeamContact2D":
+            if (
+                int(self.ndm) != 2
+                or node_ndfs[i] != 3
+                or node_ndfs[j] != 3
+                or node_ndfs[int(k)] != 2
+                or node_ndfs[int(l)] != 2
+            ):
+                raise ValueError(
+                    "BeamContact2D requires master nodes ndf=3 and "
+                    "constrained/Lagrange nodes ndf=2 in ndm=2."
+                )
+        if element_type == "BeamContact3D":
+            if (
+                int(self.ndm) != 3
+                or node_ndfs[i] != 6
+                or node_ndfs[j] != 6
+                or node_ndfs[int(k)] != 3
+                or node_ndfs[int(l)] != 3
+            ):
+                raise ValueError(
+                    "BeamContact3D requires master nodes ndf=6 and "
+                    "constrained/Lagrange nodes ndf=3 in ndm=3."
+                )
+        if (
+            element_type == "CatenaryCable"
+            and (int(self.ndm), int(self.ndf)) != (3, 3)
+        ):
+            raise ValueError(
+                "CatenaryCable requires ndm=3/ndf=3; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if (
+            element_type in {"LeadRubberX", "TripleFrictionPendulum"}
+            and (int(self.ndm), int(self.ndf)) != (3, 6)
+        ):
+            raise ValueError(
+                f"{element_type} requires ndm=3/ndf=6; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if (
+            element_type
+            in ({"elastomericBearingPlasticity"} | FRICTION_BEARING_ELEMENT_TYPES)
+            and (int(self.ndm), int(self.ndf)) not in {(2, 3), (3, 6)}
+        ):
+            raise ValueError(
+                f"{element_type} requires ndm=2/ndf=3 or ndm=3/ndf=6; "
+                f"got ndm={self.ndm}, ndf={self.ndf}."
+            )
+        normalized_special = _normalize_special_element_parameters(
+            element_type,
+            special_parameters or {},
+        )
+        if element_type in FRICTION_BEARING_ELEMENT_TYPES:
+            if int(self.ndm) == 3:
+                if (
+                    normalized_special.get("t_mat_tag") is None
+                    or normalized_special.get("my_mat_tag") is None
+                ):
+                    raise ValueError(
+                        f"3D {element_type} requires t_mat_tag and my_mat_tag."
+                    )
+            elif (
+                normalized_special.get("t_mat_tag") is not None
+                or normalized_special.get("my_mat_tag") is not None
+            ):
+                raise ValueError(
+                    f"2D {element_type} does not use t_mat_tag or my_mat_tag."
+                )
+        if element_type == "elastomericBearingPlasticity":
+            if int(self.ndm) == 3:
+                if (
+                    normalized_special.get("t_mat_tag") is None
+                    or normalized_special.get("my_mat_tag") is None
+                ):
+                    raise ValueError(
+                        "3D elastomericBearingPlasticity requires "
+                        "t_mat_tag and my_mat_tag."
+                    )
+            elif (
+                normalized_special.get("t_mat_tag") is not None
+                or normalized_special.get("my_mat_tag") is not None
+            ):
+                raise ValueError(
+                    "2D elastomericBearingPlasticity does not use "
+                    "t_mat_tag or my_mat_tag."
+                )
+        if (
+            element_type == "dispBeamColumnInt"
+            and (self.ndm, self.ndf) != (2, 3)
+        ):
+            raise ValueError(
+                "dispBeamColumnInt requires ndm=2/ndf=3; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if (
+            element_type in WALL_MACRO_2D_ELEMENT_TYPES
+            and (self.ndm, self.ndf) != (2, 3)
+        ):
+            raise ValueError(
+                f"{element_type} requires ndm=2/ndf=3; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if (
+            element_type in WALL_MACRO_3D_ELEMENT_TYPES
+            and (self.ndm, self.ndf) != (3, 6)
+        ):
+            raise ValueError(
+                f"{element_type} requires ndm=3/ndf=6; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
         if is_embedded and (
             int(self.ndm) != 2 or int(self.ndf) not in {2, 3}
         ):
@@ -669,6 +2013,90 @@ class StructuralModel:
                 "ASDEmbeddedNodeElement infrastructure currently supports "
                 "2D models with ndf=2 or ndf=3."
             )
+        if (
+            element_type in CONTINUUM_QUAD_ELEMENT_TYPES
+            and (self.ndm, self.ndf) != (2, 2)
+        ):
+            raise ValueError(
+                f"{element_type} requires ndm=2/ndf=2; got "
+                f"ndm={self.ndm}, ndf={self.ndf}."
+            )
+        if is_solid:
+            points = [
+                self.nodes[node_tag].xyz
+                for node_tag in (i, j, k, l, m, n, p, q)
+            ]
+            natural = (
+                (-1.0, -1.0, -1.0),
+                (1.0, -1.0, -1.0),
+                (1.0, 1.0, -1.0),
+                (-1.0, 1.0, -1.0),
+                (-1.0, -1.0, 1.0),
+                (1.0, -1.0, 1.0),
+                (1.0, 1.0, 1.0),
+                (-1.0, 1.0, 1.0),
+            )
+            jacobian = [[0.0] * 3 for _ in range(3)]
+            for point, signs in zip(points, natural):
+                for row in range(3):
+                    for col in range(3):
+                        jacobian[row][col] += (
+                            float(point[row]) * signs[col] / 8.0
+                        )
+            det_j = (
+                jacobian[0][0] * (
+                    jacobian[1][1] * jacobian[2][2]
+                    - jacobian[1][2] * jacobian[2][1]
+                )
+                - jacobian[0][1] * (
+                    jacobian[1][0] * jacobian[2][2]
+                    - jacobian[1][2] * jacobian[2][0]
+                )
+                + jacobian[0][2] * (
+                    jacobian[1][0] * jacobian[2][1]
+                    - jacobian[1][1] * jacobian[2][0]
+                )
+            )
+            spans = [
+                max(float(point[axis]) for point in points)
+                - min(float(point[axis]) for point in points)
+                for axis in range(3)
+            ]
+            scale = max(max(spans), 1.0)
+            if det_j <= scale ** 3 * 1.0e-12:
+                raise ValueError(
+                    f"{element_type} requires a non-degenerate, positively "
+                    "oriented eight-node brick ordering."
+                )
+
+        if element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
+            points = [
+                self.nodes[node_tag].xyz
+                for node_tag in (i, j, k, l)
+            ]
+            cross_values = []
+            for index in range(4):
+                a = points[index]
+                b = points[(index + 1) % 4]
+                c = points[(index + 2) % 4]
+                cross_values.append(
+                    (b[0] - a[0]) * (c[1] - b[1])
+                    - (b[1] - a[1]) * (c[0] - b[0])
+                )
+            scale = max(
+                max(
+                    abs(float(point[axis]))
+                    for point in points
+                )
+                for axis in (0, 1)
+            )
+            tol = max(1.0, scale * scale) * 1.0e-12
+            if any(value <= tol for value in cross_values):
+                raise ValueError(
+                    f"{element_type} requires four convex nodes ordered "
+                    "counter-clockwise in the XY plane."
+                )
+
         if element_type == "MEFI" and (self.ndm, self.ndf) not in {
             (2, 3), (3, 6),
         }:
@@ -725,6 +2153,32 @@ class StructuralModel:
             tuple(mefi_section_tags),
             embedded_penalty=embedded_penalty,
             embedded_constrain_rotation=embedded_constrain_rotation,
+            continuum_thickness=continuum_thickness,
+            continuum_material_tag=continuum_material_tag,
+            continuum_type=continuum_type,
+            continuum_pressure=continuum_pressure,
+            continuum_density=continuum_density,
+            continuum_body_force=tuple(continuum_body_force),
+            m=m,
+            n=n,
+            p=p,
+            q=q,
+            solid_material_tag=solid_material_tag,
+            solid_body_force=tuple(solid_body_force),
+            wall_center_ratio=wall_center_ratio,
+            wall_density=wall_density,
+            wall_thicknesses=tuple(wall_thicknesses),
+            wall_widths=tuple(wall_widths),
+            wall_rhos=tuple(wall_rhos),
+            wall_concrete_tags=tuple(wall_concrete_tags),
+            wall_steel_tags=tuple(wall_steel_tags),
+            wall_shear_tag=wall_shear_tag,
+            wall_nd_material_tags=tuple(wall_nd_material_tags),
+            wall_thick_mod=wall_thick_mod,
+            wall_poisson=wall_poisson,
+            beam_center_ratio=beam_center_ratio,
+            special_parameters=normalized_special,
+            additional_node_tags=tuple(additional_node_tags),
         )
         self.elements[tag] = ele
         return ele
@@ -736,8 +2190,11 @@ class StructuralModel:
             _strict_int(value, "Fixity value")
             for value in values
         )
-        if len(vals) != self.ndf:
-            raise ValueError(f"Expected {self.ndf} fixity values, got {len(vals)}")
+        expected_ndf = int(node.ndf)
+        if len(vals) != expected_ndf:
+            raise ValueError(
+                f"Expected {expected_ndf} fixity values, got {len(vals)}"
+            )
         if any(value not in {0, 1} for value in vals):
             raise ValueError("Fixity values must be 0 or 1.")
         node.fixity = vals
@@ -751,10 +2208,6 @@ class StructuralModel:
             _strict_int(value, "Fixity value")
             for value in values
         )
-        if len(vals) != self.ndf:
-            raise ValueError(
-                f"Expected {self.ndf} fixity values, got {len(vals)}"
-            )
         if any(value not in {0, 1} for value in vals):
             raise ValueError("Fixity values must be 0 or 1.")
         updated: set[int] = set()
@@ -763,20 +2216,33 @@ class StructuralModel:
             node = self.nodes.get(normalized_tag)
             if node is None:
                 continue
+            if len(vals) != int(node.ndf):
+                raise ValueError(
+                    f"Node {node.tag} has ndf={node.ndf}; received "
+                    f"{len(vals)} fixity values."
+                )
             node.fixity = vals
             updated.add(node.tag)
         return updated
 
     def clear_fixity_many(self, node_tags: Iterable[int]) -> set[int]:
-        return self.set_fixity_many(node_tags, (0,) * self.ndf)
+        updated: set[int] = set()
+        for tag in node_tags:
+            normalized_tag = _strict_int(tag, "Node tag")
+            node = self.nodes.get(normalized_tag)
+            if node is None:
+                continue
+            node.fixity = (0,) * int(node.ndf)
+            updated.add(node.tag)
+        return updated
 
     def set_mass(self, tag: int, values: Iterable[float]) -> None:
         tag = _strict_int(tag, "Node tag")
         node = self.nodes[tag]
         vals = tuple(float(v) for v in values)
-        if len(vals) != self.ndf:
+        if len(vals) != int(node.ndf):
             raise ValueError(
-                f"Expected {self.ndf} mass values, got {len(vals)}"
+                f"Expected {node.ndf} mass values, got {len(vals)}"
             )
         if any(not math.isfinite(value) for value in vals):
             raise ValueError("Nodal mass values must be finite.")
@@ -790,10 +2256,6 @@ class StructuralModel:
         values: Iterable[float],
     ) -> set[int]:
         vals = tuple(float(v) for v in values)
-        if len(vals) != self.ndf:
-            raise ValueError(
-                f"Expected {self.ndf} mass values, got {len(vals)}"
-            )
         if any(not math.isfinite(value) for value in vals):
             raise ValueError("Nodal mass values must be finite.")
         if any(value < 0.0 for value in vals):
@@ -804,12 +2266,25 @@ class StructuralModel:
             node = self.nodes.get(normalized_tag)
             if node is None:
                 continue
+            if len(vals) != int(node.ndf):
+                raise ValueError(
+                    f"Node {node.tag} has ndf={node.ndf}; received "
+                    f"{len(vals)} mass values."
+                )
             node.mass = vals
             updated.add(node.tag)
         return updated
 
     def clear_mass_many(self, node_tags: Iterable[int]) -> set[int]:
-        return self.set_mass_many(node_tags, (0.0,) * self.ndf)
+        updated: set[int] = set()
+        for tag in node_tags:
+            normalized_tag = _strict_int(tag, "Node tag")
+            node = self.nodes.get(normalized_tag)
+            if node is None:
+                continue
+            node.mass = (0.0,) * int(node.ndf)
+            updated.add(node.tag)
+        return updated
 
     def remove_element(self, tag: int) -> None:
         tag = _strict_int(tag, "Element tag")
@@ -858,7 +2333,12 @@ class StructuralModel:
         for tag in element_tags:
             normalized_tag = _strict_int(tag, "Element tag")
             element = self.elements.get(normalized_tag)
-            if element is None or element.element_type in TRUSS_ELEMENT_TYPES:
+            if (
+                element is None
+                or element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
+                or element.element_type in SPECIAL_TWO_NODE_ELEMENT_TYPES
+                or element.element_type in BEAM_CONTACT_ELEMENT_TYPES
+            ):
                 continue
             element.section_tag = value
             assigned.add(element.tag)
@@ -869,7 +2349,7 @@ class StructuralModel:
         element_tags: Iterable[int],
         material_tag: int | None,
     ) -> set[int]:
-        """Assign a uniaxial material only to Truss/CorotTruss elements."""
+        """Assign a uniaxial material only to area/material truss elements."""
         assigned: set[int] = set()
         value = (
             None
@@ -879,7 +2359,10 @@ class StructuralModel:
         for tag in element_tags:
             normalized_tag = _strict_int(tag, "Element tag")
             element = self.elements.get(normalized_tag)
-            if element is None or element.element_type not in TRUSS_ELEMENT_TYPES:
+            if (
+                element is None
+                or element.element_type not in TRUSS_MATERIAL_ELEMENT_TYPES
+            ):
                 continue
             element.truss_material_tag = value
             assigned.add(element.tag)
@@ -901,6 +2384,7 @@ class StructuralModel:
         interior_section_tag: int | None = None,
         hinge_i_length: float = 0.0,
         hinge_j_length: float = 0.0,
+        beam_center_ratio: float = 0.4,
     ) -> set[int]:
         updated: set[int] = set()
         for tag in element_tags:
@@ -927,6 +2411,7 @@ class StructuralModel:
                 interior_section_tag=interior_section_tag,
                 hinge_i_length=hinge_i_length,
                 hinge_j_length=hinge_j_length,
+                beam_center_ratio=beam_center_ratio,
                 truss_area=element.truss_area,
                 truss_material_tag=element.truss_material_tag,
                 truss_do_rayleigh=element.truss_do_rayleigh,
@@ -1138,6 +2623,7 @@ class StructuralModel:
                 self.nodes[tag].xyz,
                 self.nodes[tag].fixity,
                 self.nodes[tag].mass,
+                self.nodes[tag].ndf,
             )
             for tag in source_nodes
         }
@@ -1158,7 +2644,7 @@ class StructuralModel:
         for copy_index in range(1, copies + 1):
             node_map: dict[int, int] = {}
             for source_tag in sorted(source_nodes):
-                xyz, fixity, mass = base_nodes[source_tag]
+                xyz, fixity, mass, node_ndf = base_nodes[source_tag]
                 new_tag = next_node
                 next_node += 1
                 node = self.add_node(
@@ -1166,6 +2652,7 @@ class StructuralModel:
                     xyz[0] + float(dx) * copy_index,
                     xyz[1] + float(dy) * copy_index,
                     xyz[2] + float(dz) * copy_index,
+                    ndf=int(node_ndf),
                 )
                 node.fixity = tuple(fixity)
                 node.mass = tuple(mass)
@@ -1222,6 +2709,51 @@ class StructuralModel:
                     embedded_constrain_rotation=(
                         source.embedded_constrain_rotation
                     ),
+                    continuum_thickness=source.continuum_thickness,
+                    continuum_material_tag=source.continuum_material_tag,
+                    continuum_type=source.continuum_type,
+                    continuum_pressure=source.continuum_pressure,
+                    continuum_density=source.continuum_density,
+                    continuum_body_force=source.continuum_body_force,
+                    m=(
+                        node_map[source.m]
+                        if source.m is not None
+                        else None
+                    ),
+                    n=(
+                        node_map[source.n]
+                        if source.n is not None
+                        else None
+                    ),
+                    p=(
+                        node_map[source.p]
+                        if source.p is not None
+                        else None
+                    ),
+                    q=(
+                        node_map[source.q]
+                        if source.q is not None
+                        else None
+                    ),
+                    solid_material_tag=source.solid_material_tag,
+                    solid_body_force=source.solid_body_force,
+                    wall_center_ratio=source.wall_center_ratio,
+                    wall_density=source.wall_density,
+                    wall_thicknesses=source.wall_thicknesses,
+                    wall_widths=source.wall_widths,
+                    wall_rhos=source.wall_rhos,
+                    wall_concrete_tags=source.wall_concrete_tags,
+                    wall_steel_tags=source.wall_steel_tags,
+                    wall_shear_tag=source.wall_shear_tag,
+                    wall_nd_material_tags=source.wall_nd_material_tags,
+                    wall_thick_mod=source.wall_thick_mod,
+                    wall_poisson=source.wall_poisson,
+                    beam_center_ratio=source.beam_center_ratio,
+                    special_parameters=dict(source.special_parameters),
+                    additional_node_tags=tuple(
+                        node_map[tag]
+                        for tag in source.additional_node_tags
+                    ),
                 )
                 created_elements.add(new_tag)
 
@@ -1238,6 +2770,7 @@ class StructuralModel:
                     "xyz": list(node.xyz),
                     "fixity": list(node.fixity),
                     "mass": list(node.mass),
+                    "ndf": int(node.ndf),
                 }
                 for node in sorted(self.nodes.values(), key=lambda item: item.tag)
             ],
@@ -1281,6 +2814,36 @@ class StructuralModel:
                     "embedded_constrain_rotation": (
                         element.embedded_constrain_rotation
                     ),
+                    "continuum_thickness": element.continuum_thickness,
+                    "continuum_material_tag": element.continuum_material_tag,
+                    "continuum_type": element.continuum_type,
+                    "continuum_pressure": element.continuum_pressure,
+                    "continuum_density": element.continuum_density,
+                    "continuum_body_force": list(element.continuum_body_force),
+                    "m": element.m,
+                    "n": element.n,
+                    "p": element.p,
+                    "q": element.q,
+                    "solid_material_tag": element.solid_material_tag,
+                    "solid_body_force": list(element.solid_body_force),
+                    "wall_center_ratio": element.wall_center_ratio,
+                    "wall_density": element.wall_density,
+                    "wall_thicknesses": list(element.wall_thicknesses),
+                    "wall_widths": list(element.wall_widths),
+                    "wall_rhos": list(element.wall_rhos),
+                    "wall_concrete_tags": list(element.wall_concrete_tags),
+                    "wall_steel_tags": list(element.wall_steel_tags),
+                    "wall_shear_tag": element.wall_shear_tag,
+                    "wall_nd_material_tags": list(
+                        element.wall_nd_material_tags
+                    ),
+                    "wall_thick_mod": element.wall_thick_mod,
+                    "wall_poisson": element.wall_poisson,
+                    "beam_center_ratio": element.beam_center_ratio,
+                    "special_parameters": dict(element.special_parameters),
+                    "additional_node_tags": list(
+                        element.additional_node_tags
+                    ),
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -1312,14 +2875,16 @@ class StructuralModel:
                 float(xyz[0]),
                 float(xyz[1]),
                 float(xyz[2]) if len(xyz) > 2 else 0.0,
+                ndf=int(item.get("ndf", model.ndf)),
             )
             fixity = tuple(
                 _strict_int(value, "Fixity value")
-                for value in item.get("fixity", (0,) * model.ndf)
+                for value in item.get("fixity", (0,) * int(node.ndf))
             )
-            if len(fixity) != model.ndf:
+            if len(fixity) != int(node.ndf):
                 raise ValueError(
-                    f"Node {node.tag} has {len(fixity)} fixities; expected {model.ndf}."
+                    f"Node {node.tag} has {len(fixity)} fixities; "
+                    f"expected {node.ndf}."
                 )
             if any(value not in {0, 1} for value in fixity):
                 raise ValueError(
@@ -1328,12 +2893,12 @@ class StructuralModel:
             node.fixity = fixity
             mass = tuple(
                 float(value)
-                for value in item.get("mass", (0.0,) * model.ndf)
+                for value in item.get("mass", (0.0,) * int(node.ndf))
             )
-            if len(mass) != model.ndf:
+            if len(mass) != int(node.ndf):
                 raise ValueError(
                     f"Node {node.tag} has {len(mass)} mass values; "
-                    f"expected {model.ndf}."
+                    f"expected {node.ndf}."
                 )
             if any(not math.isfinite(value) for value in mass):
                 raise ValueError(
@@ -1390,6 +2955,54 @@ class StructuralModel:
                 tuple(item.get("mefi_section_tags", ())),
                 item.get("embedded_penalty"),
                 item.get("embedded_constrain_rotation", False),
+                float(item.get("continuum_thickness", 1.0)),
+                item.get("continuum_material_tag"),
+                str(item.get("continuum_type", "PlaneStrain")),
+                float(item.get("continuum_pressure", 0.0)),
+                float(item.get("continuum_density", 0.0)),
+                tuple(item.get("continuum_body_force", (0.0, 0.0))),
+                m=item.get("m"),
+                n=item.get("n"),
+                p=item.get("p"),
+                q=item.get("q"),
+                solid_material_tag=item.get("solid_material_tag"),
+                solid_body_force=tuple(
+                    item.get("solid_body_force", (0.0, 0.0, 0.0))
+                ),
+                wall_center_ratio=float(
+                    item.get("wall_center_ratio", 0.4)
+                ),
+                wall_density=float(item.get("wall_density", 0.0)),
+                wall_thicknesses=tuple(
+                    item.get("wall_thicknesses", ())
+                ),
+                wall_widths=tuple(item.get("wall_widths", ())),
+                wall_rhos=tuple(item.get("wall_rhos", ())),
+                wall_concrete_tags=tuple(
+                    item.get("wall_concrete_tags", ())
+                ),
+                wall_steel_tags=tuple(
+                    item.get("wall_steel_tags", ())
+                ),
+                wall_shear_tag=item.get("wall_shear_tag"),
+                wall_nd_material_tags=tuple(
+                    item.get("wall_nd_material_tags", ())
+                ),
+                wall_thick_mod=float(
+                    item.get("wall_thick_mod", 0.63)
+                ),
+                wall_poisson=float(
+                    item.get("wall_poisson", 0.25)
+                ),
+                beam_center_ratio=float(
+                    item.get("beam_center_ratio", 0.4)
+                ),
+                special_parameters=dict(
+                    item.get("special_parameters", {})
+                ),
+                additional_node_tags=tuple(
+                    item.get("additional_node_tags", ())
+                ),
             )
 
         return model

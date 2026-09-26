@@ -52,6 +52,7 @@ PREVIEW_MATERIAL_TYPES = {
     "Concrete01",
     "Concrete02",
     "Concrete04",
+    "ConcreteCM",
     "Hysteretic",
     "HystereticSmooth",
     "Pinching4",
@@ -70,6 +71,13 @@ PARAMETER_LABELS = {
     "Su": "Ultimate slip Su",
     "eps_sh": "Strain at hardening eps_sh",
     "eps_ult": "Ultimate strain eps_ult",
+    "fpcc": "Peak compression stress fpcc",
+    "epcc": "Peak compression strain epcc",
+    "rc": "Compression curve-shape parameter rc",
+    "xcrn": "Compression cracking parameter xcrn",
+    "rt": "Tension curve-shape parameter rt",
+    "xcrp": "Tension cracking parameter xcrp",
+    "GapClose": "Gap closure flag",
     "sigmaY": "Yield stress σy",
     "H_iso": "Isotropic hardening modulus Hiso",
     "H_kin": "Kinematic hardening modulus Hkin",
@@ -88,6 +96,7 @@ SWITCH_OPTIONS = {
     "mode": (("JacketC - circular FRP jacket", 0.0), ("Ultimate - user-defined fcu/ecu", 1.0)),
     "dmgType": (("cycle", 0.0), ("energy", 1.0)),
     "damage": (("noDamage", 0.0), ("damage", 1.0)),
+    "GapClose": (("Open gap", 0.0), ("Close gap", 1.0)),
 }
 
 
@@ -377,6 +386,34 @@ class MaterialEnvelopePreview(QWidget):
                     "Concrete02 compression + tension guide · λ affects unloading/reloading"
                 )
             return compression, note, annotations
+
+        if material_type == "ConcreteCM":
+            fpcc = p.get("fpcc", 0.0)
+            epcc = p.get("epcc", 0.0)
+            ec = abs(p.get("Ec", 0.0))
+            ft = max(p.get("ft", 0.0), 0.0)
+            et = max(p.get("et", 0.0), 0.0)
+            if abs(epcc) <= 1.0e-15:
+                return [], "epcc must be non-zero to draw ConcreteCM.", []
+            compression_end = 4.0 * epcc
+            pts = [
+                (compression_end, 0.15 * fpcc),
+                (epcc, fpcc),
+                (0.0, 0.0),
+            ]
+            if ft > 0.0:
+                eps_t = (
+                    et if et > 0.0
+                    else (ft / ec if ec > 1.0e-15 else 0.0001)
+                )
+                pts.extend([(eps_t, ft), (4.0 * eps_t, 0.1 * ft)])
+            return pts, (
+                "ConcreteCM parameter guide · Chang-Mander cyclic concrete "
+                "used by FSAM"
+            ), [
+                (epcc, fpcc, "epcc / fpcc"),
+                *(([(eps_t, ft, "et / ft")] if ft > 0.0 else [])),
+            ]
 
         if material_type == "Concrete04":
             fc = p.get("fc", 0.0)

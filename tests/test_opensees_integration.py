@@ -12,21 +12,37 @@ from openseespy_studio.crack_results import (
     mefi_crack_panel_states,
     mefi_crack_summary,
 )
-from openseespy_studio.generator import material_to_openseespy, to_openseespy
+from openseespy_studio.frame_setup import prepare_frame_grid
+from openseespy_studio.generator import (
+    FrameGridSpec,
+    generate_frame_grid,
+    generate_frame_project,
+    material_to_openseespy,
+    to_openseespy,
+)
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import StructuralModel
+from openseespy_studio.masonry_wall import (
+    MasonryWallSpec,
+    build_masonry_wall,
+)
 from openseespy_studio.moment_curvature import (
     MomentCurvatureSpec,
     build_moment_curvature_project,
 )
 from openseespy_studio.postprocess import moment_curvature_curve
-from openseespy_studio.rc_wall import RCWallSpec, build_rc_wall
+from openseespy_studio.rc_wall import (
+    RCWallSpec,
+    build_rc_wall,
+    build_rc_wall_macro_2d,
+)
 from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
     AnalysisSettingsData,
     ConnectionData,
     ElementLoadData,
     FiberData,
+    FrictionModelData,
     LoadPatternData,
     MaterialData,
     NDMaterialData,
@@ -2670,3 +2686,2094 @@ def test_imported_rc_wall_produces_crack_history_in_real_opensees(
     assert summary["cracked"] >= 1
     assert summary["max_ratio"] >= 1.0
     assert len(results["history"]["mefi_panel_strains"]["1"]["1"]) == 100
+
+
+
+def test_advanced_isolation_elements_construct_in_real_opensees(
+    tmp_path: Path,
+):
+    lead = ProjectDatabase()
+    lead.units = {"length": "m", "force": "N", "time": "s"}
+    lead.model = StructuralModel(ndm=3, ndf=6)
+    lead.model.add_node(1, 0.0, 0.0, 0.0)
+    lead.model.add_node(2, 0.0, 0.0, 0.5)
+    lead.model.add_element(
+        1,
+        1,
+        2,
+        element_type="LeadRubberX",
+        special_parameters={
+            "Fy": 1.2e5,
+            "alpha": 0.1,
+            "Gr": 0.8e6,
+            "Kbulk": 2.0e9,
+            "D1": 0.10,
+            "D2": 0.80,
+            "ts": 0.003,
+            "tr": 0.010,
+            "n": 20,
+            "orientation": (0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
+        },
+    )
+    lead_script = to_openseespy(
+        lead.model,
+        units=lead.units,
+        friction_models=lead.friction_models,
+    )
+    lead_path = tmp_path / "lead-rubber-x.py"
+    lead_path.write_text(lead_script, encoding="utf-8")
+    lead_run = subprocess.run(
+        [sys.executable, str(lead_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert lead_run.returncode == 0, lead_run.stderr
+
+    tfp = ProjectDatabase()
+    tfp.units = {"length": "m", "force": "N", "time": "s"}
+    tfp.model = StructuralModel(ndm=3, ndf=6)
+    tfp.model.add_node(1, 0.0, 0.0, 0.0)
+    tfp.model.add_node(2, 0.0, 0.0, 0.5)
+    for tag in range(1, 5):
+        tfp.add_material(
+            MaterialData(
+                tag,
+                f"Elastic {tag}",
+                "Elastic",
+                {"E": 1.0e8},
+            )
+        )
+    for tag, mu in ((1, 0.03), (2, 0.05), (3, 0.08)):
+        tfp.add_friction_model(
+            FrictionModelData(
+                tag,
+                f"Friction {tag}",
+                "Coulomb",
+                {"mu": mu},
+            )
+        )
+    tfp.model.add_element(
+        2,
+        1,
+        2,
+        element_type="TripleFrictionPendulum",
+        special_parameters={
+            "frnTag1": 1,
+            "frnTag2": 2,
+            "frnTag3": 3,
+            "vertMatTag": 1,
+            "rotZMatTag": 2,
+            "rotXMatTag": 3,
+            "rotYMatTag": 4,
+            "L1": 0.36,
+            "L2": 1.25,
+            "L3": 1.25,
+            "d1": 0.10,
+            "d2": 0.20,
+            "d3": 0.20,
+            "W": 1.0e6,
+            "uy": 0.0005,
+            "kvt": 1000.0,
+            "minFv": 100.0,
+            "tol": 1.0e-5,
+        },
+    )
+    tfp_script = to_openseespy(
+        tfp.model,
+        materials=tfp.materials,
+        units=tfp.units,
+        friction_models=tfp.friction_models,
+    )
+    tfp_path = tmp_path / "triple-friction-pendulum.py"
+    tfp_path.write_text(tfp_script, encoding="utf-8")
+    tfp_run = subprocess.run(
+        [sys.executable, str(tfp_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert tfp_run.returncode == 0, tfp_run.stderr
+
+
+def test_contact_elements_construct_in_real_opensees(tmp_path: Path):
+    cases: list[tuple[str, ProjectDatabase]] = []
+
+    z2 = ProjectDatabase()
+    z2.units = {"length": "m", "force": "N", "time": "s"}
+    z2.model = StructuralModel(ndm=2, ndf=2)
+    z2.model.add_node(1, 0.0, 0.0)
+    z2.model.add_node(2, 0.0, 0.0)
+    z2.model.add_element(
+        1, 1, 2,
+        element_type="zeroLengthContact2D",
+        special_parameters={
+            "Kn": 1.0e9,
+            "Kt": 1.0e8,
+            "mu": 0.3,
+            "normal": (1.0, 0.0),
+        },
+    )
+    cases.append(("zero-contact-2d", z2))
+
+    z3 = ProjectDatabase()
+    z3.units = {"length": "m", "force": "N", "time": "s"}
+    z3.model = StructuralModel(ndm=3, ndf=3)
+    z3.model.add_node(1, 0.0, 0.0, 0.0)
+    z3.model.add_node(2, 0.0, 0.0, 0.0)
+    z3.model.add_element(
+        1, 1, 2,
+        element_type="zeroLengthContact3D",
+        special_parameters={
+            "Kn": 1.0e9,
+            "Kt": 1.0e8,
+            "mu": 0.3,
+            "cohesion": 0.0,
+            "dir": 3,
+        },
+    )
+    cases.append(("zero-contact-3d", z3))
+
+    b2 = ProjectDatabase()
+    b2.units = {"length": "m", "force": "N", "time": "s"}
+    b2.model = StructuralModel(ndm=2, ndf=3)
+    b2.model.add_node(1, 0.0, 0.0)
+    b2.model.add_node(2, 1.0, 0.0)
+    b2.model.add_node(3, 0.5, 0.1, ndf=2)
+    b2.model.add_node(4, 0.5, 0.1, ndf=2)
+    b2.add_nd_material(
+        NDMaterialData(
+            1,
+            "Contact 2D",
+            "ContactMaterial2D",
+            {"mu": 0.3, "G": 1.0e8, "c": 0.0, "t": 0.0},
+        )
+    )
+    b2.model.add_element(
+        1, 1, 2, k=3, l=4,
+        element_type="BeamContact2D",
+        special_parameters={
+            "nd_material_tag": 1,
+            "width": 0.30,
+            "gTol": 1.0e-8,
+            "fTol": 1.0e-4,
+            "cFlag": 0,
+        },
+    )
+    cases.append(("beam-contact-2d", b2))
+
+    b3 = ProjectDatabase()
+    b3.units = {"length": "m", "force": "N", "time": "s"}
+    b3.model = StructuralModel(ndm=3, ndf=6)
+    b3.model.add_node(1, 0.0, 0.0, 0.0)
+    b3.model.add_node(2, 1.0, 0.0, 0.0)
+    b3.model.add_node(3, 0.5, 0.1, 0.0, ndf=3)
+    b3.model.add_node(4, 0.5, 0.1, 0.0, ndf=3)
+    b3.add_nd_material(
+        NDMaterialData(
+            1,
+            "Contact 3D",
+            "ContactMaterial3D",
+            {"mu": 0.3, "G": 1.0e8, "c": 0.0, "t": 0.0},
+        )
+    )
+    b3.add_transformation(
+        TransformationData(
+            1,
+            "Contact beam",
+            "Linear",
+            (0.0, 0.0, 1.0),
+        )
+    )
+    b3.model.add_element(
+        1, 1, 2, k=3, l=4,
+        element_type="BeamContact3D",
+        special_parameters={
+            "nd_material_tag": 1,
+            "radius": 0.15,
+            "transf_tag": 1,
+            "gTol": 1.0e-8,
+            "fTol": 1.0e-4,
+            "cFlag": 0,
+        },
+    )
+    cases.append(("beam-contact-3d", b3))
+
+    for name, project in cases:
+        project.validate_element_state(1)
+        script = to_openseespy(
+            project.model,
+            materials=project.materials,
+            sections=project.sections,
+            transformations=project.transformations,
+            constraints=project.constraints,
+            connections=project.connections,
+            nd_materials=project.nd_materials,
+            friction_models=project.friction_models,
+            units=project.units,
+        )
+        assert "# ERROR:" not in script
+        path = tmp_path / f"{name}.py"
+        path.write_text(script, encoding="utf-8")
+        completed = subprocess.run(
+            [sys.executable, str(path)],
+            cwd=tmp_path,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        assert completed.returncode == 0, (
+            name + "\nSTDOUT:\n" + completed.stdout
+            + "\nSTDERR:\n" + completed.stderr
+        )
+
+
+
+def test_section_based_trusses_construct_in_real_opensees(tmp_path: Path):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.model = StructuralModel(ndm=2, ndf=2)
+    project.model.add_node(1, 0.0, 0.0)
+    project.model.add_node(2, 3.0, 0.0)
+    project.model.add_node(3, 6.0, 0.0)
+    project.add_section(
+        SectionData(
+            tag=5,
+            name="Axial elastic",
+            section_type="Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.01,
+                "Iz": 1.0e-4,
+                "Iy": 1.0e-4,
+                "G": 7.7e10,
+                "J": 1.0e-5,
+            },
+        )
+    )
+    project.model.add_element(
+        41,
+        1,
+        2,
+        element_type="trussSection",
+        section_tag=5,
+        group="truss",
+    )
+    project.model.add_element(
+        42,
+        2,
+        3,
+        element_type="corotTrussSection",
+        section_tag=5,
+        group="truss",
+    )
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        nodal_loads=project.nodal_loads,
+        analyses=project.analyses,
+        active_analysis_tag=project.active_analysis_tag,
+        element_loads=project.element_loads,
+        prescribed_displacements=project.prescribed_displacements,
+        recorders=project.recorders,
+        units=project.units,
+        solution_results=project.solution_results,
+        nd_materials=project.nd_materials,
+        friction_models=project.friction_models,
+    )
+    target = tmp_path / "section-trusses.py"
+    target.write_text(script, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+
+def test_generated_friction_bearings_construct_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.model = StructuralModel("friction-bearing-smoke", ndm=2, ndf=3)
+    project.model.add_node(1, 0.0, 0.0)
+    project.model.add_node(2, 0.0, 0.20)
+    project.model.add_node(3, 0.0, 0.40)
+    project.add_material(
+        MaterialData(
+            1,
+            "Axial",
+            "Elastic",
+            parameters={"E": 1.0e8},
+        )
+    )
+    project.add_material(
+        MaterialData(
+            2,
+            "Rotation",
+            "Elastic",
+            parameters={"E": 1.0e8},
+        )
+    )
+    project.add_friction_model(
+        FrictionModelData(
+            1,
+            "PTFE",
+            "Coulomb",
+            {"mu": 0.05},
+        )
+    )
+    project.model.add_element(
+        10,
+        1,
+        2,
+        element_type="flatSliderBearing",
+        group="isolation",
+        special_parameters={
+            "frn_model_tag": 1,
+            "kInit": 2.0e7,
+            "p_mat_tag": 1,
+            "mz_mat_tag": 2,
+        },
+    )
+    project.model.add_element(
+        11,
+        2,
+        3,
+        element_type="singleFPBearing",
+        group="isolation",
+        special_parameters={
+            "frn_model_tag": 1,
+            "Reff": 2.5,
+            "kInit": 3.0e7,
+            "p_mat_tag": 1,
+            "mz_mat_tag": 2,
+        },
+    )
+
+    project.validate_element_state(10)
+    project.validate_element_state(11)
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        nd_materials=project.nd_materials,
+        friction_models=project.friction_models,
+        units=project.units,
+    )
+    assert "# ERROR:" not in script
+    assert "ops.frictionModel('Coulomb', 1, 0.05)" in script
+    assert "ops.element('flatSliderBearing', 10" in script
+    assert "ops.element('singleFPBearing', 11" in script
+
+    script_path = tmp_path / "friction-bearing-smoke.py"
+    script_path.write_text(
+        script + "\nprint('FRICTION_BEARINGS_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "FRICTION_BEARINGS_OK" in completed.stdout
+
+def test_generated_3d_friction_bearings_construct_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.model = StructuralModel(
+        "friction-bearing-3d-smoke",
+        ndm=3,
+        ndf=6,
+    )
+    project.model.add_node(1, 0.0, 0.0, 0.0)
+    project.model.add_node(2, 0.0, 0.0, 0.20)
+    project.model.add_node(3, 0.0, 0.0, 0.40)
+
+    for tag, name in (
+        (1, "Axial"),
+        (2, "Torsion"),
+        (3, "Moment Y"),
+        (4, "Moment Z"),
+    ):
+        project.add_material(
+            MaterialData(
+                tag,
+                name,
+                "Elastic",
+                parameters={"E": 1.0e8},
+            )
+        )
+    project.add_friction_model(
+        FrictionModelData(
+            1,
+            "PTFE",
+            "Coulomb",
+            {"mu": 0.05},
+        )
+    )
+
+    common = {
+        "frn_model_tag": 1,
+        "kInit": 2.0e7,
+        "p_mat_tag": 1,
+        "t_mat_tag": 2,
+        "my_mat_tag": 3,
+        "mz_mat_tag": 4,
+        "orientation": (0.0, 0.0, 1.0, 1.0, 0.0, 0.0),
+    }
+    project.model.add_element(
+        20,
+        1,
+        2,
+        element_type="flatSliderBearing",
+        group="isolation",
+        special_parameters=common,
+    )
+    project.model.add_element(
+        21,
+        2,
+        3,
+        element_type="singleFPBearing",
+        group="isolation",
+        special_parameters={**common, "Reff": 2.5},
+    )
+
+    project.validate_element_state(20)
+    project.validate_element_state(21)
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        nd_materials=project.nd_materials,
+        friction_models=project.friction_models,
+        units=project.units,
+    )
+    assert "# ERROR:" not in script
+    assert "'-T', 2, '-My', 3, '-Mz', 4" in script
+    assert "'-orient', 0, 0, 1, 1, 0, 0" in script
+
+    script_path = tmp_path / "friction-bearing-3d-smoke.py"
+    script_path.write_text(
+        script + "\nprint('FRICTION_BEARINGS_3D_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "FRICTION_BEARINGS_3D_OK" in completed.stdout
+
+def test_generated_masonpan12_constructs_in_real_opensees(tmp_path):
+    project = ProjectDatabase()
+    result = build_masonry_wall(
+        project,
+        MasonryWallSpec(
+            width=3.0,
+            height=2.8,
+            thickness=0.15,
+            formulation="MasonPan12",
+            masonpan_w_tot=0.25,
+            masonpan_w1=0.5,
+            name="Runtime Masonry",
+        ),
+    )
+    assert len(result.node_tags) == 12
+    assert len(result.element_tags) == 1
+    assert len(result.boundary_element_tags) == 12
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        nd_materials=project.nd_materials,
+        friction_models=project.friction_models,
+        units=project.units,
+    )
+    assert "# ERROR:" not in script
+    assert "ops.uniaxialMaterial('Masonry'" in script
+    assert "ops.element('MasonPan12'" in script
+
+    top_right = result.node_tags[6]
+    panel_tag = result.element_tags[0]
+    run_block = f"""
+ops.timeSeries('Linear', 901)
+ops.pattern('Plain', 901, 901)
+ops.load({top_right}, 1.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Plain')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_masonry_ok = ops.analyze(1)
+if _masonry_ok != 0:
+    raise RuntimeError(f'MasonPan12 smoke analysis failed: {{_masonry_ok}}')
+_shear = ops.eleResponse({panel_tag}, 'Shear') or []
+_force = ops.eleResponse({panel_tag}, 'localForce') or []
+_strain = ops.eleResponse({panel_tag}, 'deformation') or []
+print('MASONPAN12_RESPONSES_OK', len(_shear), len(_force), len(_strain))
+print('MASONPAN12_ANALYSIS_OK', ops.nodeDisp({top_right}, 1))
+"""
+    script_path = tmp_path / "masonpan12-smoke.py"
+    script_path.write_text(
+        script + "\n" + run_block,
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "MASONPAN12_ANALYSIS_OK" in completed.stdout
+    assert "MASONPAN12_RESPONSES_OK 2 6 6" in completed.stdout
+
+@pytest.mark.parametrize("formulation", ["MVLEM", "SFI_MVLEM"])
+def test_wall_macro_wizard_defaults_run_in_real_opensees(
+    tmp_path: Path,
+    formulation: str,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    spec = RCWallSpec(
+        width=1.20,
+        height=3.00,
+        thickness=0.20,
+        boundary_width=0.20,
+        vertical_elements=2,
+        macro_fibers=5,
+        formulation=formulation,
+        macro_shear_material_tag=None,
+        macro_web_fsam_tag=None,
+        macro_boundary_fsam_tag=None,
+        boundary_unconfined_thickness=0.05,
+        boundary_confined_thickness=0.15,
+        replace_geometry=True,
+        name=f"Runtime {formulation}",
+    )
+    result = build_rc_wall_macro_2d(project, spec)
+    top_node = result.node_tags[-1]
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in script
+    assert f"ops.element('{formulation}'" in script
+
+    run_block = f"""
+ops.timeSeries('Linear', 950)
+ops.pattern('Plain', 950, 950)
+ops.load({top_node}, 1.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Plain')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_wall_macro_ok = ops.analyze(1)
+if _wall_macro_ok != 0:
+    raise RuntimeError(
+        f'{formulation} default wizard analysis failed: {{_wall_macro_ok}}'
+    )
+print('WALL_MACRO_RUNTIME_OK', '{formulation}', ops.nodeDisp({top_node}, 1))
+"""
+    script_path = tmp_path / f"{formulation.lower()}-wizard-smoke.py"
+    script_path.write_text(script + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert f"WALL_MACRO_RUNTIME_OK {formulation}" in completed.stdout
+
+def test_frame_wizard_mixed_member_formulations_run_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            901,
+            "Frame Elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=901,
+        beam_section_tag=901,
+        column_element_type="forceBeamColumn",
+        beam_element_type="dispBeamColumn",
+        column_integration_type="Radau",
+        beam_integration_type="Legendre",
+        column_integration_points=4,
+        beam_integration_points=5,
+    )
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert "ops.element('forceBeamColumn'" in source
+    assert "ops.element('dispBeamColumn'" in source
+
+    top_right = max(
+        project.model.nodes,
+        key=lambda tag: (
+            project.model.nodes[tag].xyz[2],
+            project.model.nodes[tag].xyz[0],
+        ),
+    )
+    run_block = f"""
+ops.timeSeries('Linear', 990)
+ops.pattern('Plain', 990, 990)
+ops.load({top_right}, 1000.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Plain')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_frame_ok = ops.analyze(1)
+if _frame_ok != 0:
+    raise RuntimeError(f'Frame Wizard mixed formulation failed: {{_frame_ok}}')
+print('FRAME_WIZARD_MEMBER_OK', ops.nodeDisp({top_right}, 1))
+"""
+    script_path = tmp_path / "frame-wizard-member-smoke.py"
+    script_path.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_WIZARD_MEMBER_OK" in completed.stdout
+
+def test_frame_wizard_hinge_members_run_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            911,
+            "Hinge Elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=911,
+        beam_section_tag=911,
+        column_element_type="forceBeamColumn",
+        beam_element_type="dispBeamColumn",
+        column_integration_type="HingeRadau",
+        beam_integration_type="HingeEndpoint",
+        column_hinge_i_section_tag=911,
+        column_hinge_j_section_tag=911,
+        column_interior_section_tag=911,
+        beam_hinge_i_section_tag=911,
+        beam_hinge_j_section_tag=911,
+        beam_interior_section_tag=911,
+        column_hinge_i_length=0.25,
+        column_hinge_j_length=0.25,
+        beam_hinge_i_length=0.30,
+        beam_hinge_j_length=0.30,
+        column_mass_per_length=5.0,
+        beam_mass_per_length=4.0,
+        beam_consistent_mass=True,
+    )
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert "ops.beamIntegration('HingeRadau'" in source
+    assert "ops.beamIntegration('HingeEndpoint'" in source
+    assert "'-cMass'" in source
+
+    top_right = max(
+        project.model.nodes,
+        key=lambda tag: (
+            project.model.nodes[tag].xyz[2],
+            project.model.nodes[tag].xyz[0],
+        ),
+    )
+    run_block = f"""
+ops.timeSeries('Linear', 991)
+ops.pattern('Plain', 991, 991)
+ops.load({top_right}, 1000.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Plain')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_hinge_ok = ops.analyze(1)
+if _hinge_ok != 0:
+    raise RuntimeError(
+        f'Frame Wizard hinge analysis failed: {{_hinge_ok}}'
+    )
+print('FRAME_WIZARD_HINGE_OK', ops.nodeDisp({top_right}, 1))
+"""
+    target = tmp_path / "frame-wizard-hinge-smoke.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_WIZARD_HINGE_OK" in completed.stdout
+
+
+
+def test_frame_wizard_zero_length_joints_build_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            912,
+            "Joint rotational spring",
+            "Elastic",
+            parameters={"E": 2.0e7},
+            source={
+                "response_quantity": "moment_rotation",
+                "parameter_dimensions": {"E": "stiffness"},
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            911,
+            "Joint frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=911,
+        beam_section_tag=911,
+        joint_model="ZeroLength",
+        joint_material_tag=912,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["joint_connections"] == 2
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('zeroLength'") >= 2
+    assert source.count("ops.equalDOF(") >= 2
+    assert "'-dir', 5" in source
+
+    target = tmp_path / "frame-wizard-zero-length-joints.py"
+    target.write_text(
+        source + "\nprint('FRAME_WIZARD_JOINT_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_WIZARD_JOINT_OK" in completed.stdout
+
+
+def _real_macro_joint_project() -> ProjectDatabase:
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            930,
+            "Joint component elastic",
+            "Elastic",
+            parameters={"E": 2.0e7},
+            source={
+                "response_quantity": "moment_rotation",
+                "parameter_dimensions": {"E": "stiffness"},
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            931,
+            "Macro-joint frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    return project
+
+
+@pytest.mark.parametrize(
+    "joint_model",
+    ["Joint2D", "BeamColumnJoint", "KrawinklerPanelZone"],
+)
+def test_frame_wizard_macro_joint_models_build_in_real_opensees(
+    tmp_path: Path,
+    joint_model: str,
+):
+    project = _real_macro_joint_project()
+    kwargs = {
+        "joint_model": joint_model,
+        "joint_panel_width": 0.40,
+        "joint_panel_height": 0.50,
+    }
+    if joint_model == "Joint2D":
+        kwargs.update({
+            "joint_material_tag": 930,
+            "joint_interface_material_tags": (0, 0, 0, 0),
+            "joint_large_disp": 0,
+        })
+    elif joint_model == "BeamColumnJoint":
+        kwargs.update({
+            "joint_component_material_tags": (930,) * 13,
+            "joint_height_factor": 1.0,
+            "joint_width_factor": 1.0,
+        })
+    else:
+        kwargs.update({
+            "joint_material_tag": 930,
+            "joint_rigid_a": 10.0,
+            "joint_rigid_e": 2.0e14,
+            "joint_rigid_i": 10.0,
+        })
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=931,
+        beam_section_tag=931,
+        **kwargs,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["joint_connections"] == 2
+    assert project.model.ndm == 2
+    assert project.model.ndf == 3
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    if joint_model == "Joint2D":
+        assert "ops.element('Joint2D'" in source
+    elif joint_model == "BeamColumnJoint":
+        assert "ops.element('beamColumnJoint'" in source
+    else:
+        assert "Krawinkler panel-zone macro" in source
+        assert "'-dir', 6" in source
+
+    target = tmp_path / f"frame-wizard-{joint_model}.py"
+    target.write_text(
+        source + f"\nprint('FRAME_MACRO_OK {joint_model}')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert f"FRAME_MACRO_OK {joint_model}" in completed.stdout
+
+
+def test_frame_wizard_rigid_diaphragm_builds_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            940,
+            "Diaphragm frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=2,
+        dx=5.0,
+        dy=4.0,
+        dz=3.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=940,
+        beam_section_tag=940,
+        diaphragm_mode="Rigid",
+        diaphragm_levels=(1, 2),
+        diaphragm_floor_mass=12.0,
+        diaphragm_rotational_inertia=4.0,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["diaphragm_constraints"] == 2
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.rigidDiaphragm(3,") == 2
+    assert source.count("ops.mass(") >= 2
+
+    master_tags = [
+        constraint.retained_node
+        for constraint in project.constraints.values()
+        if constraint.constraint_type == "rigidDiaphragm"
+    ]
+    assert len(master_tags) == 2
+
+    target = tmp_path / "frame-wizard-rigid-diaphragm.py"
+    target.write_text(
+        source + "\nprint('FRAME_DIAPHRAGM_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_DIAPHRAGM_OK" in completed.stdout
+
+
+def test_frame_wizard_explicit_shell_slab_builds_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            950,
+            "Frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            951,
+            "Elastic shell slab",
+            "ElasticMembranePlate",
+            parameters={
+                "E": 30.0e9,
+                "nu": 0.20,
+                "h": 0.20,
+                "rho": 0.0,
+                "EpModifier": 1.0,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=950,
+        beam_section_tag=950,
+        diaphragm_mode="Shell",
+        diaphragm_levels=(1,),
+        slab_section_tag=951,
+        slab_element_type="ShellMITC4",
+        slab_divisions_x=2,
+        slab_divisions_y=2,
+        slab_mass_per_area=2.0,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["slab_elements"] == 4
+    assert result["slab_beam_segments_added"] == 4
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('ShellMITC4'") == 4
+    assert "ops.section('ElasticMembranePlateSection', 951" in source
+    assert source.count("ops.mass(") >= 9
+
+    target = tmp_path / "frame-wizard-shell-slab.py"
+    target.write_text(
+        source + "\nprint('FRAME_SHELL_SLAB_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_SHELL_SLAB_OK" in completed.stdout
+
+
+def test_frame_wizard_foundation_springs_build_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            960,
+            "Foundation UX",
+            "Elastic",
+            parameters={"E": 2.0e8},
+            source={
+                "response_quantity": "force_deformation",
+                "parameter_dimensions": {"E": "stiffness"},
+            },
+        )
+    )
+    project.add_material(
+        MaterialData(
+            961,
+            "Foundation UZ",
+            "Elastic",
+            parameters={"E": 3.0e8},
+            source={
+                "response_quantity": "force_deformation",
+                "parameter_dimensions": {"E": "stiffness"},
+            },
+        )
+    )
+    project.add_material(
+        MaterialData(
+            962,
+            "Foundation RY",
+            "Elastic",
+            parameters={"E": 4.0e7},
+            source={
+                "response_quantity": "moment_rotation",
+                "parameter_dimensions": {"E": "stiffness"},
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            963,
+            "Foundation frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=963,
+        beam_section_tag=963,
+        foundation_mode="Springs",
+        foundation_material_tags=(960, 0, 961, 0, 962, 0),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["foundation_connections"] == 2
+    assert result["foundation_ground_nodes"] == 2
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('zeroLength'") >= 2
+    assert "'-dir', 1, 3, 5" in source
+
+    top_right = max(
+        (
+            tag
+            for tag, node in project.model.nodes.items()
+            if abs(node.xyz[2] - 3.5) < 1.0e-12
+        ),
+        key=lambda tag: project.model.nodes[tag].xyz[0],
+    )
+    run_block = f"""
+ops.timeSeries('Linear', 996)
+ops.pattern('Plain', 996, 996)
+ops.load({top_right}, 1000.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Transformation')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_ok = ops.analyze(1)
+if _ok != 0:
+    raise RuntimeError(f'Foundation spring analysis failed: {{_ok}}')
+print('FRAME_FOUNDATION_OK', ops.nodeDisp({top_right}, 1))
+"""
+    target = tmp_path / "frame-wizard-foundation-springs.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_FOUNDATION_OK" in completed.stdout
+
+
+def test_frame_wizard_per_base_foundation_profiles_run_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+
+    for tag, stiffness, name in (
+        (970, 1.0e8, "Footing UX"),
+        (971, 3.0e8, "Footing UZ"),
+        (972, 4.0e7, "Footing RY"),
+        (973, 4.0e8, "Pile-group UX"),
+        (974, 6.0e8, "Pile-group UZ"),
+        (975, 1.2e8, "Pile-group RY"),
+    ):
+        project.add_material(
+            MaterialData(
+                tag,
+                name,
+                "Elastic",
+                parameters={"E": stiffness},
+                source={
+                    "response_quantity": "force_deformation",
+                    "parameter_dimensions": {"E": "stiffness"},
+                },
+            )
+        )
+
+    project.add_section(
+        SectionData(
+            976,
+            "Per-base foundation frame",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=976,
+        beam_section_tag=976,
+        foundation_mode="Springs",
+        foundation_assignment_mode="PerBase",
+        foundation_profile_material_tags=(
+            (970, 0, 971, 0, 972, 0),
+            (973, 0, 974, 0, 975, 0),
+        ),
+        foundation_base_profile_indices=(0, 1),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["foundation_connections"] == 2
+    assert result["foundation_profiles_used"] == 2
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert "970, 971, 972" in source
+    assert "973, 974, 975" in source
+
+    top_right = 4
+    run_block = f"""
+ops.timeSeries('Linear', 997)
+ops.pattern('Plain', 997, 997)
+ops.load({top_right}, 1000.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Transformation')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_ok = ops.analyze(1)
+if _ok != 0:
+    raise RuntimeError(f'Per-base foundation analysis failed: {{_ok}}')
+print('FRAME_PER_BASE_FOUNDATION_OK', ops.nodeDisp({top_right}, 1))
+"""
+    target = tmp_path / "frame-wizard-per-base-foundation.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_PER_BASE_FOUNDATION_OK" in completed.stdout
+
+
+def test_frame_wizard_x_bracing_runs_in_real_opensees(tmp_path: Path):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            980,
+            "Brace steel elastic",
+            "Elastic",
+            parameters={"E": 2.0e11},
+            source={
+                "response_quantity": "stress_strain",
+                "parameter_dimensions": {"E": "stress"},
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            981,
+            "Braced frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=981,
+        beam_section_tag=981,
+        brace_mode="Truss",
+        brace_pattern="X",
+        brace_element_type="corotTruss",
+        brace_material_tag=980,
+        brace_area=0.002,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["brace_panels"] == 1
+    assert result["brace_elements"] == 2
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('corotTruss'") == 2
+
+    top_right = 4
+    run_block = f"""
+ops.timeSeries('Linear', 998)
+ops.pattern('Plain', 998, 998)
+ops.load({top_right}, 1000.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Transformation')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_ok = ops.analyze(1)
+if _ok != 0:
+    raise RuntimeError(f'Braced frame analysis failed: {{_ok}}')
+print('FRAME_BRACING_OK', ops.nodeDisp({top_right}, 1))
+"""
+    target = tmp_path / "frame-wizard-x-bracing.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_BRACING_OK" in completed.stdout
+
+
+def test_frame_wizard_chevron_bracing_builds_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            982,
+            "Chevron brace elastic",
+            "Elastic",
+            parameters={"E": 2.0e11},
+            source={
+                "response_quantity": "stress_strain",
+                "parameter_dimensions": {"E": "stress"},
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            983,
+            "Chevron frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=6.0,
+        dz=4.0,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=983,
+        beam_section_tag=983,
+        brace_mode="Truss",
+        brace_pattern="VUpper",
+        brace_element_type="truss",
+        brace_material_tag=982,
+        brace_area=0.002,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["brace_elements"] == 2
+    assert result["brace_member_splits"] == 1
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('Truss'") == 2
+
+    target = tmp_path / "frame-wizard-chevron-bracing.py"
+    target.write_text(
+        source + "\nprint('FRAME_CHEVRON_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_CHEVRON_OK" in completed.stdout
+
+
+def test_frame_wizard_yz_bracing_runs_in_real_opensees(tmp_path: Path):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            984,
+            "YZ brace elastic",
+            "Elastic",
+            parameters={"E": 2.0e11},
+            source={
+                "response_quantity": "stress_strain",
+                "parameter_dimensions": {"E": "stress"},
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            985,
+            "YZ braced frame",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.5,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=985,
+        beam_section_tag=985,
+        brace_mode="Truss",
+        brace_plane_mode="Y",
+        brace_pattern="X",
+        brace_element_type="corotTruss",
+        brace_material_tag=984,
+        brace_area=0.002,
+        brace_y_bays=(0,),
+        brace_storeys=(1,),
+        brace_x_plane_scope="XMin",
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["brace_yz_panels"] == 1
+    assert result["brace_elements"] == 2
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('corotTruss'") == 2
+
+    top_far = max(
+        (
+            tag
+            for tag, node in project.model.nodes.items()
+            if abs(node.xyz[2] - 3.5) < 1.0e-12
+        ),
+        key=lambda tag: project.model.nodes[tag].xyz[1],
+    )
+    run_block = f"""
+ops.timeSeries('Linear', 999)
+ops.pattern('Plain', 999, 999)
+ops.load({top_far}, 0.0, 1000.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Transformation')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_ok = ops.analyze(1)
+if _ok != 0:
+    raise RuntimeError(f'YZ braced frame analysis failed: {{_ok}}')
+print('FRAME_YZ_BRACING_OK', ops.nodeDisp({top_far}, 2))
+"""
+    target = tmp_path / "frame-wizard-yz-bracing.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_YZ_BRACING_OK" in completed.stdout
+
+
+def test_frame_wizard_mixed_bracing_builds_in_real_opensees(tmp_path: Path):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            986,
+            "Mixed brace steel",
+            "Steel01",
+            parameters={
+                "Fy": 3.5e8,
+                "E0": 2.0e11,
+                "b": 0.01,
+            },
+            source={
+                "response_quantity": "stress_strain",
+                "parameter_dimensions": {
+                    "Fy": "stress",
+                    "E0": "stress",
+                },
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            987,
+            "Mixed braced frame",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=4.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=987,
+        beam_section_tag=987,
+        brace_mode="Truss",
+        brace_plane_mode="Both",
+        brace_pattern="X",
+        brace_element_type="corotTruss",
+        brace_material_tag=986,
+        brace_area=0.002,
+        brace_x_bays=(0,),
+        brace_y_bays=(0,),
+        brace_storeys=(1,),
+        brace_y_plane_scope="YMin",
+        brace_x_plane_scope="XMin",
+        brace_panel_patterns=(
+            ("X", 0, 0, 1, "DiagonalForward"),
+            ("Y", 0, 0, 1, "KRight"),
+        ),
+        brace_response_preset="BRBReady",
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["brace_panels"] == 2
+    assert result["brace_elements"] == 3
+    assert result["brace_member_splits"] == 1
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('corotTruss'") == 3
+    target = tmp_path / "frame-wizard-mixed-bracing.py"
+    target.write_text(
+        source + "\nprint('FRAME_MIXED_BRACING_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_MIXED_BRACING_OK" in completed.stdout
+
+
+def test_frame_wizard_static_loads_run_in_real_opensees(tmp_path: Path):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            990,
+            "Loaded frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=990,
+        beam_section_tag=990,
+        load_mode="Static",
+        load_self_weight=True,
+        load_self_weight_density=7850.0,
+        load_beam_udl=True,
+        load_beam_scope="X",
+        load_storeys=(1,),
+        load_beam_udl_coordinate_system="global",
+        load_beam_udl_vector=(0.0, 0.0, -5000.0),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["load_patterns"] == 1
+    assert result["self_weight_loads"] == 3
+    assert result["beam_udl_loads"] == 1
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        nodal_loads=project.nodal_loads,
+        prescribed_displacements=project.prescribed_displacements,
+        element_loads=project.element_loads,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert "ops.timeSeries('Linear'" in source
+    assert "ops.pattern('Plain'" in source
+    assert source.count("'-beamUniform'") >= 4
+
+    top_right = 4
+    run_block = f"""
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Transformation')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_ok = ops.analyze(1)
+if _ok != 0:
+    raise RuntimeError(f'Loaded frame analysis failed: {{_ok}}')
+print('FRAME_STATIC_LOADS_OK', ops.nodeDisp({top_right}, 3))
+"""
+    target = tmp_path / "frame-wizard-static-loads.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_STATIC_LOADS_OK" in completed.stdout
+
+
+def test_frame_wizard_mass_to_modal_runs_eigen_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            990,
+            "Modal frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.5,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=990,
+        beam_section_tag=990,
+        load_mode="Static",
+        load_floor_area=True,
+        load_floor_area_pressure=1000.0,
+        load_floor_area_direction="X",
+        load_storeys=(1,),
+        mass_source_mode="Source",
+        mass_include_self=False,
+        mass_include_static_loads=True,
+        mass_static_load_factor=1.0,
+        mass_gravity_axis=3,
+        mass_directions=(1, 2),
+        modal_mode="Modal",
+        modal_num_modes=2,
+        modal_eigen_solver="-fullGenLapack",
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["mass_sources"] == 1
+    assert result["modal_analyses"] == 1
+    assert result["modal_results"] == 3
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        element_loads=project.element_loads,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    run_block = """
+ops.wipeAnalysis()
+_eigs = ops.eigen('-fullGenLapack', 2)
+if len(_eigs) != 2 or any(float(value) <= 0.0 for value in _eigs):
+    raise RuntimeError(f'Frame modal eigen failed: {_eigs}')
+print('FRAME_MODAL_OK', _eigs)
+"""
+    target = tmp_path / "frame-wizard-modal.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_MODAL_OK" in completed.stdout

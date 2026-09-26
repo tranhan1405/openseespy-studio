@@ -1721,7 +1721,7 @@ class SectionDialog(QDialog):
         self.name.setText(section.name if section else f"Section {next_tag}")
 
         self.section_type = QComboBox()
-        self.section_type.addItems(["Elastic", "Fiber"])
+        self.section_type.addItems(["Elastic", "Fiber", "FiberInt"])
         if section:
             self.section_type.setCurrentText(section.section_type)
 
@@ -1754,6 +1754,9 @@ class SectionDialog(QDialog):
 
         self.fiber_page = self._build_fiber_page(section)
         self.stack.addWidget(self.fiber_page)
+
+        self.fiber_int_page = self._build_fiber_int_page(section)
+        self.stack.addWidget(self.fiber_int_page)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -1843,6 +1846,7 @@ class SectionDialog(QDialog):
                         combo.setCurrentIndex(index)
                 combo.blockSignals(False)
 
+        self._refresh_fiber_int_materials()
         self._refresh_frp_material_combo(select_tag)
         self._update_fiber_outputs()
 
@@ -1966,6 +1970,8 @@ class SectionDialog(QDialog):
                 "Iy": f"Iy [{lu}⁴]:",
                 "Iz": f"Iz [{lu}⁴]:",
                 "J": f"J [{lu}⁴]:",
+                "Avy": f"Avy shear area [{lu}²]:",
+                "Avz": f"Avz shear area [{lu}²]:",
             }
             form.addRow(labels.get(key, f"{key}:"), spin)
             self.elastic_spins[key] = spin
@@ -2265,6 +2271,292 @@ class SectionDialog(QDialog):
 
         return page
 
+    def _build_fiber_int_page(
+        self,
+        section: SectionData | None,
+    ) -> QWidget:
+        page = QWidget()
+        root = QVBoxLayout(page)
+
+        intro = QLabel(
+            "FiberInt is the flexure-shear interaction section used by "
+            "dispBeamColumnInt. Vertical fibers use OpenSees fiber; "
+            "horizontal reinforcement uses Hfiber. Concrete material tags "
+            "must be ≤ 1000 and steel tags must be > 1000."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(
+            "padding: 7px; background: #eef4fb; color: #40566c;"
+        )
+        root.addWidget(intro)
+
+        strip_form = QFormLayout()
+        self.fiber_int_strip_count: dict[str, QSpinBox] = {}
+        self.fiber_int_strip_thickness: dict[str, QDoubleSpinBox] = {}
+        for index in range(1, 4):
+            n_key = f"nStrip{index}"
+            t_key = f"thick{index}"
+            n_value = int(
+                section.parameters.get(
+                    n_key,
+                    SECTION_DEFAULTS["FiberInt"][n_key],
+                )
+                if section and section.section_type == "FiberInt"
+                else SECTION_DEFAULTS["FiberInt"][n_key]
+            )
+            t_value = float(
+                section.parameters.get(
+                    t_key,
+                    SECTION_DEFAULTS["FiberInt"][t_key],
+                )
+                if section and section.section_type == "FiberInt"
+                else SECTION_DEFAULTS["FiberInt"][t_key]
+            )
+            n_spin = _nonnegative_int(n_value, 1000)
+            t_spin = _float_spin(t_value, low=1.0e-12)
+            self.fiber_int_strip_count[n_key] = n_spin
+            self.fiber_int_strip_thickness[t_key] = t_spin
+
+            holder = QWidget()
+            row = QHBoxLayout(holder)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            row.addWidget(QLabel("NStrip"))
+            row.addWidget(n_spin)
+            row.addWidget(QLabel(
+                f"thickness [{self.unit_system.length}]"
+            ))
+            row.addWidget(t_spin, 1)
+            strip_form.addRow(f"Region {index}:", holder)
+        root.addLayout(strip_form)
+
+        tabs = QTabWidget()
+        root.addWidget(tabs, 1)
+
+        vertical_page = QWidget()
+        vertical_layout = QVBoxLayout(vertical_page)
+        vertical_note = QLabel(
+            "Vertical fibers: use one or more concrete/steel fibers at each "
+            "strip y-location. The number of distinct y-locations must equal "
+            "NStrip1 + NStrip2 + NStrip3."
+        )
+        vertical_note.setWordWrap(True)
+        vertical_layout.addWidget(vertical_note)
+        self.fiber_int_vertical_table = QTableWidget(0, 4)
+        self.fiber_int_vertical_table.setHorizontalHeaderLabels(
+            ["y", "z", "Area", "Material"]
+        )
+        self.fiber_int_vertical_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Stretch
+        )
+        vertical_layout.addWidget(self.fiber_int_vertical_table, 1)
+        vertical_buttons = QHBoxLayout()
+        add_vertical = QPushButton("Add Vertical Fiber")
+        remove_vertical = QPushButton("Remove Selected")
+        add_vertical.clicked.connect(
+            lambda: self._add_fiber_int_row(
+                self.fiber_int_vertical_table,
+                horizontal=False,
+            )
+        )
+        remove_vertical.clicked.connect(
+            lambda: self._remove_fiber_int_rows(
+                self.fiber_int_vertical_table
+            )
+        )
+        vertical_buttons.addWidget(add_vertical)
+        vertical_buttons.addWidget(remove_vertical)
+        vertical_buttons.addStretch(1)
+        vertical_layout.addLayout(vertical_buttons)
+        tabs.addTab(vertical_page, "Vertical fibers")
+
+        horizontal_page = QWidget()
+        horizontal_layout = QVBoxLayout(horizontal_page)
+        horizontal_note = QLabel(
+            "Horizontal Hfibers: steel reinforcement only; OpenSees "
+            "FiberInt requires steel material tags > 1000."
+        )
+        horizontal_note.setWordWrap(True)
+        horizontal_layout.addWidget(horizontal_note)
+        self.fiber_int_horizontal_table = QTableWidget(0, 4)
+        self.fiber_int_horizontal_table.setHorizontalHeaderLabels(
+            ["y", "z", "Area", "Steel material"]
+        )
+        self.fiber_int_horizontal_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Stretch
+        )
+        horizontal_layout.addWidget(self.fiber_int_horizontal_table, 1)
+        horizontal_buttons = QHBoxLayout()
+        add_horizontal = QPushButton("Add Hfiber")
+        remove_horizontal = QPushButton("Remove Selected")
+        add_horizontal.clicked.connect(
+            lambda: self._add_fiber_int_row(
+                self.fiber_int_horizontal_table,
+                horizontal=True,
+            )
+        )
+        remove_horizontal.clicked.connect(
+            lambda: self._remove_fiber_int_rows(
+                self.fiber_int_horizontal_table
+            )
+        )
+        horizontal_buttons.addWidget(add_horizontal)
+        horizontal_buttons.addWidget(remove_horizontal)
+        horizontal_buttons.addStretch(1)
+        horizontal_layout.addLayout(horizontal_buttons)
+        tabs.addTab(horizontal_page, "Horizontal Hfibers")
+
+        if section and section.section_type == "FiberInt":
+            for fiber in section.fibers:
+                self._add_fiber_int_row(
+                    self.fiber_int_vertical_table,
+                    fiber=fiber,
+                    horizontal=False,
+                )
+            for fiber in section.horizontal_fibers:
+                self._add_fiber_int_row(
+                    self.fiber_int_horizontal_table,
+                    fiber=fiber,
+                    horizontal=True,
+                )
+        return page
+
+    def _fiber_int_material_combo(
+        self,
+        selected_tag: int | None = None,
+        *,
+        horizontal: bool = False,
+    ) -> QComboBox:
+        combo = QComboBox()
+        for tag in sorted(self.materials):
+            material = self.materials[tag]
+            is_steel = (
+                "Steel" in material.material_type
+                or material.material_type
+                in {"Hardening", "ElasticPP", "ElasticBilin"}
+            )
+            is_concrete = (
+                "Concrete" in material.material_type
+                or material.material_type.startswith(
+                    "FRPConfinedConcrete"
+                )
+            )
+            allowed = (
+                is_steel and int(tag) > 1000
+                if horizontal
+                else (
+                    (is_concrete and int(tag) <= 1000)
+                    or (is_steel and int(tag) > 1000)
+                )
+            )
+            if not allowed:
+                continue
+            combo.addItem(
+                f"{tag} - {material.name} ({material.material_type})",
+                int(tag),
+            )
+        if combo.count() == 0:
+            combo.addItem(
+                (
+                    "No steel material tag > 1000"
+                    if horizontal
+                    else "No compatible concrete/steel material"
+                ),
+                None,
+            )
+            combo.setEnabled(False)
+        if selected_tag is not None:
+            index = combo.findData(int(selected_tag))
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        return combo
+
+    def _add_fiber_int_row(
+        self,
+        table: QTableWidget,
+        fiber: FiberData | None = None,
+        *,
+        horizontal: bool,
+    ) -> None:
+        row = table.rowCount()
+        table.insertRow(row)
+        values = (
+            (fiber.y, fiber.z, fiber.area)
+            if fiber is not None
+            else (0.0, 0.0, 1.0e-4)
+        )
+        for column, value in enumerate(values):
+            table.setItem(
+                row,
+                column,
+                QTableWidgetItem(f"{float(value):.10g}"),
+            )
+        table.setCellWidget(
+            row,
+            3,
+            self._fiber_int_material_combo(
+                fiber.material_tag if fiber is not None else None,
+                horizontal=horizontal,
+            ),
+        )
+
+    @staticmethod
+    def _remove_fiber_int_rows(table: QTableWidget) -> None:
+        rows = sorted(
+            {index.row() for index in table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            table.removeRow(row)
+
+    @staticmethod
+    def _fiber_int_table_data(
+        table: QTableWidget,
+        label: str,
+    ) -> list[FiberData]:
+        fibers: list[FiberData] = []
+        for row in range(table.rowCount()):
+            combo = table.cellWidget(row, 3)
+            if not isinstance(combo, QComboBox) or combo.currentData() is None:
+                raise ValueError(
+                    f"{label} row {row + 1} has no compatible material."
+                )
+            cells = [table.item(row, column) for column in range(3)]
+            if any(cell is None for cell in cells):
+                raise ValueError(f"{label} row {row + 1} is incomplete.")
+            fibers.append(
+                FiberData(
+                    y=float(cells[0].text()),
+                    z=float(cells[1].text()),
+                    area=float(cells[2].text()),
+                    material_tag=int(combo.currentData()),
+                )
+            )
+        return fibers
+
+    def _refresh_fiber_int_materials(self) -> None:
+        for table, horizontal in (
+            (getattr(self, "fiber_int_vertical_table", None), False),
+            (getattr(self, "fiber_int_horizontal_table", None), True),
+        ):
+            if not isinstance(table, QTableWidget):
+                continue
+            for row in range(table.rowCount()):
+                old = table.cellWidget(row, 3)
+                selected = (
+                    old.currentData()
+                    if isinstance(old, QComboBox)
+                    else None
+                )
+                table.setCellWidget(
+                    row,
+                    3,
+                    self._fiber_int_material_combo(
+                        selected,
+                        horizontal=horizontal,
+                    ),
+                )
+
     def _apply_elastic_geometry_template(self) -> None:
         dialog = ElasticGeometryDialog(
             units=self.unit_system.as_mapping(),
@@ -2302,9 +2594,12 @@ class SectionDialog(QDialog):
         )
 
     def _sync_page(self, section_type: str) -> None:
-        self.stack.setCurrentIndex(
-            0 if section_type == "Elastic" else 1
-        )
+        page_index = {
+            "Elastic": 0,
+            "Fiber": 1,
+            "FiberInt": 2,
+        }.get(section_type, 0)
+        self.stack.setCurrentIndex(page_index)
         if section_type == "Fiber":
             self._update_fiber_outputs()
 
@@ -2990,13 +3285,35 @@ class SectionDialog(QDialog):
             fibers: list[FiberData] = []
             components: list[FiberComponentData] = []
             material_tag = self.elastic_material.currentData()
-        else:
+        elif section_type == "Fiber":
             parameters = {"GJ": self.gj.value()}
             fibers = self._fiber_data()
             components = [
                 FiberComponentData.from_dict(component.to_dict())
                 for component in self._components
             ]
+            horizontal_fibers: list[FiberData] = []
+            material_tag = None
+        else:
+            parameters = {}
+            for index in range(1, 4):
+                n_key = f"nStrip{index}"
+                t_key = f"thick{index}"
+                parameters[n_key] = float(
+                    self.fiber_int_strip_count[n_key].value()
+                )
+                parameters[t_key] = float(
+                    self.fiber_int_strip_thickness[t_key].value()
+                )
+            fibers = self._fiber_int_table_data(
+                self.fiber_int_vertical_table,
+                "Vertical fiber",
+            )
+            horizontal_fibers = self._fiber_int_table_data(
+                self.fiber_int_horizontal_table,
+                "Hfiber",
+            )
+            components = []
             material_tag = None
 
         return SectionData(
@@ -3008,6 +3325,11 @@ class SectionDialog(QDialog):
             fibers=fibers,
             fiber_components=components,
             material_tag=material_tag,
+            horizontal_fibers=(
+                horizontal_fibers
+                if section_type == "FiberInt"
+                else []
+            ),
             display_geometry=(
                 {
                     "shape": str(

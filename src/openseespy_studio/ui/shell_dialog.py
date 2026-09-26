@@ -67,6 +67,9 @@ class NDMaterialDialog(QDialog):
         ("ASD concrete 3D", "ASDConcrete3D"),
         ("Orthotropic rotating-angle concrete", "OrthotropicRAConcrete"),
         ("Smeared steel double layer", "SmearedSteelDoubleLayer"),
+        ("FSAM RC panel", "FSAM"),
+        ("Contact material 2D", "ContactMaterial2D"),
+        ("Contact material 3D", "ContactMaterial3D"),
     )
 
     PARAMETER_LABELS = {
@@ -134,6 +137,15 @@ class NDMaterialDialog(QDialog):
         "ratio1": "Reinforcement ratio ρ1",
         "ratio2": "Reinforcement ratio ρ2",
         "orientation": "Layer orientation [rad]",
+        "sX": "Uniaxial steel tag X",
+        "sY": "Uniaxial steel tag Y",
+        "rouX": "Reinforcement ratio rouX",
+        "rouY": "Reinforcement ratio rouY",
+        "alfadow": "Dowel coefficient alfadow",
+        "mu": "Interface friction coefficient μ",
+        "G": "Interface stiffness parameter G",
+        "c": "Cohesive intercept c",
+        "t": "Interface tensile strength t",
     }
 
     def __init__(
@@ -219,6 +231,10 @@ class NDMaterialDialog(QDialog):
     def _parameter_label(self, material_type: str, key: str) -> str:
         if material_type == "DruckerPrager" and key == "rho":
             base = "Frictional strength parameter ρ"
+        elif material_type == "FSAM" and key == "nu":
+            base = "Concrete friction coefficient ν"
+        elif material_type == "FSAM" and key == "conc":
+            base = "ConcreteCM uniaxial material tag"
         else:
             base = self.PARAMETER_LABELS.get(key, key)
         kind = nd_material_parameter_kind(material_type, key)
@@ -339,6 +355,11 @@ class NDMaterialDialog(QDialog):
                     high = -1.0e-8
                 elif key in {"DamageCte1", "DamageCte2"}:
                     low = 0.0
+            elif material_type in {"ContactMaterial2D", "ContactMaterial3D"}:
+                if key == "mu":
+                    low = 0.0
+                elif key in {"G", "c", "t"}:
+                    low = 0.0
             elif material_type == "SmearedSteelDoubleLayer":
                 if key in {"mat1", "mat2"}:
                     low, high, decimals = 1.0, 2_147_483_647.0, 0
@@ -401,6 +422,14 @@ class NDMaterialDialog(QDialog):
                 "requires updateMaterialStage. SARE supports the automatic "
                 "yield-surface form, including documented critical-state "
                 "optional parameters, but not explicit custom surface pairs."
+            )
+        elif material_type in {"ContactMaterial2D", "ContactMaterial3D"}:
+            text = (
+                f"{material_type} defines regularized Coulomb interface "
+                "behavior for OpenSees contact elements. G, c and t are "
+                "stored as stress-like quantities; BeamContact2D requires "
+                "ContactMaterial2D and BeamContact3D requires "
+                "ContactMaterial3D."
             )
         elif material_type == "ASDConcrete3D":
             text = (

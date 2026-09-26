@@ -74,14 +74,31 @@ from ..analysis_templates import (
     default_control_node,
 )
 from ..frame_setup import prepare_frame_grid
-from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, to_openseespy
+from ..frame_management import (
+    frame_regeneration_plan,
+    managed_frame_snapshot,
+)
+from ..frame_presets import frame_spec_from_preset, frame_spec_to_preset
+from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, generate_frame_project, to_openseespy
 from ..importer import import_openseespy_source
 from ..jobs import JobRecord
 from ..live_convergence import parse_opensees_convergence_line
 from ..model import (
+    BEAM_CONTACT_ELEMENT_TYPES,
+    BEARING_ELEMENT_TYPES,
+    CABLE_ELEMENT_TYPES,
+    CONTACT_ELEMENT_TYPES,
+    CONTACT_TWO_NODE_ELEMENT_TYPES,
+    CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
+    FRICTION_BEARING_ELEMENT_TYPES,
+    MASONRY_PANEL_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
+    SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
+    TRUSS_MATERIAL_ELEMENT_TYPES,
+    TRUSS_SECTION_ELEMENT_TYPES,
+    WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
     classify_fixity,
     dof_is_rotation,
@@ -92,7 +109,12 @@ from ..mass_source import apply_mass_source, evaluate_mass_source
 from ..moment_curvature import build_moment_curvature_project
 from ..postprocess import enrich_fiber_state_results, enrich_member_force_results
 from ..test_column import build_test_column
-from ..rc_wall import build_rc_wall
+from ..rc_wall import (
+    build_rc_wall,
+    build_rc_wall_macro_2d,
+    build_rc_wall_macro_3d,
+)
+from ..masonry_wall import build_masonry_wall
 from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
@@ -179,6 +201,20 @@ from .calibration_dialog import (
 from .code_editor import CodeEditor
 from .connection_dialog import ConnectionDialog
 from .constraint_dialog import ConstraintDialog
+from .continuum_dialog import ContinuumQuadDialog
+from .solid_dialog import SolidBrickDialog
+from .special_element_dialog import (
+    CatenaryCableDialog,
+    ElastomericBearingPlasticityDialog,
+)
+from .isolation_contact_dialog import (
+    ContactElementDialog,
+    FrictionBearingDialog,
+    FrictionModelDialog,
+    LeadRubberXDialog,
+    TripleFrictionPendulumDialog,
+)
+from .wall_macro_dialog import RCWallMacroElementDialog
 from .geometry_dialogs import (
     ElementDialog,
     ElementFormulationDialog,
@@ -211,8 +247,10 @@ from .line_geometry_dialog import LineGeometryDialog, PointGeometryDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
 from .rc_wall_wizard import RCWallWizard
+from .masonry_wall_wizard import MasonryWallWizard
+from .frame_wizard import FrameWizard
 from .rclms_section_dialog import RCLMSSectionDialog
-from .icons import studio_icon
+from .icons import create_visual_icon, studio_icon
 from .results_panel import ResultsPanel
 from .restraint_dialog import RestraintDialog
 from .selection import SelectionManager, parse_tag_expression
@@ -488,7 +526,7 @@ QStatusBar {
 
 
 class BrandWidget(QWidget):
-    """Compact SARE wordmark for the application ribbon."""
+    """Compact FEWIZ identity for the application ribbon."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -498,41 +536,44 @@ class BrandWidget(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        # Primary wordmark.
-        painter.setPen(QColor(BRAND_NAVY))
+        # Use the same mesh-W mark as the taskbar/application icon so the
+        # ribbon, installer and desktop identity stay visually consistent.
+        mark_size = 52
+        mark = create_visual_icon(mark_size).pixmap(mark_size, mark_size)
+        painter.drawPixmap(7, 6, mark)
+
+        # Wordmark: FE in engineering blue, WIZ in charcoal.
         font = QFont(self.font())
-        font.setPointSize(18)
+        font.setPointSize(16)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(8, 31, PRODUCT_NAME)
 
-        # Minimal deformation/response curve under the SARE wordmark.
-        path = QPainterPath()
-        path.moveTo(8, 43)
-        path.cubicTo(28, 43, 40, 42, 51, 35)
-        path.cubicTo(61, 29, 68, 24, 77, 27)
-        path.cubicTo(86, 30, 91, 40, 101, 43)
-        path.cubicTo(108, 45, 116, 44, 124, 43)
-        response_pen = QPen(QColor(BRAND_RED), 3.0)
-        response_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        response_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(response_pen)
-        painter.drawPath(path)
+        text_x = 70
+        baseline = 28
+        painter.setPen(QColor("#0B5DAA"))
+        painter.drawText(text_x, baseline, "FE")
+        fe_width = painter.fontMetrics().horizontalAdvance("FE")
 
-        # Descriptor: detailed enough for identity, compact enough for ribbon.
-        painter.setPen(QColor("#556B80"))
+        painter.setPen(QColor("#20272E"))
+        painter.drawText(text_x + fe_width, baseline, "WIZ")
+
+        # Primary descriptor from the selected FEWIZ wordmark.
+        painter.setPen(QColor("#465463"))
         font.setPointSize(7)
         font.setBold(False)
+        font.setLetterSpacing(QFont.AbsoluteSpacing, 1.4)
         painter.setFont(font)
-        painter.drawText(145, 25, "Structural Analysis & Research")
-        painter.drawText(145, 39, "Environment for OpenSees")
+        painter.drawText(text_x, 43, "FINITE ELEMENT WIZARD")
 
-        painter.setPen(QColor(BRAND_NAVY))
+        # Compact capability line replaces the former SARE research slogan.
+        painter.setPen(QColor("#0B5DAA"))
         font.setPointSize(6)
         font.setBold(True)
+        font.setLetterSpacing(QFont.AbsoluteSpacing, 0.8)
         painter.setFont(font)
-        painter.drawText(145, 52, "STRUCTURAL SIMULATION · RESEARCH")
+        painter.drawText(text_x, 57, "MODELING · ANALYSIS · RESULTS")
 
 
 class RibbonGroup(QWidget):
@@ -1540,6 +1581,8 @@ class PropertiesPanel(QWidget):
             "NodalDisplacement",
             "NodalReaction",
             "MemberForce",
+            "MasonryStrutForce",
+            "MasonryStrutStrain",
             "ShellForce",
             "ShellDeformation",
             "ShellDisplacement",
@@ -1568,6 +1611,14 @@ class PropertiesPanel(QWidget):
             ]
         elif kind == "MemberForce":
             component_options = ["N", "Vy", "Vz", "T", "My", "Mz"]
+        elif kind == "MasonryStrutForce":
+            component_options = [
+                "P1", "P2", "P3", "P4", "P5", "P6"
+            ]
+        elif kind == "MasonryStrutStrain":
+            component_options = [
+                "E1", "E2", "E3", "E4", "E5", "E6"
+            ]
         elif kind == "ShellDisplacement":
             component_options = ["|U|", "UX", "UY", "UZ"]
         elif kind == "ShellForce":
@@ -1863,6 +1914,30 @@ def tree_selection_drives_fe_navigation(
         tree_item_drives_fe_navigation(kind, ancestors)
         for kind, ancestors in selected_items
     )
+
+
+def element_tree_icon_name(element_type: str) -> str:
+    """Return the FEWIZ icon stem for an OpenSees element formulation."""
+    name = str(element_type).lower()
+    if "catenary" in name or "cable" in name:
+        return "link"
+    if "contact" in name:
+        return "link"
+    if "bearing" in name or "pendulum" in name or "leadrubber" in name:
+        return "spring"
+    if "truss" in name:
+        return "truss"
+    if "shell" in name:
+        return "shell-element"
+    if "mvlem" in name:
+        return "wall-macro"
+    if "brick" in name:
+        return "solid-brick"
+    if "quad" in name:
+        return "continuum-quad"
+    if any(token in name for token in ("beam", "column")):
+        return "frame"
+    return "element"
 
 
 class MainWindow(QMainWindow):
@@ -2442,6 +2517,69 @@ class MainWindow(QMainWindow):
             "Create a Truss element by entering nodes, area, and material",
         )
         self._make_action(
+            "catenary_cable",
+            "Catenary Cable...",
+            "link",
+            self._create_catenary_cable,
+            "Create a 3D OpenSees CatenaryCable element",
+        )
+        self._make_action(
+            "elastomeric_bearing",
+            "Elastomeric Bearing...",
+            "spring",
+            self._create_elastomeric_bearing,
+            "Create an elastomericBearingPlasticity isolation element",
+        )
+        self._make_action(
+            "friction_bearing",
+            "Friction Bearing...",
+            "spring",
+            self._create_friction_bearing,
+            "Create a flatSliderBearing or singleFPBearing isolation element",
+        )
+        self._make_action(
+            "lead_rubber_x",
+            "Lead Rubber X...",
+            "spring",
+            self._create_lead_rubber_x,
+            "Create a 3D LeadRubberX isolation bearing",
+        )
+        self._make_action(
+            "triple_friction_pendulum",
+            "Triple Friction Pendulum...",
+            "spring",
+            self._create_triple_friction_pendulum,
+            "Create a TripleFrictionPendulum isolation bearing",
+        )
+        self._make_action(
+            "contact_element",
+            "Contact / Interface...",
+            "link",
+            self._create_contact_element,
+            "Create zeroLengthContact or BeamContact interface elements",
+        )
+        self._make_action(
+            "continuum_quad",
+            "2D Quad...",
+            "continuum-quad",
+            self._create_continuum_quad,
+            "Create a FourNodeQuad, SSPquad, bbarQuad, or enhancedQuad continuum element",
+        )
+        self._make_action(
+            "solid_brick",
+            "3D Solid...",
+            "solid-brick",
+            self._create_solid_brick,
+            "Create an stdBrick, SSPbrick, or bbarBrick 8-node solid element",
+        )
+        self._make_action(
+            "wall_macro_element",
+            "RC Wall Macro...",
+            "wall-macro",
+            self._create_wall_macro_element,
+            "Create an MVLEM, SFI_MVLEM, or MVLEM_3D wall macro-element",
+        )
+        self._make_action(
             "sketch_plane_offset",
             "Offset Plane...",
             "sketch-plane",
@@ -2617,6 +2755,20 @@ class MainWindow(QMainWindow):
             "Build a planar reinforced-concrete wall with RCLMS and MEFI",
         )
         self._make_action(
+            "masonry_wall_wizard",
+            "Masonry Wall",
+            "wall-macro",
+            self._show_masonry_wall_wizard,
+            "Build a masonry/infill panel with equivalent struts or MasonPan12",
+        )
+        self._make_action(
+            "frame_wizard",
+            "Frame Wizard",
+            "frame-grid",
+            self._show_frame_wizard,
+            "Build a regular 2D or 3D frame with live grid preview",
+        )
+        self._make_action(
             "frame_2d",
             "2D Frame",
             "frame-2d",
@@ -2753,6 +2905,13 @@ class MainWindow(QMainWindow):
             "nd-materials-root",
             self._create_nd_material,
             "Create an OpenSees nDMaterial definition",
+        )
+        self._make_action(
+            "new_friction_model",
+            "New Friction Model...",
+            "link",
+            self._create_friction_model,
+            "Create reusable Coulomb or velocity-dependent friction model",
         )
         self._make_action(
             "new_section",
@@ -3024,11 +3183,16 @@ class MainWindow(QMainWindow):
         truss_menu.setIcon(studio_icon("truss-menu"))
         truss_menu.addAction(self.actions["truss_pick"])
         truss_menu.addAction(self.actions["truss_input"])
+        geometry_menu.addAction(self.actions["continuum_quad"])
+        geometry_menu.addAction(self.actions["solid_brick"])
+        geometry_menu.addAction(self.actions["wall_macro_element"])
         geometry_menu.addAction(self.actions["surface_geometry"])
         geometry_menu.addSeparator()
         geometry_menu.addActions([
             self.actions["column_1d"],
             self.actions["rc_wall_wizard"],
+            self.actions["masonry_wall_wizard"],
+            self.actions["frame_wizard"],
             self.actions["frame_2d"],
             self.actions["grid"],
             self.actions["extrude"],
@@ -3599,10 +3763,17 @@ class MainWindow(QMainWindow):
 
         add_group(
             home,
-            "FE Model",
-            large=("node",),
-            small=("shell_input", "rc_wall_wizard"),
-            widgets=(frame_button, truss_button),
+            "OpenSees I/O",
+            small=("import_py", "export_py"),
+        )
+        add_group(
+            home,
+            "Wizards",
+            large=(
+                "frame_wizard",
+                "rc_wall_wizard",
+                "masonry_wall_wizard",
+            ),
         )
         add_group(
             home,
@@ -3693,7 +3864,7 @@ class MainWindow(QMainWindow):
         geometry_page.finish()
         geometry_index = self.ribbon_tabs.addTab(
             geometry_page,
-            "Sketch",
+            "Geometry",
         )
         self.ribbon_tabs.tabBar().setTabTextColor(
             geometry_index,
@@ -3701,6 +3872,28 @@ class MainWindow(QMainWindow):
         )
 
         model_page = RibbonPage()
+        add_group(
+            model_page,
+            "Create",
+            large=("node",),
+            widgets=(frame_button, truss_button),
+        )
+        add_group(
+            model_page,
+            "Advanced Elements",
+            small=(
+                "catenary_cable",
+                "shell_input",
+                "continuum_quad",
+                "solid_brick",
+                "wall_macro_element",
+                "elastomeric_bearing",
+                "friction_bearing",
+                "lead_rubber_x",
+                "triple_friction_pendulum",
+                "contact_element",
+            ),
+        )
         add_group(
             model_page,
             "Definition",
@@ -3720,29 +3913,40 @@ class MainWindow(QMainWindow):
             large=("assign_section",),
             small=("assign_transformation", "element_formulation"),
         )
+        model_page.finish()
+        self.ribbon_tabs.addTab(model_page, "Model")
+
+        loads_page = RibbonPage()
         add_group(
-            model_page,
-            "Supports",
+            loads_page,
+            "Boundary",
             large=("support",),
-            small=("clear_support", "constraint", "connection"),
+            small=(
+                "clear_support",
+                "constraint",
+                "connection",
+                "prescribed_displacement",
+            ),
         )
         add_group(
-            model_page,
-            "Loads",
+            loads_page,
+            "Loading",
             large=("load_pattern",),
             small=(
-                "mass",
-                "mass_source",
                 "time_series",
                 "ground_motion",
                 "nodal_load",
-                "prescribed_displacement",
                 "beam_load",
                 "shell_pressure",
             ),
         )
-        model_page.finish()
-        self.ribbon_tabs.addTab(model_page, "Model")
+        add_group(
+            loads_page,
+            "Mass",
+            small=("mass", "mass_source"),
+        )
+        loads_page.finish()
+        self.ribbon_tabs.addTab(loads_page, "Loads")
 
         analysis_page = RibbonPage()
         add_group(
@@ -3817,12 +4021,6 @@ class MainWindow(QMainWindow):
 
         add_group(
             analysis_page,
-            "Research",
-            large=("moment_curvature",),
-            small=("hinge_backbone", "calibration", "ai_assistant"),
-        )
-        add_group(
-            analysis_page,
             "Post-processing",
             large=("plot",),
             small=("results_manager",),
@@ -3875,12 +4073,25 @@ class MainWindow(QMainWindow):
             small=("iso", "xy", "xz", "yz"),
         )
         result_page.finish()
-        result_index = self.ribbon_tabs.addTab(result_page, "Result")
+        result_index = self.ribbon_tabs.addTab(result_page, "Results")
         self.ribbon_tabs.tabBar().setTabTextColor(
             result_index,
             QColor("#1768ad"),
         )
 
+        tools_page = RibbonPage()
+        add_group(
+            tools_page,
+            "Research",
+            large=("moment_curvature",),
+            small=("hinge_backbone", "calibration"),
+        )
+        add_group(
+            tools_page,
+            "Assist",
+            large=("ai_assistant",),
+            small=("measure_distance", "clear_measurements"),
+        )
         self.model_representation_combo = QComboBox()
         self.model_representation_combo.setFixedWidth(132)
         self.model_representation_combo.addItem("Tube", "tube")
@@ -4031,31 +4242,11 @@ class MainWindow(QMainWindow):
         self.background_button.setMenu(background_menu)
         self._sync_background_menu(apply=True)
 
-        display_page = RibbonPage()
         add_group(
-            display_page,
-            "Views",
-            large=("iso",),
-            small=("xy", "xz", "yz"),
-        )
-        add_group(
-            display_page,
-            "Section View",
-            small=("show_section_axes",),
-            widgets=(
-                self.model_representation_combo,
-                self.model_color_combo,
-            ),
-        )
-        add_group(
-            display_page,
-            "Appearance",
-            widgets=(self.background_button,),
-        )
-        add_group(
-            display_page,
-            "Annotations",
+            tools_page,
+            "Display",
             small=(
+                "show_section_axes",
                 "show_node_numbers",
                 "show_element_numbers",
                 "show_nodal_loads",
@@ -4064,52 +4255,61 @@ class MainWindow(QMainWindow):
                 "show_masses",
                 "show_load_values",
             ),
+            widgets=(
+                self.model_representation_combo,
+                self.model_color_combo,
+                self.background_button,
+            ),
         )
-
-        measure_menu_button = QToolButton()
-        measure_menu_button.setObjectName("RibbonLargeButton")
-        measure_menu_button.setDefaultAction(self.actions["measure_distance"])
-        measure_menu_button.setText("Measure")
-        measure_menu_button.setIcon(self.actions["measure_distance"].icon())
-        measure_menu_button.setIconSize(QSize(28, 28))
-        measure_menu_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        measure_menu_button.setPopupMode(QToolButton.MenuButtonPopup)
-        measure_menu_button.setAutoRaise(True)
-        measure_popup = QMenu(measure_menu_button)
-        measure_popup.addAction(self.actions["measure_distance"])
-        measure_popup.addAction(self.actions["clear_measurements"])
-        measure_menu_button.setMenu(measure_popup)
-
-        add_group(
-            display_page,
-            "Inspect",
-            widgets=(measure_menu_button,),
-        )
-        display_page.finish()
-        self.ribbon_tabs.addTab(display_page, "Display")
+        tools_page.finish()
+        self.ribbon_tabs.addTab(tools_page, "Tools")
 
         self.selection_filter_combo = QComboBox()
         self.selection_filter_combo.addItems(["All", "Node", "Element"])
-        self.selection_filter_combo.setFixedWidth(98)
-        self.selection_filter_combo.setToolTip("Selection filter")
+        self.selection_filter_combo.setFixedWidth(92)
+        self.selection_filter_combo.setToolTip("Viewport selection filter")
         self.selection_filter_combo.currentTextChanged.connect(
             self._set_selection_filter
         )
-        selection_page = RibbonPage()
-        add_group(
-            selection_page,
-            "Select",
-            large=("select",),
-            small=("box", "polygon"),
+
+        self.viewport_toolbar = QToolBar("Viewport", self)
+        self.viewport_toolbar.setObjectName("ViewportToolbar")
+        self.viewport_toolbar.setMovable(False)
+        self.viewport_toolbar.setFloatable(False)
+        self.viewport_toolbar.setIconSize(QSize(18, 18))
+        self.viewport_toolbar.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.addToolBarBreak(Qt.TopToolBarArea)
+        self.addToolBar(Qt.TopToolBarArea, self.viewport_toolbar)
+
+        self.viewport_toolbar.addAction(self.actions["select"])
+        self.viewport_toolbar.addAction(self.actions["box"])
+        self.viewport_toolbar.addAction(self.actions["clear_selection"])
+        self.viewport_toolbar.addWidget(self.selection_filter_combo)
+        self.viewport_toolbar.addSeparator()
+        self.viewport_toolbar.addAction(self.actions["iso"])
+        self.viewport_toolbar.addAction(self.actions["xy"])
+        self.viewport_toolbar.addAction(self.actions["xz"])
+        self.viewport_toolbar.addAction(self.actions["yz"])
+        self.viewport_toolbar.addAction(self.actions["fit_view"])
+        self.viewport_toolbar.addAction(self.actions["zoom_selection"])
+        self.viewport_toolbar.addSeparator()
+        self.viewport_toolbar.addAction(self.actions["hide_selection"])
+        self.viewport_toolbar.addAction(self.actions["isolate_selection"])
+        self.viewport_toolbar.addAction(self.actions["show_all"])
+        self.viewport_toolbar.addSeparator()
+        self.viewport_toolbar.addAction(self.actions["measure_distance"])
+        self.viewport_toolbar.addAction(self.actions["clear_measurements"])
+
+        self.context_toolbar = QToolBar("Context", self)
+        self.context_toolbar.setObjectName("ContextToolbar")
+        self.context_toolbar.setMovable(False)
+        self.context_toolbar.setFloatable(False)
+        self.context_toolbar.setIconSize(QSize(18, 18))
+        self.context_toolbar.setToolButtonStyle(
+            Qt.ToolButtonTextBesideIcon
         )
-        add_group(
-            selection_page,
-            "Query",
-            small=("byid", "bytype"),
-            widgets=(self.selection_filter_combo,),
-        )
-        selection_page.finish()
-        self.ribbon_tabs.addTab(selection_page, "Selection")
+        self.addToolBar(Qt.TopToolBarArea, self.context_toolbar)
+        self._refresh_context_toolbar()
 
         self._ribbon_tab_indices = {
             self.ribbon_tabs.tabText(index): index
@@ -4118,6 +4318,102 @@ class MainWindow(QMainWindow):
 
         brand = BrandWidget()
         ribbon.addWidget(brand)
+
+    def _refresh_context_toolbar(
+        self,
+        *,
+        nodes: set[int] | None = None,
+        elements: set[int] | None = None,
+        kinds: set[str] | None = None,
+    ) -> None:
+        toolbar = getattr(self, "context_toolbar", None)
+        if toolbar is None:
+            return
+
+        node_tags = set(
+            self.selection.nodes if nodes is None else nodes
+        )
+        element_tags = set(
+            self.selection.elements if elements is None else elements
+        )
+        payload_kinds = set(kinds or ())
+
+        toolbar.clear()
+
+        if not node_tags and not element_tags and not payload_kinds:
+            placeholder = toolbar.addAction("Context")
+            placeholder.setEnabled(False)
+            return
+
+        label_parts: list[str] = []
+        if node_tags:
+            label_parts.append(f"{len(node_tags)} Node")
+        if element_tags:
+            label_parts.append(f"{len(element_tags)} Element")
+        if payload_kinds and not label_parts:
+            label_parts.append("Tree")
+        header = toolbar.addAction(
+            "Context · " + " / ".join(label_parts)
+        )
+        header.setEnabled(False)
+        toolbar.addSeparator()
+
+        result_kinds = {
+            "jobs_root",
+            "job",
+            "job_plot",
+            "solution_root",
+            "solution_result",
+            "solution_information",
+            "solution_convergence",
+            "solver_output",
+        }
+        surface_kinds = {
+            "surface_geometry",
+            "surface_mesh_recipe",
+        }
+
+        if payload_kinds & result_kinds:
+            toolbar.addAction(self.actions["results_manager"])
+            toolbar.addAction(self.actions["fit_result"])
+            toolbar.addAction(self.actions["clear_result"])
+            return
+
+        if payload_kinds & surface_kinds:
+            toolbar.addAction(self.actions["shell_pressure"])
+            toolbar.addAction(self.actions["surface_mesh_overlay"])
+
+        if node_tags and not element_tags:
+            toolbar.addAction(self.actions["support"])
+            toolbar.addAction(self.actions["nodal_load"])
+            toolbar.addAction(self.actions["mass"])
+            toolbar.addAction(
+                self.actions["prescribed_displacement"]
+            )
+        elif element_tags and not node_tags:
+            toolbar.addAction(self.actions["assign_section"])
+            toolbar.addAction(self.actions["assign_transformation"])
+
+            selected_types = {
+                str(self.model.elements[tag].element_type).lower()
+                for tag in element_tags
+                if tag in self.model.elements
+            }
+            shell_like = any(
+                ("shell" in name or "quad" in name)
+                for name in selected_types
+            )
+            if shell_like:
+                toolbar.addAction(self.actions["shell_pressure"])
+            else:
+                toolbar.addAction(self.actions["beam_load"])
+
+        if node_tags or element_tags:
+            toolbar.addSeparator()
+            toolbar.addAction(self.actions["zoom_selection"])
+            toolbar.addAction(self.actions["hide_selection"])
+            toolbar.addAction(self.actions["isolate_selection"])
+            toolbar.addAction(self.actions["show_all"])
 
     def _save_background_preferences(self) -> None:
         settings = QSettings(
@@ -4690,9 +4986,35 @@ class MainWindow(QMainWindow):
             "recorders_root",
             "recorder",
         }
+        load_kinds = {
+            "boundary_root",
+            "boundary_group",
+            "loads_bc_root",
+            "loading_root",
+            "time_series_root",
+            "time_series",
+            "load_patterns_root",
+            "load_pattern",
+            "nodal_load",
+            "prescribed_displacement",
+            "element_load",
+            "ground_motions_root",
+            "ground_motion",
+            "mass_root",
+            "masses_root",
+            "nodal_mass",
+            "element_masses_root",
+            "element_mass",
+            "mass_sources_root",
+            "mass_source",
+        }
         selection_kinds = {
             "named_sets_root",
             "set",
+        }
+        recipe_kinds = {
+            "recipes_root",
+            "frame_recipe",
         }
 
         # Geometry is the only branch that owns the CAD/topology display.
@@ -4701,11 +5023,15 @@ class MainWindow(QMainWindow):
         if kinds and kinds <= geometry_kinds:
             return "geometry", "Geometry"
         if kinds & result_kinds:
-            return "fe", "Result"
+            return "fe", "Results"
         if kinds & analysis_kinds:
             return "fe", "Analysis"
+        if kinds & load_kinds:
+            return "fe", "Loads"
         if kinds & selection_kinds:
-            return "fe", "Selection"
+            return "fe", "Model"
+        if kinds & recipe_kinds:
+            return "fe", "Model"
         if kinds:
             return "fe", "Model"
         return "fe", None
@@ -4954,10 +5280,22 @@ class MainWindow(QMainWindow):
             if issue.severity == "ERROR"
         }
         try:
-            result = build_rc_wall(
-                self.project,
-                spec,
-            )
+            formulation = str(spec.formulation)
+            if formulation == "MEFI":
+                result = build_rc_wall(
+                    self.project,
+                    spec,
+                )
+            elif formulation == "MVLEM_3D":
+                result = build_rc_wall_macro_3d(
+                    self.project,
+                    spec,
+                )
+            else:
+                result = build_rc_wall_macro_2d(
+                    self.project,
+                    spec,
+                )
             generated_errors = [
                 issue
                 for issue in validate_project(self.project)
@@ -4981,7 +5319,7 @@ class MainWindow(QMainWindow):
                         f"\n- ... {len(generated_errors) - 6} more error(s)"
                     )
                 raise ValueError(
-                    "Generated RC wall failed SARE Model Check:\n"
+                    "Generated RC wall failed FEWIZ Model Check:\n"
                     + preview
                 )
 
@@ -4989,7 +5327,11 @@ class MainWindow(QMainWindow):
             # entities are really present in the live Project model.  This
             # turns any silent/partial RC-wall generation into a visible
             # error before the wizard workflow continues.
-            expected_node_count = 2 * (int(spec.vertical_elements) + 1)
+            expected_node_count = (
+                2 * (int(spec.vertical_elements) + 1)
+                if formulation in {"MEFI", "MVLEM_3D"}
+                else int(spec.vertical_elements) + 1
+            )
             expected_element_count = int(spec.vertical_elements)
             if len(result.node_tags) != expected_node_count:
                 raise ValueError(
@@ -4998,7 +5340,7 @@ class MainWindow(QMainWindow):
                 )
             if len(result.element_tags) != expected_element_count:
                 raise ValueError(
-                    "RC Wall builder returned an unexpected MEFI count: "
+                    "RC Wall builder returned an unexpected element count: "
                     f"{len(result.element_tags)} "
                     f"(expected {expected_element_count})."
                 )
@@ -5015,7 +5357,7 @@ class MainWindow(QMainWindow):
                 if (
                     int(tag) in self.project.model.elements
                     and self.project.model.elements[int(tag)].element_type
-                    != "MEFI"
+                    != formulation
                 )
             ]
             if missing_nodes or missing_elements or wrong_elements:
@@ -5032,7 +5374,7 @@ class MainWindow(QMainWindow):
                     )
                 if wrong_elements:
                     details.append(
-                        "non-MEFI generated element(s): "
+                        f"non-{formulation} generated element(s): "
                         + ", ".join(map(str, wrong_elements))
                     )
                 raise ValueError(
@@ -5065,11 +5407,16 @@ class MainWindow(QMainWindow):
         self.viewport.set_display_domain("fe")
 
         named = ", ".join(result.selection_set_names)
+        formulation = str(spec.formulation)
         message = (
             f"Created {spec.name} · {len(result.node_tags)} nodes · "
-            f"{len(result.element_tags)} MEFI elements · "
-            f"{len(result.section_tags)} RCLMS sections · "
-            f"named selections: {named}"
+            f"{len(result.element_tags)} {formulation} elements · "
+            + (
+                f"{len(result.section_tags)} RCLMS sections · "
+                if formulation == "MEFI"
+                else ""
+            )
+            + f"named selections: {named}"
         )
 
         # Update the Model Tree before touching VTK/PyVista.  If a graphics
@@ -5092,7 +5439,7 @@ class MainWindow(QMainWindow):
                 visible_tags = self.viewport._visible_element_tags()
             if not generated_tags.issubset(visible_tags):
                 raise RuntimeError(
-                    "generated MEFI elements are not in the FE viewport "
+                    f"generated {formulation} elements are not in the FE viewport "
                     "visibility set"
                 )
             self.viewport.plotter.render()
@@ -5129,6 +5476,154 @@ class MainWindow(QMainWindow):
 
         self._record_project_change(
             f"Create RC wall {spec.name} with MEFI/RCLMS",
+            before,
+        )
+
+    def _show_masonry_wall_wizard(
+        self,
+        checked: bool = False,
+    ) -> None:
+        dialog = MasonryWallWizard(self.project, parent=self)
+        if not dialog.exec():
+            return
+
+        try:
+            spec = dialog.data()
+        except (KeyError, TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Masonry Wall Wizard",
+                str(exc),
+            )
+            return
+
+        if spec.replace_geometry and (
+            self.model.nodes or self.model.elements
+        ):
+            answer = QMessageBox.question(
+                self,
+                "Replace Current FE Model",
+                (
+                    "Masonry Wall Wizard is set to Replace mode.\n\n"
+                    "Existing FE geometry and model-linked objects will be "
+                    "cleared. Material libraries are preserved.\n\n"
+                    "Continue and generate the masonry wall?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        before = self.project.to_dict()
+        existing_error_keys = {
+            (
+                issue.category,
+                issue.message,
+                issue.entity_kind,
+                issue.entity_tag,
+            )
+            for issue in validate_project(self.project)
+            if issue.severity == "ERROR"
+        }
+        try:
+            result = build_masonry_wall(self.project, spec)
+            generated_errors = [
+                issue
+                for issue in validate_project(self.project)
+                if (
+                    issue.severity == "ERROR"
+                    and (
+                        issue.category,
+                        issue.message,
+                        issue.entity_kind,
+                        issue.entity_tag,
+                    ) not in existing_error_keys
+                )
+            ]
+            if generated_errors:
+                preview = "\n".join(
+                    f"- {issue.message}"
+                    for issue in generated_errors[:6]
+                )
+                raise ValueError(
+                    "Generated masonry wall failed FEWIZ Model Check:\n"
+                    + preview
+                )
+
+            expected_nodes = (
+                12 if spec.formulation == "MasonPan12" else 4
+            )
+            expected_elements = (
+                1
+                if spec.formulation == "MasonPan12"
+                else (2 if spec.crossed_struts else 1)
+            )
+            if len(result.node_tags) != expected_nodes:
+                raise ValueError(
+                    "Masonry builder returned an unexpected node count: "
+                    f"{len(result.node_tags)} (expected {expected_nodes})."
+                )
+            if len(result.element_tags) != expected_elements:
+                raise ValueError(
+                    "Masonry builder returned an unexpected element count: "
+                    f"{len(result.element_tags)} "
+                    f"(expected {expected_elements})."
+                )
+            expected_boundary = (
+                12 if spec.formulation == "MasonPan12" else 4
+            )
+            if len(result.boundary_element_tags) != expected_boundary:
+                raise ValueError(
+                    "Masonry builder returned an unexpected boundary-frame "
+                    f"element count: {len(result.boundary_element_tags)} "
+                    f"(expected {expected_boundary})."
+                )
+        except (KeyError, TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Masonry Wall Wizard",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+
+        self.selection.clear()
+        self._reset_runtime_results()
+        self.model = self.project.model
+        if spec.replace_geometry:
+            self._reset_sketch_plane_context()
+        self._activate_select_tool()
+        self.viewport.set_display_domain("fe")
+
+        named = ", ".join(result.selection_set_names)
+        message = (
+            f"Created {spec.name} · {len(result.node_tags)} nodes · "
+            f"{len(result.element_tags)} masonry element(s) · "
+            f"{len(result.boundary_element_tags)} boundary-frame element(s) · "
+            f"named selections: {named}"
+        )
+        self._refresh_tree()
+        self.selection.set_selection(elements=set(result.element_tags))
+        try:
+            self._refresh_all(message)
+            self.viewport.set_view("xy", render=False)
+            self.viewport.fit_view()
+            self.viewport.plotter.render()
+        except Exception as exc:
+            self._refresh_tree()
+            self._log(
+                "Masonry wall generated, but viewport refresh failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            self.status_message.setText(
+                f"Created {spec.name} · viewport refresh failed"
+            )
+
+        self._record_project_change(
+            f"Create masonry wall {spec.name} ({spec.formulation})",
             before,
         )
 
@@ -5217,6 +5712,61 @@ class MainWindow(QMainWindow):
         else:
             self.viewport.set_view("iso")
 
+    def _show_frame_wizard(
+        self,
+        checked: bool = False,
+    ) -> None:
+        del checked
+        dialog = FrameWizard(self.project, parent=self)
+        if not dialog.exec():
+            return
+
+        # Preview & Create owns replacement acknowledgement and runs a
+        # cloned-project generation dry-run before QWizard accepts.  Reaching
+        # this point therefore means the complete Frame Wizard build contract
+        # has already been reviewed by the user.
+        spec = dialog.spec()
+        self._generate_frame_grid(
+            spec,
+            managed_by_frame_wizard=True,
+            recipe_name=dialog.active_preset_name,
+        )
+
+    def _edit_frame_wizard(self) -> None:
+        recipe = dict(self.project.frame_wizard_recipe)
+        if not recipe:
+            QMessageBox.information(
+                self,
+                "Edit in Frame Wizard",
+                "The current FE model is not managed by Frame Wizard.",
+            )
+            return
+        try:
+            frame_spec_from_preset(recipe)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Edit in Frame Wizard",
+                f"The saved Frame Wizard recipe is invalid:\n\n{exc}",
+            )
+            return
+
+        dialog = FrameWizard(
+            self.project,
+            parent=self,
+            initial_preset=recipe,
+            managed_edit=True,
+        )
+        if not dialog.exec():
+            return
+        self._generate_frame_grid(
+            dialog.spec(),
+            managed_by_frame_wizard=True,
+            recipe_name=dialog.active_preset_name,
+            regenerating=True,
+            regeneration_mode=dialog.regeneration_mode(),
+        )
+
     def _open_frame_grid(self, *, planar_2d: bool) -> None:
         self.frame_grid_panel.set_planar_2d(planar_2d)
         self.frame_grid_panel.refresh_assignments(
@@ -5237,19 +5787,85 @@ class MainWindow(QMainWindow):
     def _show_frame_grid_2d(self) -> None:
         self._open_frame_grid(planar_2d=True)
 
-    def _generate_frame_grid(self, spec: FrameGridSpec) -> None:
+    def _generate_frame_grid(
+        self,
+        spec: FrameGridSpec,
+        *,
+        managed_by_frame_wizard: bool = False,
+        recipe_name: str | None = None,
+        regenerating: bool = False,
+        regeneration_mode: str = "all",
+    ) -> None:
+        regeneration_mode = str(regeneration_mode or "all")
+        if regeneration_mode not in {"all", "compatible"}:
+            raise ValueError(
+                "Frame Wizard regeneration mode must be 'all' or 'compatible'."
+            )
+        if (
+            regenerating
+            and regeneration_mode == "compatible"
+            and self.project.frame_wizard_recipe
+        ):
+            try:
+                plan = frame_regeneration_plan(
+                    self.project,
+                    dict(self.project.frame_wizard_recipe),
+                    spec,
+                )
+            except (TypeError, ValueError) as exc:
+                QMessageBox.warning(
+                    self,
+                    "Update Compatible Parts",
+                    str(exc),
+                )
+                return
+            if not bool(plan.get("compatible", False)):
+                QMessageBox.warning(
+                    self,
+                    "Update Compatible Parts",
+                    (
+                        "Compatible update is no longer safe. Generated tags "
+                        "would change or manual edits were detected. Reopen "
+                        "Frame Wizard and use Regenerate all after reviewing "
+                        "the diff."
+                    ),
+                )
+                return
+
         before = self.project.to_dict()
         try:
             created_transformations = prepare_frame_grid(
                 self.project,
                 spec,
             )
-            # Frame Grid is a replacement-geometry command.  Clear every
-            # object whose meaning depends on old node/element tags before
-            # generating the new model so reused IDs cannot silently rebind
-            # old loads, constraints, recorders, or analyses.
-            self.project.clear_model_linked_data()
-            generate_frame_grid(self.model, spec)
+            # Frame Grid is a replacement-geometry command.  The project
+            # generator clears model-linked objects, creates the member grid,
+            # then applies any Frame Wizard joint topology (duplicate nodes,
+            # equalDOF ties and connection springs).
+            joint_result = generate_frame_project(self.project, spec)
+            if managed_by_frame_wizard:
+                managed_name = str(recipe_name or "").strip()
+                if managed_name in {"", "Custom"}:
+                    managed_name = "Frame Wizard Managed Model"
+                recipe = frame_spec_to_preset(
+                    spec,
+                    name=managed_name,
+                    description=(
+                        "Managed FE model recipe created by Frame Wizard. "
+                        "Use Edit in Frame Wizard to reopen and regenerate it."
+                    ),
+                )
+                recipe["managed_snapshot"] = managed_frame_snapshot(
+                    self.project
+                )
+                recipe["last_regeneration_mode"] = (
+                    regeneration_mode if regenerating else "generate"
+                )
+                self.project.frame_wizard_recipe = recipe
+            else:
+                # Quick Frame Grid also replaces the FE domain, so any
+                # previous managed recipe no longer describes the live model.
+                self.project.frame_wizard_recipe = {}
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
@@ -5259,12 +5875,19 @@ class MainWindow(QMainWindow):
 
         self.selection.clear()
 
+        if regenerating and regeneration_mode == "compatible":
+            message = "Updated compatible Frame Wizard model · stable tags preserved"
+        elif regenerating:
+            message = "Regenerated Frame Wizard model"
+        else:
+            message = ""
+
         if created_transformations:
             names = ", ".join(
                 f"{item.name} [{item.tag}]"
                 for item in created_transformations
             )
-            message = (
+            generated_detail = (
                 (
                     f"Generated 2D {spec.nx}-bay, {spec.nz}-storey frame"
                     if spec.planar_2d
@@ -5276,13 +5899,106 @@ class MainWindow(QMainWindow):
                 + f" · created {names}"
             )
         else:
-            message = (
+            generated_detail = (
                 f"Generated 2D {spec.nx}-bay, {spec.nz}-storey frame"
                 if spec.planar_2d
                 else (
                     f"Generated {spec.nx} × {spec.ny} bay, "
                     f"{spec.nz}-storey frame"
                 )
+            )
+        message = (
+            f"{message} · {generated_detail}"
+            if message
+            else generated_detail
+        )
+
+        joint_connections = int(
+            joint_result.get("joint_connections", 0)
+        )
+        if joint_connections:
+            joint_model = str(spec.joint_model or "None")
+            if joint_model == "ZeroLength":
+                message += (
+                    f" · {joint_connections} semi-rigid joint spring(s)"
+                )
+            else:
+                message += (
+                    f" · {joint_connections} {joint_model} joint core(s)"
+                )
+
+        diaphragm_count = int(
+            joint_result.get("diaphragm_constraints", 0)
+        )
+        if diaphragm_count:
+            message += (
+                f" · {diaphragm_count} rigid floor diaphragm(s)"
+            )
+
+        slab_floors = int(joint_result.get("slab_floors", 0))
+        slab_elements = int(joint_result.get("slab_elements", 0))
+        if slab_floors:
+            message += (
+                f" · {slab_floors} shell slab floor(s)"
+                f" / {slab_elements} shell element(s)"
+            )
+
+        foundation_connections = int(
+            joint_result.get("foundation_connections", 0)
+        )
+        foundation_profiles = int(
+            joint_result.get("foundation_profiles_used", 0)
+        )
+        if foundation_connections:
+            message += (
+                f" · {foundation_connections} foundation spring connection(s)"
+            )
+            if foundation_profiles:
+                message += f" / {foundation_profiles} profile(s)"
+
+        brace_panels = int(joint_result.get("brace_panels", 0))
+        brace_elements = int(joint_result.get("brace_elements", 0))
+        if brace_panels:
+            message += (
+                f" · {brace_panels} braced panel(s)"
+                f" / {brace_elements} brace element(s)"
+            )
+
+        self_weight_loads = int(
+            joint_result.get("self_weight_loads", 0)
+        )
+        beam_udl_loads = int(
+            joint_result.get("beam_udl_loads", 0)
+        )
+        floor_area_loads = int(
+            joint_result.get("floor_area_loads", 0)
+        )
+        if self_weight_loads or beam_udl_loads or floor_area_loads:
+            message += (
+                f" · {self_weight_loads} self-weight load(s)"
+                f" / {beam_udl_loads} beam UDL(s)"
+                f" / {floor_area_loads} floor-area beam load(s)"
+            )
+
+        mass_sources = int(joint_result.get("mass_sources", 0))
+        if mass_sources:
+            mass_nodes = int(joint_result.get("mass_nodes", 0))
+            generated_mass = float(
+                joint_result.get("generated_nodal_mass", 0.0)
+            )
+            message += (
+                f" · {mass_sources} seismic Mass Source"
+                f" / {mass_nodes} mass node(s)"
+                f" / generated nodal mass={generated_mass:.6g}"
+            )
+
+        modal_analyses = int(joint_result.get("modal_analyses", 0))
+        if modal_analyses:
+            modal_tag = int(joint_result.get("modal_analysis_tag", 0))
+            modal_results = int(joint_result.get("modal_results", 0))
+            message += (
+                f" · Modal analysis {modal_tag}"
+                f" / {modal_results} modal result request(s)"
             )
 
         self._refresh_all(message)
@@ -5293,11 +6009,45 @@ class MainWindow(QMainWindow):
             beam_transf_tag=spec.beam_transf_tag,
         )
         self._record_project_change(
-            "Generate 2D frame" if spec.planar_2d else "Generate frame grid",
+            (
+                (
+                    (
+                        "Frame Wizard · Compatible update 2D frame"
+                        if spec.planar_2d
+                        else "Frame Wizard · Compatible update 3D frame"
+                    )
+                    if regeneration_mode == "compatible"
+                    else (
+                        "Frame Wizard · Regenerate 2D frame"
+                        if spec.planar_2d
+                        else "Frame Wizard · Regenerate 3D frame"
+                    )
+                )
+                if regenerating
+                else (
+                    "Frame Wizard · Generate 2D frame"
+                    if spec.planar_2d
+                    else "Frame Wizard · Generate 3D frame"
+                )
+            ),
             before,
         )
         if spec.planar_2d:
-            self.viewport.set_view("xz")
+            if str(spec.joint_model) in {
+                "Joint2D",
+                "BeamColumnJoint",
+                "KrawinklerPanelZone",
+            }:
+                self.viewport.set_view("xy")
+            else:
+                self.viewport.set_view("xz")
+        else:
+            self.viewport.set_view("iso")
+
+        modal_tag = int(joint_result.get("modal_analysis_tag", 0))
+        if modal_tag > 0 and modal_tag in self.project.analyses:
+            self._select_tree_payload("analysis", modal_tag)
+            self._show_analysis_properties(modal_tag)
 
     def _sync_viewport_display_data(
         self,
@@ -5358,6 +6108,7 @@ class MainWindow(QMainWindow):
             units=self.project.units,
             solution_results=self.project.solution_results,
             nd_materials=self.project.nd_materials,
+            friction_models=self.project.friction_models,
         )
 
     def _refresh_project_metadata(
@@ -5365,6 +6116,7 @@ class MainWindow(QMainWindow):
         message: str = "",
         *,
         sync_viewport_display: bool = True,
+        refresh_tree: bool = True,
     ) -> None:
         if sync_viewport_display:
             self._sync_viewport_display_data(refresh=True)
@@ -5380,7 +6132,8 @@ class MainWindow(QMainWindow):
             self.project.sections,
             self.project.transformations,
         )
-        self._refresh_tree()
+        if refresh_tree:
+            self._refresh_tree()
         self._sync_analysis_ribbon_cpu_controls()
         try:
             generated_script = self._generate_project_script()
@@ -5486,7 +6239,7 @@ class MainWindow(QMainWindow):
         else:
             self._tree_surface_items.clear()
 
-        root = QTreeWidgetItem(["OpenSees Model"])
+        root = QTreeWidgetItem(["FEWIZ Project"])
         root.setIcon(0, studio_icon("model-root"))
         root.setData(0, Qt.UserRole, ("model_root", None))
         root.setExpanded(True)
@@ -5554,7 +6307,7 @@ class MainWindow(QMainWindow):
         mesh_root.setIcon(0, studio_icon("mesh-root"))
         mesh_root.setData(0, Qt.UserRole, ("mesh_root", None))
         mesh_root.setExpanded(True)
-        root.addChild(mesh_root)
+        geometry.addChild(mesh_root)
 
         line_meshes = QTreeWidgetItem([
             f"Line Meshes ({len(self.project.lines)})"
@@ -5575,12 +6328,42 @@ class MainWindow(QMainWindow):
         mesh_root.addChild(surface_meshes)
 
         # Geometry defines topology, Mesh stores discretization/FE recipes,
-        # and generated OpenSees entities live only under FE Model.
-        fe_model = QTreeWidgetItem(["FE Model"])
+        # and generated solver entities live under Model.
+        fe_model = QTreeWidgetItem([
+            (
+                "Model · Frame Wizard Managed"
+                if self.project.frame_wizard_recipe
+                else "Model"
+            )
+        ])
         fe_model.setIcon(0, studio_icon("fe-model"))
         fe_model.setData(0, Qt.UserRole, ("fe_model_root", None))
         fe_model.setExpanded(True)
         root.addChild(fe_model)
+
+        recipe_count = 1 if self.project.frame_wizard_recipe else 0
+        recipes_root = QTreeWidgetItem([f"Recipes ({recipe_count})"])
+        recipes_root.setIcon(0, studio_icon("frame-grid"))
+        recipes_root.setData(0, Qt.UserRole, ("recipes_root", None))
+        recipes_root.setExpanded(True)
+        root.addChild(recipes_root)
+        if self.project.frame_wizard_recipe:
+            recipe_name = str(
+                self.project.frame_wizard_recipe.get(
+                    "name",
+                    "Frame Wizard Managed Model",
+                )
+            )
+            frame_recipe_item = QTreeWidgetItem([
+                f"Frame Wizard · {recipe_name}"
+            ])
+            frame_recipe_item.setIcon(0, studio_icon("frame-grid"))
+            frame_recipe_item.setData(
+                0,
+                Qt.UserRole,
+                ("frame_recipe", None),
+            )
+            recipes_root.addChild(frame_recipe_item)
 
         nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
         nodes.setIcon(0, studio_icon("node-root"))
@@ -5608,23 +6391,7 @@ class MainWindow(QMainWindow):
             item = QTreeWidgetItem([
                 f"{element_type} ({type_counts[element_type]})"
             ])
-            element_type_lower = element_type.lower()
-            element_icon = (
-                "truss"
-                if "truss" in element_type_lower
-                else (
-                    "shell-element"
-                    if "shell" in element_type_lower
-                    else (
-                        "frame"
-                        if any(
-                            token in element_type_lower
-                            for token in ("beam", "column")
-                        )
-                        else "element"
-                    )
-                )
-            )
+            element_icon = element_tree_icon_name(element_type)
             item.setIcon(0, studio_icon(element_icon))
             item.setData(
                 0,
@@ -5859,23 +6626,7 @@ class MainWindow(QMainWindow):
         for tag in sorted(self.model.elements):
             element = self.model.elements[tag]
             item = QTreeWidgetItem([f"Element {tag}"])
-            element_type_lower = element.element_type.lower()
-            element_icon = (
-                "truss"
-                if "truss" in element_type_lower
-                else (
-                    "shell-element"
-                    if "shell" in element_type_lower
-                    else (
-                        "frame"
-                        if any(
-                            token in element_type_lower
-                            for token in ("beam", "column")
-                        )
-                        else "element"
-                    )
-                )
-            )
+            element_icon = element_tree_icon_name(element.element_type)
             item.setIcon(0, studio_icon(element_icon))
             item.setData(0, Qt.UserRole, ("element", tag))
             type_items.get(element.element_type, elements).addChild(item)
@@ -5943,7 +6694,7 @@ class MainWindow(QMainWindow):
             connection_groups[connection.connection_type].addChild(item)
 
         # MPC-style kinematic relationships belong to the FE model rather
-        # than Loads & BCs. Supports/fixities remain in Loads & BCs.
+        # than Model. Supports/fixities remain under Boundary Conditions.
         constraints_root = QTreeWidgetItem([
             f"Constraints ({len(self.project.constraints)})"
         ])
@@ -6059,7 +6810,7 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("set", name))
             named_sets.addChild(item)
 
-        properties_root = QTreeWidgetItem(["Properties"])
+        properties_root = QTreeWidgetItem(["Definitions"])
         properties_root.setIcon(0, studio_icon("properties"))
         properties_root.setData(
             0,
@@ -6067,7 +6818,7 @@ class MainWindow(QMainWindow):
             ("properties_root", None),
         )
         properties_root.setExpanded(True)
-        root.addChild(properties_root)
+        fe_model.addChild(properties_root)
 
         materials_root = QTreeWidgetItem([
             f"Materials ({len(self.project.materials)})"
@@ -6106,6 +6857,27 @@ class MainWindow(QMainWindow):
             item.setIcon(0, studio_icon("nd-material-item"))
             item.setData(0, Qt.UserRole, ("nd_material", tag))
             nd_materials_root.addChild(item)
+
+        friction_models_root = QTreeWidgetItem([
+            f"Friction Models ({len(self.project.friction_models)})"
+        ])
+        friction_models_root.setIcon(0, studio_icon("link"))
+        friction_models_root.setData(
+            0,
+            Qt.UserRole,
+            ("friction_models_root", None),
+        )
+        friction_models_root.setExpanded(True)
+        properties_root.addChild(friction_models_root)
+
+        for tag in sorted(self.project.friction_models):
+            friction = self.project.friction_models[tag]
+            item = QTreeWidgetItem([
+                f"{friction.friction_type} [{tag}]  {friction.name}"
+            ])
+            item.setIcon(0, studio_icon("link"))
+            item.setData(0, Qt.UserRole, ("friction_model", tag))
+            friction_models_root.addChild(item)
 
         sections_root = QTreeWidgetItem([
             f"Sections ({len(self.project.sections)})"
@@ -6154,16 +6926,6 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("transformation", tag))
             transformations_root.addChild(item)
 
-        loads_bc_root = QTreeWidgetItem(["Loads & BCs"])
-        loads_bc_root.setIcon(0, studio_icon("loads-bcs"))
-        loads_bc_root.setData(
-            0,
-            Qt.UserRole,
-            ("loads_bc_root", None),
-        )
-        loads_bc_root.setExpanded(True)
-        root.addChild(loads_bc_root)
-
         constrained_nodes = {
             tag: classify_fixity(
                 node.fixity,
@@ -6178,7 +6940,7 @@ class MainWindow(QMainWindow):
         boundary_root.setIcon(0, studio_icon("boundary-root"))
         boundary_root.setData(0, Qt.UserRole, ("boundary_root", None))
         boundary_root.setExpanded(True)
-        loads_bc_root.addChild(boundary_root)
+        root.addChild(boundary_root)
 
         grouped: dict[str, list[int]] = {}
         for tag, support_type in constrained_nodes.items():
@@ -6216,11 +6978,11 @@ class MainWindow(QMainWindow):
                 node_item.setData(0, Qt.UserRole, ("node", tag))
                 group_item.addChild(node_item)
 
-        loading_root = QTreeWidgetItem(["Loading"])
+        loading_root = QTreeWidgetItem(["Loads"])
         loading_root.setIcon(0, studio_icon("loading"))
         loading_root.setData(0, Qt.UserRole, ("loading_root", None))
         loading_root.setExpanded(True)
-        loads_bc_root.addChild(loading_root)
+        root.addChild(loading_root)
 
         ground_motion_patterns = {
             tag: pattern
@@ -6486,6 +7248,7 @@ class MainWindow(QMainWindow):
                     "ShellForce": "result-shell-force",
                     "ShellDeformation": "result-shell-deformation",
                     "ShellDisplacement": "result-displacement",
+                    "CrackPattern": "result-crack",
                     "TimeHistory": "result-time-history",
                     "ForceDisplacement": "result-force-displacement",
                     "PushoverCurve": "result-pushover-curve",
@@ -6519,6 +7282,7 @@ class MainWindow(QMainWindow):
                     "ShellForce": "result-shell-force",
                     "ShellDeformation": "result-shell-deformation",
                     "ShellDisplacement": "result-displacement",
+                    "CrackPattern": "result-crack",
                     "TimeHistory": "result-time-history",
                     "ForceDisplacement": "result-force-displacement",
                     "PushoverCurve": "result-pushover-curve",
@@ -6566,7 +7330,7 @@ class MainWindow(QMainWindow):
             recorders.addChild(item)
         root.addChild(analysis)
 
-        results = QTreeWidgetItem([f"Results / Jobs ({len(self._jobs)})"])
+        results = QTreeWidgetItem([f"Solution / Jobs ({len(self._jobs)})"])
         results.setIcon(0, studio_icon("jobs-root"))
         results.setData(0, Qt.UserRole, ("jobs_root", None))
         results.setExpanded(True)
@@ -6600,6 +7364,7 @@ class MainWindow(QMainWindow):
                     "ShellForce": "result-shell-force",
                     "ShellDeformation": "result-shell-deformation",
                     "ShellDisplacement": "result-displacement",
+                    "CrackPattern": "result-crack",
                     "TimeHistory": "result-time-history",
                     "ForceDisplacement": "result-force-displacement",
                     "PushoverCurve": "result-pushover-curve",
@@ -6988,6 +7753,11 @@ class MainWindow(QMainWindow):
             )
 
         self._sync_ribbon_context(selected_payload_kinds)
+        self._refresh_context_toolbar(
+            nodes=nodes,
+            elements=elements,
+            kinds=selected_payload_kinds,
+        )
 
         if jobs_root_selected:
             # Results / Jobs is a navigation context, not a particular result.
@@ -7161,7 +7931,7 @@ class MainWindow(QMainWindow):
         elif show_jobs_root:
             self._show_jobs_summary()
             self.status_message.setText(
-                "Results / Jobs overview · current result display preserved"
+                "Solution / Jobs overview · current result display preserved"
             )
         elif len(selected_payload_kinds) == 1:
             root_kind = next(iter(selected_payload_kinds))
@@ -7216,7 +7986,7 @@ class MainWindow(QMainWindow):
                     )
                 elif root_kind == "fe_model_root":
                     self.status_message.setText(
-                        "FE Model overview · base FE display"
+                        "Model overview · base FE display"
                     )
                 elif root_kind == "reinforcement_root":
                     self.status_message.setText(
@@ -9977,16 +10747,47 @@ class MainWindow(QMainWindow):
             else:
                 self._show_entity_properties("element", next(iter(elements)))
         elif total > 1:
+            element_types = sorted({
+                str(self.model.elements[tag].element_type)
+                for tag in elements
+                if tag in self.model.elements
+            })
+            node_preview = ", ".join(
+                str(tag) for tag in sorted(nodes)[:8]
+            )
+            element_preview = ", ".join(
+                str(tag) for tag in sorted(elements)[:8]
+            )
             self.properties_panel.set_properties(
                 "Selection",
                 [
+                    ("Scope", "FE Selection"),
                     ("Nodes", len(nodes)),
+                    (
+                        "Node Tags",
+                        node_preview
+                        + (" …" if len(nodes) > 8 else ""),
+                    ),
                     ("Elements", len(elements)),
+                    (
+                        "Element Tags",
+                        element_preview
+                        + (" …" if len(elements) > 8 else ""),
+                    ),
+                    (
+                        "Element Types",
+                        ", ".join(element_types) if element_types else "—",
+                    ),
                     ("Total", total),
                 ],
             )
         else:
             self.properties_panel.set_properties("Properties", [])
+
+        self._refresh_context_toolbar(
+            nodes=nodes,
+            elements=elements,
+        )
 
         if total:
             self.status_message.setText(
@@ -10137,16 +10938,15 @@ class MainWindow(QMainWindow):
                         )
                 elif property_id == "element_type":
                     new_type = str(value)
-                    if new_type not in {
-                        "elasticBeamColumn",
-                        "forceBeamColumn",
-                        "dispBeamColumn",
-                    }:
+                    if new_type not in FRAME_ELEMENT_TYPES:
                         raise ValueError(
                             f"Unsupported frame formulation: {new_type}"
                         )
                     element.element_type = new_type
-                    if new_type == "elasticBeamColumn":
+                    if new_type in {
+                        "elasticBeamColumn",
+                        "ElasticTimoshenkoBeam",
+                    }:
                         section = self.project.sections.get(
                             element.section_tag
                         )
@@ -10155,6 +10955,24 @@ class MainWindow(QMainWindow):
                             and section.section_type != "Elastic"
                         ):
                             element.section_tag = None
+                    elif new_type == "dispBeamColumnInt":
+                        section = self.project.sections.get(
+                            element.section_tag
+                        )
+                        transformation = self.project.transformations.get(
+                            element.transf_tag
+                        )
+                        if (
+                            section is not None
+                            and section.section_type != "FiberInt"
+                        ):
+                            element.section_tag = None
+                        if (
+                            transformation is not None
+                            and transformation.transformation_type
+                            != "LinearInt"
+                        ):
+                            element.transf_tag = None
                 elif property_id == "group":
                     element.group = str(value).strip() or "frame"
                 elif property_id == "section_tag":
@@ -10166,11 +10984,20 @@ class MainWindow(QMainWindow):
                                 f"Section {section_tag} does not exist."
                             )
                         if (
-                            element.element_type == "elasticBeamColumn"
+                            element.element_type
+                            in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                             and section.section_type != "Elastic"
                         ):
                             raise ValueError(
-                                "elasticBeamColumn requires an Elastic section."
+                                f"{element.element_type} requires an "
+                                "Elastic section."
+                            )
+                        if (
+                            element.element_type == "dispBeamColumnInt"
+                            and section.section_type != "FiberInt"
+                        ):
+                            raise ValueError(
+                                "dispBeamColumnInt requires a FiberInt section."
                             )
                         if (
                             element.element_type in SHELL_ELEMENT_TYPES
@@ -10179,6 +11006,15 @@ class MainWindow(QMainWindow):
                             raise ValueError(
                                 "Shell elements require a shell-compatible "
                                 "section."
+                            )
+                        if (
+                            element.element_type in TRUSS_SECTION_ELEMENT_TYPES
+                            and section.section_type
+                            not in {"Elastic", "Fiber", "FiberInt"}
+                        ):
+                            raise ValueError(
+                                "Section-based trusses require an Elastic, "
+                                "Fiber, or FiberInt section."
                             )
                     element.section_tag = section_tag
                 elif property_id == "transf_tag":
@@ -10190,6 +11026,28 @@ class MainWindow(QMainWindow):
                         raise ValueError(
                             f"Transformation {transf_tag} does not exist."
                         )
+                    if transf_tag is not None:
+                        transformation = self.project.transformations[
+                            transf_tag
+                        ]
+                        if (
+                            element.element_type == "dispBeamColumnInt"
+                            and transformation.transformation_type
+                            != "LinearInt"
+                        ):
+                            raise ValueError(
+                                "dispBeamColumnInt requires a LinearInt "
+                                "transformation."
+                            )
+                        if (
+                            element.element_type != "dispBeamColumnInt"
+                            and transformation.transformation_type
+                            == "LinearInt"
+                        ):
+                            raise ValueError(
+                                "LinearInt is reserved for "
+                                "dispBeamColumnInt."
+                            )
                     element.transf_tag = transf_tag
                 elif property_id == "integration_type":
                     element.integration_type = str(value)
@@ -10201,6 +11059,8 @@ class MainWindow(QMainWindow):
                     element.force_tolerance = float(str(value).strip())
                 elif property_id == "mass_per_length":
                     element.mass_per_length = float(str(value).strip())
+                elif property_id == "beam_center_ratio":
+                    element.beam_center_ratio = float(str(value).strip())
                 elif property_id == "consistent_mass":
                     if isinstance(value, bool):
                         element.consistent_mass = value
@@ -10388,9 +11248,23 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self._refresh_all(
-            f"Updated {kind} {tag}: {property_id}"
-        )
+        message = f"Updated {kind} {tag}: {property_id}"
+        if kind in {"material", "section", "transformation"}:
+            # These edits change reusable properties but normally do not change
+            # FE topology. Let the viewport decide whether its current display
+            # mode actually needs a rebuild (actual section / color-by modes)
+            # instead of unconditionally clearing and redrawing the whole scene.
+            self._sync_viewport_display_data(refresh=True)
+            self._refresh_project_metadata(
+                message,
+                sync_viewport_display=False,
+                refresh_tree=property_id in {
+                    "name",
+                    "transformation_type",
+                },
+            )
+        else:
+            self._refresh_all(message)
         self._record_project_change(
             f"Edit {kind} {tag} property {property_id}",
             before,
@@ -10555,6 +11429,226 @@ class MainWindow(QMainWindow):
                 )
                 return
 
+            if element.element_type in MASONRY_PANEL_ELEMENT_TYPES:
+                p = element.special_parameters
+                mat_1_tag = int(p["mat_1"])
+                mat_2_tag = int(p["mat_2"])
+                mat_1 = self.project.materials.get(mat_1_tag)
+                mat_2 = self.project.materials.get(mat_2_tag)
+                mat_1_text = (
+                    f"{mat_1_tag} - {mat_1.name} ({mat_1.material_type})"
+                    if mat_1 is not None
+                    else f"{mat_1_tag} (missing)"
+                )
+                mat_2_text = (
+                    f"{mat_2_tag} - {mat_2.name} ({mat_2.material_type})"
+                    if mat_2 is not None
+                    else f"{mat_2_tag} (missing)"
+                )
+                self.properties_panel.set_properties(
+                    "Masonry Panel Element",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        (
+                            "Nodes",
+                            ", ".join(map(str, element.node_tags())),
+                        ),
+                        (
+                            "Topology",
+                            "12-node panel · 6 diagonal struts "
+                            "(3 each direction)",
+                        ),
+                        ("Central strut material", mat_1_text),
+                        ("Lateral strut material", mat_2_text),
+                        ("Thickness", f"{float(p['thick']):g}"),
+                        (
+                            "Total strut width / diagonal",
+                            f"{float(p['w_tot']):g}",
+                        ),
+                        (
+                            "Central / total strut width",
+                            f"{float(p['w_1']):g}",
+                        ),
+                        ("Group", element.group),
+                        ("Section", "Not used by MasonPan12"),
+                        ("Transformation", "Internal to MasonPan12"),
+                        (
+                            "Edit",
+                            "Recreate / calibrate through Masonry Wall Wizard; "
+                            "materials remain editable in Material Library.",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
+                material = (
+                    self.project.nd_materials.get(
+                        int(element.continuum_material_tag)
+                    )
+                    if element.continuum_material_tag is not None
+                    else None
+                )
+                material_text = (
+                    f"{element.continuum_material_tag} - {material.name} "
+                    f"({material.material_type})"
+                    if material is not None
+                    else (
+                        f"{element.continuum_material_tag} (missing)"
+                        if element.continuum_material_tag is not None
+                        else "Unassigned"
+                    )
+                )
+                b1, b2 = element.continuum_body_force
+                self.properties_panel.set_properties(
+                    "2D Continuum Quad",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        (
+                            "Nodes",
+                            ", ".join(map(str, element.node_tags())),
+                        ),
+                        ("Topology", "4-node XY continuum · CCW"),
+                        ("Behavior", element.continuum_type),
+                        ("Thickness", f"{element.continuum_thickness:g}"),
+                        ("nD Material", material_text),
+                        (
+                            "Body force",
+                            (
+                                f"({float(b1):g}, {float(b2):g})"
+                                if element.element_type in {"quad", "SSPquad"}
+                                else f"Not used by {element.element_type}"
+                            ),
+                        ),
+                        (
+                            "Pressure",
+                            (
+                                f"{element.continuum_pressure:g}"
+                                if element.element_type == "quad"
+                                else f"Not used by {element.element_type}"
+                            ),
+                        ),
+                        (
+                            "Density",
+                            (
+                                f"{element.continuum_density:g}"
+                                if element.element_type == "quad"
+                                else f"Not used by {element.element_type}"
+                            ),
+                        ),
+                        ("Section", "Not used by 2D continuum"),
+                        ("Transformation", "Not used by 2D continuum"),
+                        ("Group", element.group),
+                        (
+                            "Edit",
+                            "Right-click element → Edit 2D Continuum Definition...",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in WALL_MACRO_ELEMENT_TYPES:
+                fiber_count = len(element.wall_widths)
+                rows = [
+                    ("Tag", tag),
+                    ("Type", element.element_type),
+                    ("Nodes", ", ".join(map(str, element.node_tags()))),
+                    ("Macro-fibers", fiber_count),
+                    ("Total width", f"{sum(element.wall_widths):g}"),
+                    ("Center of rotation c", f"{element.wall_center_ratio:g}"),
+                ]
+                if element.element_type == "SFI_MVLEM":
+                    rows.extend([
+                        (
+                            "FSAM nDMaterials",
+                            ", ".join(map(str, element.wall_nd_material_tags)),
+                        ),
+                        ("Density", "Not used by SFI_MVLEM"),
+                    ])
+                else:
+                    rows.extend([
+                        (
+                            "Concrete materials",
+                            ", ".join(map(str, element.wall_concrete_tags)),
+                        ),
+                        (
+                            "Steel materials",
+                            ", ".join(map(str, element.wall_steel_tags)),
+                        ),
+                        ("Shear material", element.wall_shear_tag),
+                        ("Density", f"{element.wall_density:g}"),
+                    ])
+                if element.element_type == "MVLEM_3D":
+                    rows.extend([
+                        ("Thickness modifier", f"{element.wall_thick_mod:g}"),
+                        ("Poisson ratio", f"{element.wall_poisson:g}"),
+                    ])
+                rows.extend([
+                    ("Section", "Not used by wall macro-element"),
+                    ("Transformation", "Not used by wall macro-element"),
+                    ("Group", element.group),
+                    (
+                        "Edit",
+                        "Right-click element → Edit RC Wall Macro Definition...",
+                    ),
+                ])
+                self.properties_panel.set_properties(
+                    "RC Wall Macro Element",
+                    rows,
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in SOLID_ELEMENT_TYPES:
+                material = (
+                    self.project.nd_materials.get(
+                        int(element.solid_material_tag)
+                    )
+                    if element.solid_material_tag is not None
+                    else None
+                )
+                material_text = (
+                    f"{element.solid_material_tag} - {material.name} "
+                    f"({material.material_type})"
+                    if material is not None
+                    else (
+                        f"{element.solid_material_tag} (missing)"
+                        if element.solid_material_tag is not None
+                        else "Unassigned"
+                    )
+                )
+                b1, b2, b3 = element.solid_body_force
+                self.properties_panel.set_properties(
+                    "3D Solid Brick",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        (
+                            "Nodes",
+                            ", ".join(map(str, element.node_tags())),
+                        ),
+                        ("Topology", "8-node hexahedral solid"),
+                        ("nD Material", material_text),
+                        (
+                            "Body force",
+                            f"({float(b1):g}, {float(b2):g}, {float(b3):g})",
+                        ),
+                        ("Section", "Not used by 3D solid"),
+                        ("Transformation", "Not used by 3D solid"),
+                        ("Group", element.group),
+                        (
+                            "Edit",
+                            "Right-click element → Edit 3D Solid Definition...",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
             if element.element_type in SHELL_ELEMENT_TYPES:
                 section_text = "Unassigned"
                 if element.section_tag is not None:
@@ -10703,33 +11797,26 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-            if element.element_type == "truss":
-                material_text = "Unassigned"
-                if element.truss_material_tag is not None:
-                    material = self.project.materials.get(
-                        element.truss_material_tag
-                    )
-                    material_text = (
-                        f"{element.truss_material_tag} - {material.name}"
-                        if material is not None
-                        else f"{element.truss_material_tag} (missing)"
-                    )
-                material_choices = [("Unassigned", None)]
-                material_choices.extend(
-                    (
-                        f"{material_tag} - {material.name} "
-                        f"({material.material_type})",
-                        int(material_tag),
-                    )
-                    for material_tag, material in sorted(
-                        self.project.materials.items()
-                    )
+            if element.element_type in CABLE_ELEMENT_TYPES:
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                weight = (
+                    float(p["weight"])
+                    * unit_system.length_to_m
+                    / unit_system.force_to_n
+                )
+                area = float(p["A"]) / unit_system.length_to_m**2
+                l0 = unit_system.length_from_m(float(p["L0"]))
+                rho = (
+                    float(p["rho"])
+                    * unit_system.length_to_m
+                    / unit_system.mass_unit_kg
                 )
                 self.properties_panel.set_properties(
-                    "Truss Element",
+                    "Catenary Cable",
                     [
                         ("Tag", tag),
-                        ("Type", "truss"),
+                        ("Type", element.element_type),
                         ("Nodes", f"{element.i}, {element.j}"),
                         (
                             "Group",
@@ -10740,6 +11827,501 @@ class MainWindow(QMainWindow):
                                 "kind": "text",
                             },
                         ),
+                        (
+                            f"Weight / length [{unit_system.line_load_label}]",
+                            f"{weight:g}",
+                        ),
+                        (
+                            f"Elastic modulus [{unit_system.engineering_stress_label}]",
+                            f"{unit_system.engineering_stress_from_pa(float(p['E'])):g}",
+                        ),
+                        (
+                            f"Area [{unit_system.length}²]",
+                            f"{area:g}",
+                        ),
+                        (
+                            f"Unstressed length L0 [{unit_system.length}]",
+                            f"{l0:g}",
+                        ),
+                        ("Thermal expansion α", f"{float(p['alpha']):g}"),
+                        (
+                            "Temperature change ΔT",
+                            f"{float(p['temperature_change']):g}",
+                        ),
+                        (
+                            f"Mass / length ρ [{unit_system.mass_per_length_label}]",
+                            f"{rho:g}",
+                        ),
+                        ("Substeps", int(p["Nsubsteps"])),
+                        ("Mass type", int(p["massType"])),
+                        ("Section", "Not used by CatenaryCable"),
+                        ("Transformation", "Not used by CatenaryCable"),
+                        (
+                            "Edit",
+                            "Double-click element or use Definition → "
+                            "Edit Special Element Definition...",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in CONTACT_ELEMENT_TYPES:
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                rows = [
+                    ("Tag", tag),
+                    ("Type", element.element_type),
+                    (
+                        "Nodes",
+                        ", ".join(
+                            str(value) for value in element.node_tags()
+                        ),
+                    ),
+                    ("Group", element.group),
+                ]
+                if element.element_type in CONTACT_TWO_NODE_ELEMENT_TYPES:
+                    kn = (
+                        float(p["Kn"])
+                        * unit_system.length_to_m
+                        / unit_system.force_to_n
+                    )
+                    kt = (
+                        float(p["Kt"])
+                        * unit_system.length_to_m
+                        / unit_system.force_to_n
+                    )
+                    rows.extend([
+                        (
+                            f"Normal penalty [{unit_system.force}/{unit_system.length}]",
+                            f"{kn:g}",
+                        ),
+                        (
+                            f"Tangential penalty [{unit_system.force}/{unit_system.length}]",
+                            f"{kt:g}",
+                        ),
+                        ("Friction μ", f"{float(p['mu']):g}"),
+                    ])
+                    if element.element_type == "zeroLengthContact2D":
+                        rows.append((
+                            "Contact normal",
+                            ", ".join(
+                                f"{float(value):g}"
+                                for value in p["normal"]
+                            ),
+                        ))
+                    else:
+                        rows.extend([
+                            (
+                                f"Cohesion [{unit_system.force}]",
+                                f"{unit_system.force_from_n(float(p['cohesion'])):g}",
+                            ),
+                            ("Normal direction", int(p["dir"])),
+                        ])
+                else:
+                    nd_tag = int(p["nd_material_tag"])
+                    nd_material = self.project.nd_materials.get(nd_tag)
+                    rows.extend([
+                        (
+                            "Contact nD material",
+                            (
+                                f"{nd_tag} - {nd_material.name}"
+                                if nd_material is not None
+                                else f"{nd_tag} (missing)"
+                            ),
+                        ),
+                        (
+                            f"Gap tolerance [{unit_system.length}]",
+                            f"{unit_system.length_from_m(float(p['gTol'])):g}",
+                        ),
+                        (
+                            f"Force tolerance [{unit_system.force}]",
+                            f"{unit_system.force_from_n(float(p['fTol'])):g}",
+                        ),
+                        (
+                            "Initial contact state",
+                            "Open / no contact assumed"
+                            if int(p["cFlag"])
+                            else "Contact assumed",
+                        ),
+                    ])
+                    if element.element_type == "BeamContact2D":
+                        rows.append((
+                            f"Beam width [{unit_system.length}]",
+                            f"{unit_system.length_from_m(float(p['width'])):g}",
+                        ))
+                    else:
+                        rows.extend([
+                            (
+                                f"Beam radius [{unit_system.length}]",
+                                f"{unit_system.length_from_m(float(p['radius'])):g}",
+                            ),
+                            ("Transformation", int(p["transf_tag"])),
+                        ])
+                rows.append((
+                    "Edit",
+                    "Double-click element or use Definition → "
+                    "Edit Contact / Interface...",
+                ))
+                self.properties_panel.set_properties(
+                    "Contact / Interface Element",
+                    rows,
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in FRICTION_BEARING_ELEMENT_TYPES:
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                friction_tag = int(p["frn_model_tag"])
+                friction = self.project.friction_models.get(friction_tag)
+                k_init = (
+                    float(p["kInit"])
+                    * unit_system.length_to_m
+                    / unit_system.force_to_n
+                )
+                mass = float(p["mass"]) / unit_system.mass_unit_kg
+                material_rows = [
+                    ("Axial (-P)", p.get("p_mat_tag")),
+                ]
+                if int(self.model.ndm) == 3:
+                    material_rows.extend([
+                        ("Torsion (-T)", p.get("t_mat_tag")),
+                        ("Moment-y (-My)", p.get("my_mat_tag")),
+                    ])
+                material_rows.append(("Moment-z (-Mz)", p.get("mz_mat_tag")))
+                rows = [
+                    ("Tag", tag),
+                    ("Type", element.element_type),
+                    ("Nodes", f"{element.i}, {element.j}"),
+                    ("Group", element.group),
+                    (
+                        "Friction model",
+                        (
+                            f"{friction_tag} - {friction.name}"
+                            if friction is not None
+                            else f"{friction_tag} (missing)"
+                        ),
+                    ),
+                    (
+                        f"Initial shear stiffness "
+                        f"[{unit_system.force}/{unit_system.length}]",
+                        f"{k_init:g}",
+                    ),
+                ]
+                if element.element_type == "singleFPBearing":
+                    rows.append((
+                        f"Effective radius Reff [{unit_system.length}]",
+                        f"{unit_system.length_from_m(float(p['Reff'])):g}",
+                    ))
+                rows.extend(
+                    (label, "-" if value is None else int(value))
+                    for label, value in material_rows
+                )
+                rows.extend([
+                    ("Shear-distance ratio", f"{float(p['shearDist']):g}"),
+                    (
+                        f"Element mass [{unit_system.mass_label}]",
+                        f"{mass:g}",
+                    ),
+                    (
+                        "Rayleigh damping",
+                        "Included" if bool(p["doRayleigh"]) else "Excluded",
+                    ),
+                    (
+                        "Local iteration",
+                        f"{int(p['maxIter'])} @ tol={float(p['tol']):g}",
+                    ),
+                    (
+                        "Edit",
+                        "Double-click element or use Definition → "
+                        "Edit Friction Bearing...",
+                    ),
+                ])
+                self.properties_panel.set_properties(
+                    "Friction Bearing",
+                    rows,
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type == "LeadRubberX":
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                self.properties_panel.set_properties(
+                    "Lead Rubber Bearing",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        ("Nodes", f"{element.i}, {element.j}"),
+                        ("Group", element.group),
+                        (
+                            f"Yield force Fy [{unit_system.force}]",
+                            f"{unit_system.force_from_n(float(p['Fy'])):g}",
+                        ),
+                        ("Post-yield ratio α", f"{float(p['alpha']):g}"),
+                        (
+                            f"Rubber shear modulus [{unit_system.engineering_stress_label}]",
+                            f"{unit_system.engineering_stress_from_pa(float(p['Gr'])):g}",
+                        ),
+                        (
+                            f"Bulk modulus [{unit_system.engineering_stress_label}]",
+                            f"{unit_system.engineering_stress_from_pa(float(p['Kbulk'])):g}",
+                        ),
+                        (
+                            f"Inner / outer diameter [{unit_system.length}]",
+                            f"{unit_system.length_from_m(float(p['D1'])):g}, "
+                            f"{unit_system.length_from_m(float(p['D2'])):g}",
+                        ),
+                        ("Rubber layers", int(p["n"])),
+                        ("Shear distance", f"{float(p['sDratio']):g}"),
+                        (
+                            "Lead heating degradation",
+                            "On" if int(p["tag5"]) else "Off",
+                        ),
+                        (
+                            "Edit",
+                            "Double-click element or use Definition → Edit Isolation Bearing...",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type == "TripleFrictionPendulum":
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                self.properties_panel.set_properties(
+                    "Triple Friction Pendulum",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        ("Nodes", f"{element.i}, {element.j}"),
+                        ("Group", element.group),
+                        (
+                            "Friction models",
+                            f"{int(p['frnTag1'])}, "
+                            f"{int(p['frnTag2'])}, "
+                            f"{int(p['frnTag3'])}",
+                        ),
+                        (
+                            "Vertical / rotational materials",
+                            f"{int(p['vertMatTag'])}, "
+                            f"{int(p['rotZMatTag'])}, "
+                            f"{int(p['rotXMatTag'])}, "
+                            f"{int(p['rotYMatTag'])}",
+                        ),
+                        (
+                            f"Effective radii [{unit_system.length}]",
+                            ", ".join(
+                                f"{unit_system.length_from_m(float(p[key])):g}"
+                                for key in ("L1", "L2", "L3")
+                            ),
+                        ),
+                        (
+                            f"Displacement limits [{unit_system.length}]",
+                            ", ".join(
+                                f"{unit_system.length_from_m(float(p[key])):g}"
+                                for key in ("d1", "d2", "d3")
+                            ),
+                        ),
+                        (
+                            f"Initial axial force W [{unit_system.force}]",
+                            f"{unit_system.force_from_n(float(p['W'])):g}",
+                        ),
+                        (
+                            f"Sliding onset uy [{unit_system.length}]",
+                            f"{unit_system.length_from_m(float(p['uy'])):g}",
+                        ),
+                        (
+                            "Edit",
+                            "Double-click element or use Definition → Edit Isolation Bearing...",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type == "elastomericBearingPlasticity":
+                p = element.special_parameters
+                unit_system = UnitSystem.from_mapping(self.project.units)
+                k_init = (
+                    float(p["kInit"])
+                    * unit_system.length_to_m
+                    / unit_system.force_to_n
+                )
+                qd = unit_system.force_from_n(float(p["qd"]))
+                mass = float(p["mass"]) / unit_system.mass_unit_kg
+                material_keys = [
+                    ("Axial (-P)", "p_mat_tag"),
+                ]
+                if int(self.model.ndm) == 3:
+                    material_keys.extend([
+                        ("Torsion (-T)", "t_mat_tag"),
+                        ("My (-My)", "my_mat_tag"),
+                    ])
+                material_keys.append(("Mz (-Mz)", "mz_mat_tag"))
+                rows = [
+                    ("Tag", tag),
+                    ("Type", element.element_type),
+                    ("Nodes", f"{element.i}, {element.j}"),
+                    (
+                        "Group",
+                        element.group,
+                        {
+                            "id": "group",
+                            "editable": True,
+                            "kind": "text",
+                        },
+                    ),
+                    (
+                        f"Initial shear stiffness [{unit_system.line_load_label}]",
+                        f"{k_init:g}",
+                    ),
+                    (
+                        f"Characteristic strength qd [{unit_system.force}]",
+                        f"{qd:g}",
+                    ),
+                    ("α1", f"{float(p['alpha1']):g}"),
+                    ("α2", f"{float(p['alpha2']):g}"),
+                    ("μ", f"{float(p['mu']):g}"),
+                ]
+                for label, key in material_keys:
+                    material_tag = p.get(key)
+                    material = (
+                        self.project.materials.get(int(material_tag))
+                        if material_tag is not None
+                        else None
+                    )
+                    rows.append((
+                        label,
+                        (
+                            f"{material_tag} - {material.name}"
+                            if material is not None
+                            else (
+                                f"{material_tag} (missing)"
+                                if material_tag is not None
+                                else "Unassigned"
+                            )
+                        ),
+                    ))
+                orientation = p.get("orientation")
+                rows.extend([
+                    ("Shear distance", f"{float(p['shearDist']):g}"),
+                    (
+                        "Rayleigh damping",
+                        "On" if bool(p["doRayleigh"]) else "Off",
+                    ),
+                    (
+                        f"Element mass [{unit_system.mass_label}]",
+                        f"{mass:g}",
+                    ),
+                    (
+                        "Orientation",
+                        (
+                            ", ".join(f"{float(v):g}" for v in orientation)
+                            if orientation is not None
+                            else "Automatic"
+                        ),
+                    ),
+                    ("Section", "Not used by bearing"),
+                    ("Transformation", "Local axes defined by bearing options"),
+                    (
+                        "Edit",
+                        "Double-click element or use Definition → "
+                        "Edit Special Element Definition...",
+                    ),
+                ])
+                self.properties_panel.set_properties(
+                    "Elastomeric Bearing Plasticity",
+                    rows,
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in TRUSS_ELEMENT_TYPES:
+                section_based = (
+                    element.element_type in TRUSS_SECTION_ELEMENT_TYPES
+                )
+                rows = [
+                    ("Tag", tag),
+                    ("Type", element.element_type),
+                    ("Nodes", f"{element.i}, {element.j}"),
+                    (
+                        "Group",
+                        element.group,
+                        {
+                            "id": "group",
+                            "editable": True,
+                            "kind": "text",
+                        },
+                    ),
+                ]
+
+                if section_based:
+                    section_text = "Unassigned"
+                    if element.section_tag is not None:
+                        section = self.project.sections.get(
+                            int(element.section_tag)
+                        )
+                        section_text = (
+                            f"{element.section_tag} - {section.name}"
+                            if section is not None
+                            else f"{element.section_tag} (missing)"
+                        )
+                    section_choices = [("Unassigned", None)]
+                    section_choices.extend(
+                        (
+                            f"{section_tag} - {section.name} "
+                            f"({section.section_type})",
+                            int(section_tag),
+                        )
+                        for section_tag, section in sorted(
+                            self.project.sections.items()
+                        )
+                        if section.section_type
+                        in {"Elastic", "Fiber", "FiberInt"}
+                    )
+                    rows.append(
+                        (
+                            "Section",
+                            section_text,
+                            {
+                                "id": "section_tag",
+                                "editable": True,
+                                "kind": "choice",
+                                "current": element.section_tag,
+                                "choices": section_choices,
+                            },
+                        )
+                    )
+                    rows.extend([
+                        ("Area", "Defined by Section"),
+                        ("Material", "Defined by Section"),
+                    ])
+                else:
+                    material_text = "Unassigned"
+                    if element.truss_material_tag is not None:
+                        material = self.project.materials.get(
+                            element.truss_material_tag
+                        )
+                        material_text = (
+                            f"{element.truss_material_tag} - {material.name}"
+                            if material is not None
+                            else f"{element.truss_material_tag} (missing)"
+                        )
+                    material_choices = [("Unassigned", None)]
+                    material_choices.extend(
+                        (
+                            f"{material_tag} - {material.name} "
+                            f"({material.material_type})",
+                            int(material_tag),
+                        )
+                        for material_tag, material in sorted(
+                            self.project.materials.items()
+                        )
+                    )
+                    rows.extend([
                         (
                             "Area",
                             f"{element.truss_area:g}",
@@ -10760,56 +12342,56 @@ class MainWindow(QMainWindow):
                                 "choices": material_choices,
                             },
                         ),
-                        ("Section", "Not used by Truss"),
-                        ("Transformation", "Not used by Truss"),
+                        ("Section", "Not used by this formulation"),
+                    ])
+
+                rows.extend([
+                    ("Transformation", "Not used by Truss"),
+                    (
+                        "Mass / length (rho)",
+                        f"{element.mass_per_length:g}",
+                        {
+                            "id": "mass_per_length",
+                            "editable": True,
+                            "kind": "float",
+                        },
+                    ),
+                    (
+                        "Mass matrix",
                         (
-                            "Mass / length (rho)",
-                            f"{element.mass_per_length:g}",
-                            {
-                                "id": "mass_per_length",
-                                "editable": True,
-                                "kind": "float",
-                            },
+                            "Consistent"
+                            if element.consistent_mass
+                            else "Lumped"
                         ),
-                        (
-                            "Mass matrix",
-                            (
-                                "Consistent"
-                                if element.consistent_mass
-                                else "Lumped"
-                            ),
-                            {
-                                "id": "consistent_mass",
-                                "editable": True,
-                                "kind": "choice",
-                                "current": bool(element.consistent_mass),
-                                "choices": [
-                                    ("Lumped", False),
-                                    ("Consistent", True),
-                                ],
-                            },
-                        ),
-                        (
-                            "Rayleigh damping",
-                            (
-                                "On"
-                                if element.truss_do_rayleigh
-                                else "Off"
-                            ),
-                            {
-                                "id": "truss_do_rayleigh",
-                                "editable": True,
-                                "kind": "choice",
-                                "current": bool(
-                                    element.truss_do_rayleigh
-                                ),
-                                "choices": [
-                                    ("Off", False),
-                                    ("On", True),
-                                ],
-                            },
-                        ),
-                    ],
+                        {
+                            "id": "consistent_mass",
+                            "editable": True,
+                            "kind": "choice",
+                            "current": bool(element.consistent_mass),
+                            "choices": [
+                                ("Lumped", False),
+                                ("Consistent", True),
+                            ],
+                        },
+                    ),
+                    (
+                        "Rayleigh damping",
+                        "On" if element.truss_do_rayleigh else "Off",
+                        {
+                            "id": "truss_do_rayleigh",
+                            "editable": True,
+                            "kind": "choice",
+                            "current": bool(element.truss_do_rayleigh),
+                            "choices": [
+                                ("Off", False),
+                                ("On", True),
+                            ],
+                        },
+                    ),
+                ])
+                self.properties_panel.set_properties(
+                    "Truss Element",
+                    rows,
                     context={"kind": "element", "tag": int(tag)},
                 )
                 return
@@ -10838,8 +12420,14 @@ class MainWindow(QMainWindow):
             for section_tag in sorted(self.project.sections):
                 section = self.project.sections[section_tag]
                 if (
-                    element.element_type == "elasticBeamColumn"
+                    element.element_type
+                    in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
                     and section.section_type != "Elastic"
+                ):
+                    continue
+                if (
+                    element.element_type == "dispBeamColumnInt"
+                    and section.section_type != "FiberInt"
                 ):
                     continue
                 section_choices.append((
@@ -10857,11 +12445,22 @@ class MainWindow(QMainWindow):
                 for transf_tag, transformation in sorted(
                     self.project.transformations.items()
                 )
+                if (
+                    (
+                        element.element_type == "dispBeamColumnInt"
+                        and transformation.transformation_type == "LinearInt"
+                    )
+                    or (
+                        element.element_type != "dispBeamColumnInt"
+                        and transformation.transformation_type != "LinearInt"
+                    )
+                )
             )
 
             nonlinear = element.element_type in {
                 "forceBeamColumn", "dispBeamColumn"
             }
+            interaction = element.element_type == "dispBeamColumnInt"
             force_based = element.element_type == "forceBeamColumn"
             rows = [
                 ("Tag", tag),
@@ -10875,8 +12474,23 @@ class MainWindow(QMainWindow):
                         "current": element.element_type,
                         "choices": [
                             ("elasticBeamColumn", "elasticBeamColumn"),
+                            (
+                                "ElasticTimoshenkoBeam",
+                                "ElasticTimoshenkoBeam",
+                            ),
                             ("forceBeamColumn", "forceBeamColumn"),
                             ("dispBeamColumn", "dispBeamColumn"),
+                            *(
+                                [(
+                                    "dispBeamColumnInt",
+                                    "dispBeamColumnInt",
+                                )]
+                                if (
+                                    int(self.model.ndm),
+                                    int(self.model.ndf),
+                                ) == (2, 3)
+                                else []
+                            ),
                         ],
                     },
                 ),
@@ -10913,14 +12527,14 @@ class MainWindow(QMainWindow):
                     },
                 ),
             ]
-            if nonlinear:
+            if nonlinear or interaction:
                 rows.extend([
                     (
                         "Integration",
-                        element.integration_type,
+                        "-" if interaction else element.integration_type,
                         {
                             "id": "integration_type",
-                            "editable": True,
+                            "editable": not interaction,
                             "kind": "choice",
                             "current": element.integration_type,
                             "choices": [
@@ -10973,6 +12587,19 @@ class MainWindow(QMainWindow):
                     ("Force tolerance", "-"),
                 ])
 
+            if interaction:
+                rows.append((
+                    "Center of rotation cRot",
+                    f"{element.beam_center_ratio:g}",
+                    {
+                        "id": "beam_center_ratio",
+                        "editable": True,
+                        "kind": "float",
+                    },
+                ))
+            else:
+                rows.append(("Center of rotation cRot", "-"))
+
             rows.extend([
                 (
                     "Mass / length",
@@ -10988,7 +12615,12 @@ class MainWindow(QMainWindow):
                     "Consistent" if element.consistent_mass else "Lumped",
                     {
                         "id": "consistent_mass",
-                        "editable": True,
+                        "editable": element.element_type
+                        in {
+                            "elasticBeamColumn",
+                            "ElasticTimoshenkoBeam",
+                            "dispBeamColumn",
+                        },
                         "kind": "choice",
                         "current": bool(element.consistent_mass),
                         "choices": [
@@ -15196,11 +16828,7 @@ class MainWindow(QMainWindow):
         create_if_missing: bool = False,
         frame_only: bool = False,
     ) -> set[int] | None:
-        frame_types = {
-            "elasticBeamColumn",
-            "forceBeamColumn",
-            "dispBeamColumn",
-        }
+        frame_types = set(FRAME_ELEMENT_TYPES)
 
         def eligible(tag: int) -> bool:
             element = self.model.elements.get(int(tag))
@@ -15282,6 +16910,7 @@ class MainWindow(QMainWindow):
                 element.force_tolerance,
                 element.mass_per_length,
                 element.consistent_mass,
+                element.beam_center_ratio,
             )
             == (
                 first.integration_type,
@@ -15290,6 +16919,7 @@ class MainWindow(QMainWindow):
                 first.force_tolerance,
                 first.mass_per_length,
                 first.consistent_mass,
+                first.beam_center_ratio,
             )
             for element in selected
         )
@@ -15298,11 +16928,7 @@ class MainWindow(QMainWindow):
             element_type=(
                 first.element_type
                 if same_type and first.element_type
-                in {
-                    "elasticBeamColumn",
-                    "forceBeamColumn",
-                    "dispBeamColumn",
-                }
+                in FRAME_ELEMENT_TYPES
                 else "elasticBeamColumn"
             ),
             integration_type=(
@@ -15335,6 +16961,13 @@ class MainWindow(QMainWindow):
                 if same_integration
                 else False
             ),
+            beam_center_ratio=(
+                first.beam_center_ratio
+                if same_integration
+                else 0.4
+            ),
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             units=self.project.units,
             parent=self,
         )
@@ -15364,12 +16997,27 @@ class MainWindow(QMainWindow):
         )
 
     def _assign_section_to_selection(self) -> None:
-        element_tags = self._selected_element_tags(
+        selected_tags = self._selected_element_tags(
             "Assign Section",
             create_if_missing=True,
-            frame_only=True,
         )
-        if element_tags is None:
+        if selected_tags is None:
+            return
+        element_tags = {
+            int(tag)
+            for tag in selected_tags
+            if (
+                int(tag) in self.model.elements
+                and self.model.elements[int(tag)].element_type
+                in (FRAME_ELEMENT_TYPES | TRUSS_SECTION_ELEMENT_TYPES)
+            )
+        }
+        if not element_tags:
+            QMessageBox.information(
+                self,
+                "Assign Section",
+                "Select at least one frame or section-based Truss element.",
+            )
             return
         if not self._ensure_prerequisite(
             title="Assign Section",
@@ -15383,7 +17031,40 @@ class MainWindow(QMainWindow):
         ):
             return
 
-        tags = sorted(self.project.sections)
+        def compatible(section) -> bool:
+            section_type = str(section.section_type)
+            for element_tag in element_tags:
+                element = self.model.elements[element_tag]
+                if (
+                    element.element_type in TRUSS_SECTION_ELEMENT_TYPES
+                    and section_type not in {"Elastic", "Fiber", "FiberInt"}
+                ):
+                    return False
+                if (
+                    element.element_type
+                    in {"elasticBeamColumn", "ElasticTimoshenkoBeam"}
+                    and section_type != "Elastic"
+                ):
+                    return False
+                if (
+                    element.element_type == "dispBeamColumnInt"
+                    and section_type != "FiberInt"
+                ):
+                    return False
+            return True
+
+        tags = [
+            int(tag)
+            for tag, section in sorted(self.project.sections.items())
+            if compatible(section)
+        ]
+        if not tags:
+            QMessageBox.information(
+                self,
+                "Assign Section",
+                "No Section is compatible with all selected elements.",
+            )
+            return
         labels = [
             (
                 f"{tag} - {self.project.sections[tag].name} "
@@ -15422,7 +17103,7 @@ class MainWindow(QMainWindow):
 
     def _assign_truss_material_to_selection(self) -> None:
         if not any(
-            element.element_type == "truss"
+            element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
             for element in self.model.elements.values()
         ):
             if not self._ensure_prerequisite(
@@ -15433,7 +17114,7 @@ class MainWindow(QMainWindow):
                 ),
                 action_label="Create Truss Now...",
                 available=lambda: any(
-                    element.element_type == "truss"
+                    element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
                     for element in self.model.elements.values()
                 ),
                 creator=self._create_truss,
@@ -15448,7 +17129,7 @@ class MainWindow(QMainWindow):
             tag
             for tag in element_tags
             if tag in self.model.elements
-            and self.model.elements[tag].element_type == "truss"
+            and self.model.elements[tag].element_type in TRUSS_MATERIAL_ELEMENT_TYPES
         }
         if not truss_tags:
             QMessageBox.information(
@@ -15523,7 +17204,7 @@ class MainWindow(QMainWindow):
             tag
             for tag in element_tags
             if tag in self.model.elements
-            and self.model.elements[tag].element_type == "truss"
+            and self.model.elements[tag].element_type in TRUSS_MATERIAL_ELEMENT_TYPES
         }
         if not truss_tags:
             QMessageBox.information(
@@ -15608,8 +17289,25 @@ class MainWindow(QMainWindow):
         )
 
     def _clear_section_assignment(self) -> None:
-        element_tags = self._selected_element_tags("Clear Section")
-        if element_tags is None:
+        selected_tags = self._selected_element_tags("Clear Section")
+        if selected_tags is None:
+            return
+        element_tags = {
+            int(tag)
+            for tag in selected_tags
+            if (
+                int(tag) in self.model.elements
+                and self.model.elements[int(tag)].element_type
+                in (FRAME_ELEMENT_TYPES | SHELL_ELEMENT_TYPES)
+            )
+        }
+        if not element_tags:
+            QMessageBox.information(
+                self,
+                "Clear Section",
+                "Section-based Truss elements require a Section; "
+                "use Edit Truss Definition to change it.",
+            )
             return
         before = self.project.to_dict()
         try:
@@ -15653,13 +17351,23 @@ class MainWindow(QMainWindow):
         )
 
     def _create_node(self) -> None:
-        dialog = NodeDialog(self.model.next_node_tag(), self)
+        dialog = NodeDialog(
+            self.model.next_node_tag(),
+            self,
+            default_ndf=self.model.ndf,
+        )
         if not dialog.exec():
             return
         tag, x, y, z = dialog.values()
         before = self.project.to_dict()
         try:
-            self.model.add_node(tag, x, y, z)
+            self.model.add_node(
+                tag,
+                x,
+                y,
+                z,
+                ndf=dialog.node_ndf(),
+            )
         except ValueError as exc:
             QMessageBox.warning(self, "Create Node", str(exc))
             return
@@ -15727,17 +17435,6 @@ class MainWindow(QMainWindow):
             title="Create Truss Element",
         ):
             return
-        if not self._ensure_prerequisite(
-            title="Create Truss Element",
-            message=(
-                "A Truss requires a uniaxial Material for its axial "
-                "constitutive response. Create the Material now?"
-            ),
-            action_label="Create Material Now...",
-            available=lambda: bool(self.project.materials),
-            creator=self._create_material,
-        ):
-            return
 
         selected_nodes = sorted(self.selection.nodes)
         node_i = (
@@ -15760,9 +17457,11 @@ class MainWindow(QMainWindow):
             node_i=node_i,
             node_j=node_j,
             materials=self.project.materials,
+            sections=self.project.sections,
             units=self.project.units,
             default_area=self._default_truss_area(),
             new_material_callback=self._create_material_dependency,
+            new_section_callback=self._create_section_dependency,
             parent=self,
         )
         if not dialog.exec():
@@ -15779,6 +17478,8 @@ class MainWindow(QMainWindow):
                 rho,
                 consistent_mass,
                 do_rayleigh,
+                element_type,
+                section_tag,
             ) = dialog.values()
         except ValueError as exc:
             QMessageBox.warning(
@@ -15798,7 +17499,8 @@ class MainWindow(QMainWindow):
                 tag,
                 i,
                 j,
-                element_type="truss",
+                element_type=element_type,
+                section_tag=section_tag,
                 group=group,
                 mass_per_length=rho,
                 consistent_mass=consistent_mass,
@@ -15806,20 +17508,783 @@ class MainWindow(QMainWindow):
                 truss_material_tag=material_tag,
                 truss_do_rayleigh=do_rayleigh,
             )
+            self.project.validate_element_state(tag)
         except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(
                 self,
                 "Create Truss Element",
                 str(exc),
             )
+            self._refresh_all()
+            return
+
+        dependency = (
+            f"section {section_tag}"
+            if section_tag is not None
+            else f"A={area:g} · material {material_tag}"
+        )
+        self._refresh_all(
+            f"Created {element_type} {tag}: "
+            f"node {i} → {j} · {dependency}"
+        )
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(
+            f"Create {element_type} {tag}",
+            before,
+        )
+
+    def _edit_truss(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None or element.element_type not in TRUSS_ELEMENT_TYPES:
+            return
+
+        dialog = TrussDialog(
+            int(element.tag),
+            node_i=int(element.i),
+            node_j=int(element.j),
+            materials=self.project.materials,
+            sections=self.project.sections,
+            units=self.project.units,
+            default_area=self._default_truss_area(),
+            new_material_callback=self._create_material_dependency,
+            new_section_callback=self._create_section_dependency,
+            element=element,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            (
+                _dialog_tag,
+                i,
+                j,
+                area,
+                material_tag,
+                group,
+                rho,
+                consistent_mass,
+                do_rayleigh,
+                element_type,
+                section_tag,
+            ) = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit Truss Element", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            self.model.elements.pop(int(tag), None)
+            self.model.add_element(
+                int(tag),
+                i,
+                j,
+                element_type=element_type,
+                section_tag=section_tag,
+                group=group,
+                mass_per_length=rho,
+                consistent_mass=consistent_mass,
+                truss_area=area,
+                truss_material_tag=material_tag,
+                truss_do_rayleigh=do_rayleigh,
+            )
+            self.project.validate_element_state(int(tag))
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Edit Truss Element", str(exc))
+            self._refresh_all()
             return
 
         self._refresh_all(
-            f"Created Truss {tag}: node {i} → {j} · "
-            f"A={area:g} · material {material_tag}"
+            f"Updated Truss {tag} → {element_type}"
+        )
+        self.selection.select("element", int(tag), "replace")
+        self._record_project_change(f"Edit Truss {tag}", before)
+
+    def _special_default_nodes(self) -> tuple[int, int] | None:
+        if not self._ensure_node_count(2, title="Create Special Element"):
+            return None
+        selected_nodes = sorted(self.selection.nodes)
+        node_i = (
+            selected_nodes[0]
+            if len(selected_nodes) >= 1
+            else min(self.model.nodes)
+        )
+        node_j = (
+            selected_nodes[1]
+            if len(selected_nodes) >= 2
+            else next(
+                value
+                for value in sorted(self.model.nodes)
+                if value != node_i
+            )
+        )
+        return int(node_i), int(node_j)
+
+    def _create_catenary_cable(self) -> None:
+        if (int(self.model.ndm), int(self.model.ndf)) != (3, 3):
+            QMessageBox.warning(
+                self,
+                "Create Catenary Cable",
+                "CatenaryCable requires a 3D model with ndf=3.",
+            )
+            return
+        nodes = self._special_default_nodes()
+        if nodes is None:
+            return
+        node_i, node_j = nodes
+        dialog = CatenaryCableDialog(
+            self.project.next_element_tag(),
+            node_i,
+            node_j,
+            units=self.project.units,
+            parent=self,
+        )
+        a = self.model.nodes[node_i].xyz
+        b = self.model.nodes[node_j].xyz
+        chord = math.sqrt(
+            sum((float(b[k]) - float(a[k])) ** 2 for k in range(3))
+        )
+        if chord > 0.0:
+            dialog.unstressed_length.setValue(
+                UnitSystem.from_mapping(
+                    self.project.units
+                ).length_from_m(chord)
+            )
+        if not dialog.exec():
+            return
+        try:
+            tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Catenary Cable", str(exc))
+            return
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type="CatenaryCable",
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Create Catenary Cable", str(exc))
+            return
+        self._refresh_all(f"Created CatenaryCable {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(
+            f"Create CatenaryCable {tag}",
+            before,
+        )
+
+    def _create_elastomeric_bearing(self) -> None:
+        signature = (int(self.model.ndm), int(self.model.ndf))
+        if signature not in {(2, 3), (3, 6)}:
+            QMessageBox.warning(
+                self,
+                "Create Elastomeric Bearing",
+                "elastomericBearingPlasticity requires 2D/3DOF "
+                "or 3D/6DOF.",
+            )
+            return
+        if not self._ensure_prerequisite(
+            title="Create Elastomeric Bearing",
+            message=(
+                "This bearing requires uniaxial materials for its "
+                "non-shear directions. Create a Material now?"
+            ),
+            action_label="Create Material Now...",
+            available=lambda: bool(self.project.materials),
+            creator=self._create_material,
+        ):
+            return
+        nodes = self._special_default_nodes()
+        if nodes is None:
+            return
+        node_i, node_j = nodes
+        dialog = ElastomericBearingPlasticityDialog(
+            self.project.next_element_tag(),
+            node_i,
+            node_j,
+            materials=self.project.materials,
+            ndm=self.model.ndm,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Elastomeric Bearing", str(exc))
+            return
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type="elastomericBearingPlasticity",
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Create Elastomeric Bearing", str(exc))
+            return
+        self._refresh_all(
+            f"Created elastomericBearingPlasticity {tag}"
         )
         self.selection.select("element", tag, "replace")
-        self._record_project_change(f"Create Truss {tag}", before)
+        self._record_project_change(
+            f"Create elastomeric bearing {tag}",
+            before,
+        )
+
+    def _create_friction_bearing(self) -> None:
+        signature = (int(self.model.ndm), int(self.model.ndf))
+        if signature not in {(2, 3), (3, 6)}:
+            QMessageBox.warning(
+                self,
+                "Create Friction Bearing",
+                "flatSliderBearing / singleFPBearing require 2D/3DOF "
+                "or 3D/6DOF.",
+            )
+            return
+        if not self._ensure_prerequisite(
+            title="Create Friction Bearing",
+            message=(
+                "A friction bearing requires uniaxial materials for its "
+                "non-sliding directions. Create a Material now?"
+            ),
+            action_label="Create Material Now...",
+            available=lambda: bool(self.project.materials),
+            creator=self._create_material,
+        ):
+            return
+        if not self._ensure_prerequisite(
+            title="Create Friction Bearing",
+            message=(
+                "A friction bearing requires a reusable Friction Model. "
+                "Create one now?"
+            ),
+            action_label="Create Friction Model Now...",
+            available=lambda: bool(self.project.friction_models),
+            creator=self._create_friction_model,
+        ):
+            return
+        nodes = self._special_default_nodes()
+        if nodes is None:
+            return
+        dialog = FrictionBearingDialog(
+            tag=self.project.next_element_tag(),
+            node_i=nodes[0],
+            node_j=nodes[1],
+            ndm=self.model.ndm,
+            materials=self.project.materials,
+            friction_models=self.project.friction_models,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            tag, i, j, element_type, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create Friction Bearing", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type=element_type,
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Create Friction Bearing", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(f"Created {element_type} {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(
+            f"Create {element_type} {tag}",
+            before,
+        )
+
+    def _edit_friction_bearing(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if (
+            element is None
+            or element.element_type not in FRICTION_BEARING_ELEMENT_TYPES
+        ):
+            return
+        dialog = FrictionBearingDialog(
+            tag=element.tag,
+            node_i=element.i,
+            node_j=element.j,
+            ndm=self.model.ndm,
+            materials=self.project.materials,
+            friction_models=self.project.friction_models,
+            units=self.project.units,
+            element=element,
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            _tag, i, j, element_type, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit Friction Bearing", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            self.model.elements.pop(int(tag))
+            self.model.add_element(
+                int(tag),
+                i,
+                j,
+                element_type=element_type,
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(int(tag))
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Edit Friction Bearing", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(f"Updated {element_type} {tag}")
+        self.selection.select("element", int(tag), "replace")
+        self._show_entity_properties("element", int(tag))
+        self._record_project_change(
+            f"Edit friction bearing {tag}",
+            before,
+        )
+
+    def _create_lead_rubber_x(self) -> None:
+        if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+            QMessageBox.warning(
+                self,
+                "Create LeadRubberX",
+                "LeadRubberX requires a 3D/6DOF model.",
+            )
+            return
+        nodes = self._special_default_nodes()
+        if nodes is None:
+            return
+        dialog = LeadRubberXDialog(
+            tag=self.project.next_element_tag(),
+            node_i=nodes[0],
+            node_j=nodes[1],
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Create LeadRubberX", str(exc))
+            return
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type="LeadRubberX",
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Create LeadRubberX", str(exc))
+            self._refresh_all()
+            return
+        self._refresh_all(f"Created LeadRubberX {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(f"Create LeadRubberX {tag}", before)
+
+    def _create_triple_friction_pendulum(self) -> None:
+        if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
+            QMessageBox.warning(
+                self,
+                "Create Triple Friction Pendulum",
+                "TripleFrictionPendulum requires a 3D/6DOF model.",
+            )
+            return
+        if not self.project.materials:
+            QMessageBox.information(
+                self,
+                "Triple Friction Pendulum",
+                "Create at least one uniaxial Material first.",
+            )
+            self._create_material()
+            if not self.project.materials:
+                return
+        if not self.project.friction_models:
+            QMessageBox.information(
+                self,
+                "Triple Friction Pendulum",
+                "Create at least one Friction Model first.",
+            )
+            self._create_friction_model()
+            if not self.project.friction_models:
+                return
+        nodes = self._special_default_nodes()
+        if nodes is None:
+            return
+        dialog = TripleFrictionPendulumDialog(
+            tag=self.project.next_element_tag(),
+            node_i=nodes[0],
+            node_j=nodes[1],
+            materials=self.project.materials,
+            friction_models=self.project.friction_models,
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Create Triple Friction Pendulum",
+                str(exc),
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            if tag in self.project.connections:
+                raise ValueError(
+                    f"Element tag {tag} is already used by a connection."
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                element_type="TripleFrictionPendulum",
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Create Triple Friction Pendulum",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+        self._refresh_all(f"Created TripleFrictionPendulum {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(
+            f"Create TripleFrictionPendulum {tag}",
+            before,
+        )
+
+    def _edit_advanced_bearing(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None:
+            return
+        if element.element_type == "LeadRubberX":
+            dialog = LeadRubberXDialog(
+                tag=element.tag,
+                node_i=element.i,
+                node_j=element.j,
+                units=self.project.units,
+                element=element,
+                parent=self,
+            )
+            title = "Edit LeadRubberX"
+        elif element.element_type == "TripleFrictionPendulum":
+            dialog = TripleFrictionPendulumDialog(
+                tag=element.tag,
+                node_i=element.i,
+                node_j=element.j,
+                materials=self.project.materials,
+                friction_models=self.project.friction_models,
+                units=self.project.units,
+                element=element,
+                parent=self,
+            )
+            title = "Edit Triple Friction Pendulum"
+        else:
+            return
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            _tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, title, str(exc))
+            return
+        before = self.project.to_dict()
+        try:
+            self.model.elements.pop(int(tag))
+            self.model.add_element(
+                int(tag),
+                i,
+                j,
+                element_type=element.element_type,
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(int(tag))
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, title, str(exc))
+            self._refresh_all()
+            return
+        self._refresh_all(f"Updated {element.element_type} {tag}")
+        self.selection.select("element", int(tag), "replace")
+        self._show_entity_properties("element", int(tag))
+        self._record_project_change(
+            f"Edit {element.element_type} {tag}",
+            before,
+        )
+
+    def _create_contact_element(self) -> None:
+        if len(self.model.nodes) < 2:
+            QMessageBox.information(
+                self,
+                "Create Contact / Interface",
+                "Create at least two nodes first.",
+            )
+            return
+        dialog = ContactElementDialog(
+            tag=self.project.next_element_tag(),
+            nodes=self.model.nodes,
+            ndm=self.model.ndm,
+            nd_materials=self.project.nd_materials,
+            transformations=self.project.transformations,
+            units=self.project.units,
+            next_node_tag=self.model.next_node_tag(),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            tag, kind, node_tags, parameters, auto_lambda = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Create Contact / Interface",
+                str(exc),
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            i, j, k, l = node_tags
+            if auto_lambda and k is not None and l is not None:
+                if l in self.model.nodes:
+                    raise ValueError(
+                        f"Auto Lagrange node tag {l} already exists."
+                    )
+                source = self.model.nodes[int(k)]
+                lambda_ndf = 2 if kind == "BeamContact2D" else 3
+                self.model.add_node(
+                    int(l),
+                    source.xyz[0],
+                    source.xyz[1],
+                    source.xyz[2],
+                    ndf=lambda_ndf,
+                )
+            self.model.add_element(
+                tag,
+                i,
+                j,
+                k=k,
+                l=l,
+                element_type=kind,
+                group="contact-interface",
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Create Contact / Interface",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+        self._refresh_all(f"Created {kind} {tag}")
+        self.selection.select("element", tag, "replace")
+        self._record_project_change(f"Create {kind} {tag}", before)
+
+    def _edit_contact_element(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None or element.element_type not in CONTACT_ELEMENT_TYPES:
+            return
+        dialog = ContactElementDialog(
+            tag=element.tag,
+            nodes=self.model.nodes,
+            ndm=self.model.ndm,
+            nd_materials=self.project.nd_materials,
+            transformations=self.project.transformations,
+            units=self.project.units,
+            element=element,
+            next_node_tag=self.model.next_node_tag(),
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            _tag, kind, node_tags, parameters, auto_lambda = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Edit Contact / Interface",
+                str(exc),
+            )
+            return
+        before = self.project.to_dict()
+        try:
+            i, j, k, l = node_tags
+            if auto_lambda and k is not None and l is not None:
+                source = self.model.nodes[int(k)]
+                lambda_ndf = 2 if kind == "BeamContact2D" else 3
+                self.model.add_node(
+                    int(l),
+                    source.xyz[0],
+                    source.xyz[1],
+                    source.xyz[2],
+                    ndf=lambda_ndf,
+                )
+            self.model.elements.pop(int(tag))
+            self.model.add_element(
+                int(tag),
+                i,
+                j,
+                k=k,
+                l=l,
+                element_type=kind,
+                group=element.group or "contact-interface",
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(int(tag))
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Edit Contact / Interface",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+        self._refresh_all(f"Updated {kind} {tag}")
+        self.selection.select("element", int(tag), "replace")
+        self._show_entity_properties("element", int(tag))
+        self._record_project_change(f"Edit {kind} {tag}", before)
+
+    def _edit_special_element(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None:
+            return
+        if element.element_type in CABLE_ELEMENT_TYPES:
+            dialog = CatenaryCableDialog(
+                element.tag,
+                element.i,
+                element.j,
+                units=self.project.units,
+                element=element,
+                parent=self,
+            )
+            title = "Edit Catenary Cable"
+        elif element.element_type == "elastomericBearingPlasticity":
+            dialog = ElastomericBearingPlasticityDialog(
+                element.tag,
+                element.i,
+                element.j,
+                materials=self.project.materials,
+                ndm=self.model.ndm,
+                units=self.project.units,
+                element=element,
+                parent=self,
+            )
+            title = "Edit Elastomeric Bearing"
+        else:
+            return
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            _tag, i, j, group, parameters = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, title, str(exc))
+            return
+        before = self.project.to_dict()
+        try:
+            self.model.elements.pop(int(tag))
+            self.model.add_element(
+                int(tag),
+                i,
+                j,
+                element_type=element.element_type,
+                group=group,
+                special_parameters=parameters,
+            )
+            self.project.validate_element_state(int(tag))
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, title, str(exc))
+            self._refresh_all()
+            return
+        self._refresh_all(f"Updated {element.element_type} {tag}")
+        self.selection.select("element", int(tag), "replace")
+        self._show_entity_properties("element", int(tag))
+        self._record_project_change(
+            f"Edit {element.element_type} {tag}",
+            before,
+        )
 
     def _create_frame_between_nodes(
         self,
@@ -15960,6 +18425,8 @@ class MainWindow(QMainWindow):
             transformations=self.project.transformations,
             new_section_callback=self._create_frame_section_dependency,
             new_transformation_callback=self._create_transformation_dependency,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
             parent=self,
         )
         if not dialog.exec():
@@ -15976,6 +18443,7 @@ class MainWindow(QMainWindow):
                 group,
                 integration_type,
                 integration_points,
+                beam_center_ratio,
             ) = dialog.values()
         except ValueError as exc:
             QMessageBox.warning(
@@ -16001,13 +18469,18 @@ class MainWindow(QMainWindow):
                 group=group,
                 integration_type=integration_type,
                 integration_points=integration_points,
+                beam_center_ratio=beam_center_ratio,
             )
+            self.project.validate_element_state(tag)
         except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
             QMessageBox.warning(
                 self,
                 "Create Frame Member",
                 str(exc),
             )
+            self._refresh_all()
             return
 
         self._refresh_all(
@@ -16017,6 +18490,460 @@ class MainWindow(QMainWindow):
         )
         self.selection.select("element", tag, "replace")
         self._record_project_change(f"Create frame {tag}", before)
+
+    def _create_continuum_quad(self) -> None:
+        """Create one direct 2-D continuum quadrilateral element."""
+        if (int(self.model.ndm), int(self.model.ndf)) != (2, 2):
+            QMessageBox.warning(
+                self,
+                "2D Continuum Quad",
+                "2D continuum quads require an OpenSees 2D/2DOF "
+                "model (ndm=2, ndf=2).",
+            )
+            return
+        if not self._ensure_node_count(4, title="2D Continuum Quad"):
+            return
+        if not self._ensure_prerequisite(
+            title="2D Continuum Quad",
+            message=(
+                "A 2D continuum element requires an nDMaterial. "
+                "Create one now?"
+            ),
+            action_label="Create nD Material Now...",
+            available=lambda: bool(self.project.nd_materials),
+            creator=self._create_nd_material,
+        ):
+            return
+
+        selected_nodes = [
+            int(tag)
+            for tag in sorted(self.selection.nodes)
+            if int(tag) in self.model.nodes
+        ]
+        dialog = ContinuumQuadDialog(
+            tag=self.project.next_element_tag(),
+            nodes=self.model.nodes,
+            nd_materials=self.project.nd_materials,
+            initial_nodes=selected_nodes[:4],
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "2D Continuum Quad", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            if values["tag"] in self.project.connections:
+                raise ValueError(
+                    f"Element tag {values['tag']} is already used by "
+                    "a connection."
+                )
+            self.model.add_element(
+                values["tag"],
+                values["nodes"][0],
+                values["nodes"][1],
+                element_type=values["formulation"],
+                group="continuum-2d",
+                k=values["nodes"][2],
+                l=values["nodes"][3],
+                continuum_thickness=values["thickness"],
+                continuum_material_tag=values["material_tag"],
+                continuum_type=values["behavior"],
+                continuum_pressure=values["pressure"],
+                continuum_density=values["density"],
+                continuum_body_force=values["body_force"],
+            )
+            self.project.validate_element_state(values["tag"])
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "2D Continuum Quad", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Created {values['formulation']} {values['tag']}: nodes "
+            + ", ".join(map(str, values["nodes"]))
+            + f" · {values['behavior']} · nDMaterial "
+            + str(values["material_tag"])
+        )
+        self.selection.select("element", values["tag"], "replace")
+        self._record_project_change(
+            f"Create {values['formulation']} {values['tag']}",
+            before,
+        )
+
+    def _edit_continuum_quad(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if (
+            element is None
+            or element.element_type not in CONTINUUM_QUAD_ELEMENT_TYPES
+        ):
+            return
+        dialog = ContinuumQuadDialog(
+            tag=element.tag,
+            nodes=self.model.nodes,
+            nd_materials=self.project.nd_materials,
+            element=element,
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit 2D Continuum Quad", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            updated = type(element)(
+                tag=element.tag,
+                i=values["nodes"][0],
+                j=values["nodes"][1],
+                element_type=values["formulation"],
+                section_tag=None,
+                transf_tag=None,
+                group=element.group or "continuum-2d",
+                k=values["nodes"][2],
+                l=values["nodes"][3],
+                continuum_thickness=values["thickness"],
+                continuum_material_tag=values["material_tag"],
+                continuum_type=values["behavior"],
+                continuum_pressure=values["pressure"],
+                continuum_density=values["density"],
+                continuum_body_force=values["body_force"],
+            )
+            self.model.elements[element.tag] = updated
+            self.project.validate_element_state(element.tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Edit 2D Continuum Quad", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Updated {values['formulation']} continuum element {tag}"
+        )
+        self._show_entity_properties("element", tag)
+        self._record_project_change(
+            f"Edit {values['formulation']} {tag}",
+            before,
+        )
+
+    def _create_solid_brick(self) -> None:
+        """Create one direct 3-D eight-node continuum brick element."""
+        if (int(self.model.ndm), int(self.model.ndf)) != (3, 3):
+            QMessageBox.warning(
+                self,
+                "3D Solid Brick",
+                "stdBrick, SSPbrick, and bbarBrick require an OpenSees "
+                "3D/3DOF model (ndm=3, ndf=3).",
+            )
+            return
+        if not self._ensure_node_count(8, title="3D Solid Brick"):
+            return
+        if not self._ensure_prerequisite(
+            title="3D Solid Brick",
+            message=(
+                "A 3D solid element requires an nDMaterial. "
+                "Create one now?"
+            ),
+            action_label="Create nD Material Now...",
+            available=lambda: bool(self.project.nd_materials),
+            creator=self._create_nd_material,
+        ):
+            return
+
+        selected_nodes = [
+            int(tag)
+            for tag in sorted(self.selection.nodes)
+            if int(tag) in self.model.nodes
+        ]
+        dialog = SolidBrickDialog(
+            tag=self.project.next_element_tag(),
+            nodes=self.model.nodes,
+            nd_materials=self.project.nd_materials,
+            initial_nodes=selected_nodes[:8],
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "3D Solid Brick", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            if values["tag"] in self.project.connections:
+                raise ValueError(
+                    f"Element tag {values['tag']} is already used by "
+                    "a connection."
+                )
+            nodes = values["nodes"]
+            self.model.add_element(
+                values["tag"],
+                nodes[0],
+                nodes[1],
+                element_type=values["formulation"],
+                group="solid-3d",
+                k=nodes[2],
+                l=nodes[3],
+                m=nodes[4],
+                n=nodes[5],
+                p=nodes[6],
+                q=nodes[7],
+                solid_material_tag=values["material_tag"],
+                solid_body_force=values["body_force"],
+            )
+            self.project.validate_element_state(values["tag"])
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "3D Solid Brick", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Created {values['formulation']} {values['tag']}: nodes "
+            + ", ".join(map(str, values["nodes"]))
+            + " · nDMaterial "
+            + str(values["material_tag"])
+        )
+        self.selection.select("element", values["tag"], "replace")
+        self._record_project_change(
+            f"Create {values['formulation']} {values['tag']}",
+            before,
+        )
+
+    def _edit_solid_brick(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if element is None or element.element_type not in SOLID_ELEMENT_TYPES:
+            return
+        dialog = SolidBrickDialog(
+            tag=element.tag,
+            nodes=self.model.nodes,
+            nd_materials=self.project.nd_materials,
+            element=element,
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Edit 3D Solid Brick", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            nodes = values["nodes"]
+            updated = type(element)(
+                tag=element.tag,
+                i=nodes[0],
+                j=nodes[1],
+                element_type=values["formulation"],
+                section_tag=None,
+                transf_tag=None,
+                group=element.group or "solid-3d",
+                k=nodes[2],
+                l=nodes[3],
+                m=nodes[4],
+                n=nodes[5],
+                p=nodes[6],
+                q=nodes[7],
+                solid_material_tag=values["material_tag"],
+                solid_body_force=values["body_force"],
+            )
+            self.model.elements[element.tag] = updated
+            self.project.validate_element_state(element.tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "Edit 3D Solid Brick", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Updated {values['formulation']} solid element {tag}"
+        )
+        self._show_entity_properties("element", tag)
+        self._record_project_change(
+            f"Edit {values['formulation']} {tag}",
+            before,
+        )
+
+    def _create_wall_macro_element(self) -> None:
+        dims = (int(self.model.ndm), int(self.model.ndf))
+        if dims not in {(2, 3), (3, 6)}:
+            QMessageBox.warning(
+                self,
+                "RC Wall Macro Element",
+                "MVLEM/SFI_MVLEM require ndm=2, ndf=3; MVLEM_3D "
+                "requires ndm=3, ndf=6.",
+            )
+            return
+        required_nodes = 2 if dims == (2, 3) else 4
+        if not self._ensure_node_count(
+            required_nodes,
+            title="RC Wall Macro Element",
+        ):
+            return
+
+        selected_nodes = [
+            int(tag)
+            for tag in sorted(self.selection.nodes)
+            if int(tag) in self.model.nodes
+        ]
+        dialog = RCWallMacroElementDialog(
+            tag=self.project.next_element_tag(),
+            nodes=self.model.nodes,
+            materials=self.project.materials,
+            nd_materials=self.project.nd_materials,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
+            initial_nodes=selected_nodes[:required_nodes],
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "RC Wall Macro Element", str(exc))
+            return
+
+        before = self.project.to_dict()
+        try:
+            if values["tag"] in self.project.connections:
+                raise ValueError(
+                    f"Element tag {values['tag']} is already used by "
+                    "a connection."
+                )
+            node_values = values["nodes"]
+            self.model.add_element(
+                values["tag"],
+                node_values[0],
+                node_values[1],
+                element_type=values["formulation"],
+                group="rc-wall-macro",
+                k=(node_values[2] if len(node_values) == 4 else None),
+                l=(node_values[3] if len(node_values) == 4 else None),
+                wall_center_ratio=values["center_ratio"],
+                wall_density=values["density"],
+                wall_thicknesses=values["thicknesses"],
+                wall_widths=values["widths"],
+                wall_rhos=values["rhos"],
+                wall_concrete_tags=values["concrete_tags"],
+                wall_steel_tags=values["steel_tags"],
+                wall_shear_tag=values["shear_tag"],
+                wall_nd_material_tags=values["nd_material_tags"],
+                wall_thick_mod=values["thick_mod"],
+                wall_poisson=values["poisson"],
+            )
+            self.project.validate_element_state(values["tag"])
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(self, "RC Wall Macro Element", str(exc))
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Created {values['formulation']} {values['tag']} · "
+            f"{len(values['widths'])} macro-fibers"
+        )
+        self.selection.select("element", values["tag"], "replace")
+        self._record_project_change(
+            f"Create {values['formulation']} {values['tag']}",
+            before,
+        )
+
+    def _edit_wall_macro_element(self, tag: int) -> None:
+        element = self.model.elements.get(int(tag))
+        if (
+            element is None
+            or element.element_type not in WALL_MACRO_ELEMENT_TYPES
+        ):
+            return
+        dialog = RCWallMacroElementDialog(
+            tag=element.tag,
+            nodes=self.model.nodes,
+            materials=self.project.materials,
+            nd_materials=self.project.nd_materials,
+            ndm=self.model.ndm,
+            ndf=self.model.ndf,
+            element=element,
+            parent=self,
+        )
+        dialog.tag.setEnabled(False)
+        if not dialog.exec():
+            return
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Edit RC Wall Macro Element",
+                str(exc),
+            )
+            return
+
+        before = self.project.to_dict()
+        try:
+            node_values = values["nodes"]
+            updated = type(element)(
+                tag=element.tag,
+                i=node_values[0],
+                j=node_values[1],
+                element_type=values["formulation"],
+                section_tag=None,
+                transf_tag=None,
+                group=element.group or "rc-wall-macro",
+                k=(node_values[2] if len(node_values) == 4 else None),
+                l=(node_values[3] if len(node_values) == 4 else None),
+                wall_center_ratio=values["center_ratio"],
+                wall_density=values["density"],
+                wall_thicknesses=values["thicknesses"],
+                wall_widths=values["widths"],
+                wall_rhos=values["rhos"],
+                wall_concrete_tags=values["concrete_tags"],
+                wall_steel_tags=values["steel_tags"],
+                wall_shear_tag=values["shear_tag"],
+                wall_nd_material_tags=values["nd_material_tags"],
+                wall_thick_mod=values["thick_mod"],
+                wall_poisson=values["poisson"],
+            )
+            self.model.elements[element.tag] = updated
+            self.project.validate_element_state(element.tag)
+        except ValueError as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Edit RC Wall Macro Element",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+
+        self._refresh_all(
+            f"Updated {values['formulation']} wall macro-element {tag}"
+        )
+        self._show_entity_properties("element", tag)
+        self._record_project_change(
+            f"Edit {values['formulation']} {tag}",
+            before,
+        )
 
     def _create_shell_mesh(self) -> None:
         if (int(self.model.ndm), int(self.model.ndf)) != (3, 6):
@@ -17177,6 +20104,142 @@ class MainWindow(QMainWindow):
             before,
         )
 
+    def _create_friction_model(self):
+        dialog = FrictionModelDialog(
+            next_tag=self.project.next_friction_model_tag(),
+            units=self.project.units,
+            parent=self,
+        )
+        if not dialog.exec():
+            return None
+        before = self.project.to_dict()
+        try:
+            model = dialog.friction_model()
+            self.project.add_friction_model(model)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Friction Model", str(exc))
+            return None
+        self._refresh_project_metadata(
+            f"Created {model.friction_type} friction model {model.tag}"
+        )
+        self._show_friction_model_properties(model.tag)
+        self._record_project_change(
+            f"Create friction model {model.tag}",
+            before,
+        )
+        return model
+
+    def _edit_friction_model(self, tag: int) -> None:
+        model = self.project.friction_models.get(int(tag))
+        if model is None:
+            return
+        dialog = FrictionModelDialog(
+            next_tag=model.tag,
+            units=self.project.units,
+            model=model,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        before = self.project.to_dict()
+        try:
+            updated = dialog.friction_model()
+            self.project.update_friction_model(tag, updated)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Friction Model", str(exc))
+            return
+        self._refresh_project_metadata(
+            f"Updated friction model {updated.tag}"
+        )
+        self._show_friction_model_properties(updated.tag)
+        self._record_project_change(
+            f"Edit friction model {tag}",
+            before,
+        )
+
+    def _delete_friction_model(self, tag: int) -> None:
+        model = self.project.friction_models.get(int(tag))
+        if model is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Friction Model",
+            f"Delete friction model {tag} ({model.name})?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        before = self.project.to_dict()
+        try:
+            self.project.remove_friction_model(tag)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Delete Friction Model", str(exc))
+            return
+        self._refresh_project_metadata(f"Deleted friction model {tag}")
+        self._record_project_change(
+            f"Delete friction model {tag}",
+            before,
+        )
+
+    def _show_friction_model_properties(self, tag: int) -> None:
+        model = self.project.friction_models.get(int(tag))
+        if model is None:
+            return
+        p = model.parameters
+        rows = [
+            ("Tag", model.tag),
+            ("Name", model.name),
+            ("Type", model.friction_type),
+        ]
+        if model.friction_type == "Coulomb":
+            rows.append(("Friction coefficient μ", f"{float(p['mu']):g}"))
+        else:
+            unit_system = UnitSystem.from_mapping(self.project.units)
+            shown_rate = (
+                float(p["transRate"])
+                * unit_system.time_to_s
+                / unit_system.length_to_m
+            )
+            rows.extend([
+                ("Slow-velocity μ", f"{float(p['muSlow']):g}"),
+                ("Fast-velocity μ", f"{float(p['muFast']):g}"),
+                (
+                    f"Transition rate [{unit_system.time}/{unit_system.length}]",
+                    f"{shown_rate:g}",
+                ),
+            ])
+        tfp_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type == "TripleFrictionPendulum"
+                and tag in {
+                    int(element.special_parameters[key])
+                    for key in ("frnTag1", "frnTag2", "frnTag3")
+                }
+            )
+        )
+        bearing_users = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in FRICTION_BEARING_ELEMENT_TYPES
+                and int(element.special_parameters["frn_model_tag"]) == tag
+            )
+        )
+        rows.extend([
+            (
+                "Used by TFP elements",
+                ", ".join(map(str, tfp_users)) or "-",
+            ),
+            (
+                "Used by friction bearings",
+                ", ".join(map(str, bearing_users)) or "-",
+            ),
+        ])
+        self.properties_panel.set_properties("Friction Model", rows)
+
     def _create_nd_material(self) -> None:
         dialog = NDMaterialDialog(
             next_tag=self.project.next_nd_material_tag(),
@@ -17264,7 +20327,11 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.Yes:
             return
         before = self.project.to_dict()
-        self.project.remove_nd_material(tag)
+        try:
+            self.project.remove_nd_material(tag)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Delete nD Material", str(exc))
+            return
         self._refresh_project_metadata(f"Deleted nDMaterial {tag}")
         self._record_project_change(
             f"Delete nD material {tag}",
@@ -23904,6 +26971,7 @@ class MainWindow(QMainWindow):
             if element.element_type in {
                 "forceBeamColumn",
                 "dispBeamColumn",
+                "dispBeamColumnInt",
             }
         )
 
@@ -23915,18 +26983,18 @@ class MainWindow(QMainWindow):
             if (
                 tag in self.model.elements
                 and self.model.elements[tag].element_type
-                in {
-                    "elasticBeamColumn",
-                    "forceBeamColumn",
-                    "dispBeamColumn",
-                }
+                in FRAME_ELEMENT_TYPES
             )
         ]
         if not selected:
             return
         if any(
             self.model.elements[tag].element_type
-            in {"forceBeamColumn", "dispBeamColumn"}
+            in {
+                "forceBeamColumn",
+                "dispBeamColumn",
+                "dispBeamColumnInt",
+            }
             for tag in selected
         ):
             return
@@ -24006,7 +27074,8 @@ class MainWindow(QMainWindow):
         }
         return any(
             section_tag in self.project.sections
-            and self.project.sections[section_tag].section_type == "Fiber"
+            and self.project.sections[section_tag].section_type
+            in {"Fiber", "FiberInt"}
             for section_tag in section_tags
         )
 
@@ -24326,6 +27395,45 @@ class MainWindow(QMainWindow):
                     return None
                 selected = [tag]
             elements = set(selected)
+
+        elif kind in {
+            "MasonryPanelShear",
+            "MasonryStrutForce",
+            "MasonryStrutStrain",
+        }:
+            masonry_tags = sorted(
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if element.element_type == "MasonPan12"
+            )
+            if not masonry_tags:
+                if not self._ensure_prerequisite(
+                    title="Masonry Result",
+                    message=(
+                        "Masonry Results require a MasonPan12 infill panel. "
+                        "Create one with the Masonry Wall Wizard now?"
+                    ),
+                    action_label="Open Masonry Wall Wizard...",
+                    available=lambda: any(
+                        element.element_type == "MasonPan12"
+                        for element in self.model.elements.values()
+                    ),
+                    creator=self._show_masonry_wall_wizard,
+                ):
+                    return None
+                masonry_tags = sorted(
+                    int(tag)
+                    for tag, element in self.model.elements.items()
+                    if element.element_type == "MasonPan12"
+                )
+            if not masonry_tags:
+                return None
+            selected_masonry = {
+                int(tag)
+                for tag in elements
+                if int(tag) in masonry_tags
+            }
+            elements = selected_masonry or set(masonry_tags)
 
         elif kind == "SectionResponse":
             sources = section_response_sources(
@@ -26049,6 +29157,12 @@ class MainWindow(QMainWindow):
                     )),
                     ("Mass Sources", len(self.project.mass_sources)),
                     ("Recorders", len(self.project.recorders)),
+                    (
+                        "Managed By",
+                        "Frame Wizard"
+                        if self.project.frame_wizard_recipe
+                        else "Manual / mixed",
+                    ),
                 ],
             )
             return
@@ -26127,6 +29241,7 @@ class MainWindow(QMainWindow):
                 [
                     ("Materials", len(self.project.materials)),
                     ("nD Materials", len(self.project.nd_materials)),
+                    ("Friction Models", len(self.project.friction_models)),
                     ("Sections", len(self.project.sections)),
                     ("Transformations", len(self.project.transformations)),
                 ],
@@ -26188,6 +29303,21 @@ class MainWindow(QMainWindow):
                 for name, count in sorted(material_types.items())
             )
             self.properties_panel.set_properties("nD Materials", rows)
+            return
+        if kind == "friction_models_root":
+            types: dict[str, int] = {}
+            for model in self.project.friction_models.values():
+                key = str(model.friction_type)
+                types[key] = types.get(key, 0) + 1
+            rows = [
+                ("Total Friction Models", len(self.project.friction_models)),
+                ("Types", len(types)),
+            ]
+            rows.extend(
+                (f"Type · {name}", count)
+                for name, count in sorted(types.items())
+            )
+            self.properties_panel.set_properties("Friction Models", rows)
             return
         if kind == "sections_root":
             shell_sections = sum(
@@ -27450,6 +30580,9 @@ class MainWindow(QMainWindow):
             properties.triggered.connect(
                 lambda: self._show_tree_root_properties("model_root")
             )
+            if self.project.frame_wizard_recipe:
+                edit_frame = menu.addAction("Edit in Frame Wizard...")
+                edit_frame.triggered.connect(self._edit_frame_wizard)
             menu.addAction(self.actions["check_model"])
             menu.addAction(self.actions["run"])
             menu.addSeparator()
@@ -27514,6 +30647,9 @@ class MainWindow(QMainWindow):
                 "New Connection / Joint..."
             )
             connection_action.triggered.connect(self._create_connection)
+            if self.project.frame_wizard_recipe:
+                edit_frame = menu.addAction("Edit in Frame Wizard...")
+                edit_frame.triggered.connect(self._edit_frame_wizard)
             exec_menu()
             return
 
@@ -27545,6 +30681,8 @@ class MainWindow(QMainWindow):
             library.triggered.connect(self._show_material_library)
             nd_material = menu.addAction("New nD Material...")
             nd_material.triggered.connect(self._create_nd_material)
+            friction_model = menu.addAction("New Friction Model...")
+            friction_model.triggered.connect(self._create_friction_model)
             section = menu.addAction("New Beam / Fiber Section...")
             section.triggered.connect(self._create_section)
             shell_section = menu.addAction("New Shell Section...")
@@ -28730,8 +31868,26 @@ class MainWindow(QMainWindow):
             create.triggered.connect(self._create_element)
             create_truss = menu.addAction("New Truss...")
             create_truss.triggered.connect(self._create_truss)
+            create_cable = menu.addAction("New Catenary Cable...")
+            create_cable.triggered.connect(self._create_catenary_cable)
+            create_bearing = menu.addAction("New Elastomeric Bearing...")
+            create_bearing.triggered.connect(self._create_elastomeric_bearing)
+            create_lrb = menu.addAction("New LeadRubberX...")
+            create_lrb.triggered.connect(self._create_lead_rubber_x)
+            create_tfp = menu.addAction("New Triple Friction Pendulum...")
+            create_tfp.triggered.connect(self._create_triple_friction_pendulum)
+            create_contact = menu.addAction("New Contact / Interface...")
+            create_contact.triggered.connect(self._create_contact_element)
             create_shell = menu.addAction("New Shell Element...")
             create_shell.triggered.connect(self._create_shell)
+            create_solid = menu.addAction("New 3D Solid Brick...")
+            create_solid.triggered.connect(self._create_solid_brick)
+            create_wall_macro = menu.addAction(
+                "New RC Wall Macro Element..."
+            )
+            create_wall_macro.triggered.connect(
+                self._create_wall_macro_element
+            )
             create_connection = menu.addAction(
                 "New Connection / Joint..."
             )
@@ -28760,6 +31916,24 @@ class MainWindow(QMainWindow):
             }
             is_truss_group = element_type in TRUSS_ELEMENT_TYPES
             is_shell_group = element_type in SHELL_ELEMENT_TYPES
+            is_continuum_group = (
+                element_type in CONTINUUM_QUAD_ELEMENT_TYPES
+            )
+            is_solid_group = element_type in SOLID_ELEMENT_TYPES
+            is_wall_macro_group = element_type in WALL_MACRO_ELEMENT_TYPES
+            is_frame_group = element_type in FRAME_ELEMENT_TYPES
+            is_cable_group = element_type in CABLE_ELEMENT_TYPES
+            is_bearing_group = (
+                element_type == "elastomericBearingPlasticity"
+            )
+            is_friction_bearing_group = (
+                element_type in FRICTION_BEARING_ELEMENT_TYPES
+            )
+            is_advanced_bearing_group = element_type in {
+                "LeadRubberX",
+                "TripleFrictionPendulum",
+            }
+            is_contact_group = element_type in CONTACT_ELEMENT_TYPES
 
             if is_truss_group:
                 create = menu.addAction("New Truss...")
@@ -28767,6 +31941,36 @@ class MainWindow(QMainWindow):
             elif is_shell_group:
                 create = menu.addAction("New Shell Element...")
                 create.triggered.connect(self._create_shell)
+            elif is_continuum_group:
+                create = menu.addAction("New 2D Continuum Quad...")
+                create.triggered.connect(self._create_continuum_quad)
+            elif is_solid_group:
+                create = menu.addAction("New 3D Solid Brick...")
+                create.triggered.connect(self._create_solid_brick)
+            elif is_wall_macro_group:
+                create = menu.addAction("New RC Wall Macro Element...")
+                create.triggered.connect(self._create_wall_macro_element)
+            elif is_cable_group:
+                create = menu.addAction("New Catenary Cable...")
+                create.triggered.connect(self._create_catenary_cable)
+            elif is_bearing_group:
+                create = menu.addAction("New Elastomeric Bearing...")
+                create.triggered.connect(self._create_elastomeric_bearing)
+            elif is_friction_bearing_group:
+                create = menu.addAction("New Friction Bearing...")
+                create.triggered.connect(self._create_friction_bearing)
+            elif is_advanced_bearing_group:
+                if element_type == "LeadRubberX":
+                    create = menu.addAction("New LeadRubberX...")
+                    create.triggered.connect(self._create_lead_rubber_x)
+                else:
+                    create = menu.addAction("New Triple Friction Pendulum...")
+                    create.triggered.connect(
+                        self._create_triple_friction_pendulum
+                    )
+            elif is_contact_group:
+                create = menu.addAction("New Contact / Interface...")
+                create.triggered.connect(self._create_contact_element)
             else:
                 create = menu.addAction("New Frame...")
                 create.triggered.connect(self._create_element)
@@ -28800,6 +32004,91 @@ class MainWindow(QMainWindow):
                             else None
                         )
                     )
+                elif is_continuum_group:
+                    edit_continuum = definition_menu.addAction(
+                        "Edit 2D Continuum Definition..."
+                    )
+                    edit_continuum.setEnabled(len(tags) == 1)
+                    edit_continuum.triggered.connect(
+                        lambda checked=False,
+                        values=tuple(sorted(tags)): (
+                            self._edit_continuum_quad(values[0])
+                            if len(values) == 1
+                            else None
+                        )
+                    )
+                elif is_solid_group:
+                    edit_solid = definition_menu.addAction(
+                        "Edit 3D Solid Definition..."
+                    )
+                    edit_solid.setEnabled(len(tags) == 1)
+                    edit_solid.triggered.connect(
+                        lambda checked=False,
+                        values=tuple(sorted(tags)): (
+                            self._edit_solid_brick(values[0])
+                            if len(values) == 1
+                            else None
+                        )
+                    )
+                elif is_cable_group or is_bearing_group:
+                    edit_special = definition_menu.addAction(
+                        "Edit Special Element Definition..."
+                    )
+                    edit_special.setEnabled(len(tags) == 1)
+                    edit_special.triggered.connect(
+                        lambda checked=False,
+                        values=tuple(sorted(tags)): (
+                            self._edit_special_element(values[0])
+                            if len(values) == 1
+                            else None
+                        )
+                    )
+                elif is_friction_bearing_group:
+                    edit_friction = definition_menu.addAction(
+                        "Edit Friction Bearing..."
+                    )
+                    edit_friction.setEnabled(len(tags) == 1)
+                    edit_friction.triggered.connect(
+                        lambda checked=False, values=tuple(sorted(tags)): (
+                            self._edit_friction_bearing(values[0])
+                            if len(values) == 1 else None
+                        )
+                    )
+                elif is_advanced_bearing_group:
+                    edit_advanced = definition_menu.addAction(
+                        "Edit Isolation Bearing..."
+                    )
+                    edit_advanced.setEnabled(len(tags) == 1)
+                    edit_advanced.triggered.connect(
+                        lambda checked=False, values=tuple(sorted(tags)): (
+                            self._edit_advanced_bearing(values[0])
+                            if len(values) == 1 else None
+                        )
+                    )
+                elif is_contact_group:
+                    edit_contact = definition_menu.addAction(
+                        "Edit Contact / Interface..."
+                    )
+                    edit_contact.setEnabled(len(tags) == 1)
+                    edit_contact.triggered.connect(
+                        lambda checked=False, values=tuple(sorted(tags)): (
+                            self._edit_contact_element(values[0])
+                            if len(values) == 1 else None
+                        )
+                    )
+                elif is_wall_macro_group:
+                    edit_wall = definition_menu.addAction(
+                        "Edit RC Wall Macro Definition..."
+                    )
+                    edit_wall.setEnabled(len(tags) == 1)
+                    edit_wall.triggered.connect(
+                        lambda checked=False,
+                        values=tuple(sorted(tags)): (
+                            self._edit_wall_macro_element(values[0])
+                            if len(values) == 1
+                            else None
+                        )
+                    )
                 else:
                     formulation = definition_menu.addAction(
                         "Element Formulation..."
@@ -28812,6 +32101,9 @@ class MainWindow(QMainWindow):
                     )
 
             assign = menu.addMenu("Assign")
+            assign.setEnabled(
+                is_truss_group or is_shell_group or is_frame_group
+            )
             if is_truss_group:
                 material = assign.addAction("Material (Truss)...")
                 material.triggered.connect(
@@ -28851,7 +32143,7 @@ class MainWindow(QMainWindow):
                         )
                     )
 
-            if not is_truss_group:
+            if is_shell_group or is_frame_group:
                 load_menu = menu.addMenu("Loads")
                 if is_shell_group:
                     shell_pressure = load_menu.addAction(
@@ -28863,7 +32155,7 @@ class MainWindow(QMainWindow):
                             self._create_shell_pressure(),
                         )
                     )
-                else:
+                if is_frame_group:
                     beam_load = load_menu.addAction("Beam Load...")
                     beam_load.triggered.connect(
                         lambda checked=False, t=element_type: (
@@ -29198,7 +32490,15 @@ class MainWindow(QMainWindow):
                 if element_tag in self.model.elements
             ]
             has_truss = any(
-                element.element_type == "truss"
+                element.element_type in TRUSS_ELEMENT_TYPES
+                for element in selected_elements
+            )
+            has_material_truss = any(
+                element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
+                for element in selected_elements
+            )
+            has_section_truss = any(
+                element.element_type in TRUSS_SECTION_ELEMENT_TYPES
                 for element in selected_elements
             )
             has_frame = any(
@@ -29209,12 +32509,16 @@ class MainWindow(QMainWindow):
                 element.element_type in SHELL_ELEMENT_TYPES
                 for element in selected_elements
             )
+            has_solid = any(
+                element.element_type in SOLID_ELEMENT_TYPES
+                for element in selected_elements
+            )
             has_truss_material = any(
-                element.element_type == "truss"
+                element.element_type in TRUSS_MATERIAL_ELEMENT_TYPES
                 and element.truss_material_tag is not None
                 for element in selected_elements
             )
-            has_section_assignment = any(
+            has_clearable_section_assignment = any(
                 element.element_type
                 in (FRAME_ELEMENT_TYPES | SHELL_ELEMENT_TYPES)
                 and element.section_tag is not None
@@ -29229,10 +32533,31 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
             if has_frame or (
                 self.model.elements[tag].element_type
-                in SHELL_ELEMENT_TYPES
+                in (
+                    SHELL_ELEMENT_TYPES
+                    | CONTINUUM_QUAD_ELEMENT_TYPES
+                    | SOLID_ELEMENT_TYPES
+                    | WALL_MACRO_ELEMENT_TYPES
+                    | CABLE_ELEMENT_TYPES
+                    | {"elastomericBearingPlasticity"}
+                    | FRICTION_BEARING_ELEMENT_TYPES
+                    | {"LeadRubberX", "TripleFrictionPendulum"}
+                    | CONTACT_ELEMENT_TYPES
+                    | TRUSS_ELEMENT_TYPES
+                )
             ):
                 definition_menu = menu.addMenu("Definition")
                 if (
+                    self.model.elements[tag].element_type
+                    in TRUSS_ELEMENT_TYPES
+                ):
+                    edit_truss = definition_menu.addAction(
+                        "Edit Truss Definition..."
+                    )
+                    edit_truss.triggered.connect(
+                        lambda: self._edit_truss(tag)
+                    )
+                elif (
                     self.model.elements[tag].element_type
                     in SHELL_ELEMENT_TYPES
                 ):
@@ -29241,6 +32566,79 @@ class MainWindow(QMainWindow):
                     )
                     edit_shell.triggered.connect(
                         lambda: self._edit_shell(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in CONTINUUM_QUAD_ELEMENT_TYPES
+                ):
+                    edit_continuum = definition_menu.addAction(
+                        "Edit 2D Continuum Definition..."
+                    )
+                    edit_continuum.triggered.connect(
+                        lambda: self._edit_continuum_quad(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in SOLID_ELEMENT_TYPES
+                ):
+                    edit_solid = definition_menu.addAction(
+                        "Edit 3D Solid Definition..."
+                    )
+                    edit_solid.triggered.connect(
+                        lambda: self._edit_solid_brick(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in WALL_MACRO_ELEMENT_TYPES
+                ):
+                    edit_wall = definition_menu.addAction(
+                        "Edit RC Wall Macro Definition..."
+                    )
+                    edit_wall.triggered.connect(
+                        lambda: self._edit_wall_macro_element(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in FRICTION_BEARING_ELEMENT_TYPES
+                ):
+                    edit_friction = definition_menu.addAction(
+                        "Edit Friction Bearing..."
+                    )
+                    edit_friction.triggered.connect(
+                        lambda: self._edit_friction_bearing(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in {"LeadRubberX", "TripleFrictionPendulum"}
+                ):
+                    edit_advanced = definition_menu.addAction(
+                        "Edit Isolation Bearing..."
+                    )
+                    edit_advanced.triggered.connect(
+                        lambda: self._edit_advanced_bearing(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in CONTACT_ELEMENT_TYPES
+                ):
+                    edit_contact = definition_menu.addAction(
+                        "Edit Contact / Interface..."
+                    )
+                    edit_contact.triggered.connect(
+                        lambda: self._edit_contact_element(tag)
+                    )
+                elif (
+                    self.model.elements[tag].element_type
+                    in (
+                        CABLE_ELEMENT_TYPES
+                        | {"elastomericBearingPlasticity"}
+                    )
+                ):
+                    edit_special = definition_menu.addAction(
+                        "Edit Special Element Definition..."
+                    )
+                    edit_special.triggered.connect(
+                        lambda: self._edit_special_element(tag)
                     )
                 if has_frame:
                     formulation = definition_menu.addAction(
@@ -29251,20 +32649,22 @@ class MainWindow(QMainWindow):
                     )
 
             assign = menu.addMenu("Assign")
-            if has_truss:
+            assign.setEnabled(has_truss or has_frame or has_shell)
+            if has_material_truss:
                 material_action = assign.addAction("Material (Truss)...")
                 material_action.triggered.connect(
                     self._assign_truss_material_to_selection
                 )
-            if has_frame or has_shell:
+            if has_frame or has_shell or has_section_truss:
+                shell_only = (
+                    has_shell and not has_frame and not has_section_truss
+                )
                 section_action = assign.addAction(
-                    "Shell Section..."
-                    if has_shell and not has_frame
-                    else "Section..."
+                    "Shell Section..." if shell_only else "Section..."
                 )
                 section_action.triggered.connect(
                     self._assign_shell_section_to_selection
-                    if has_shell and not has_frame
+                    if shell_only
                     else self._assign_section_to_selection
                 )
             if has_frame:
@@ -29277,7 +32677,7 @@ class MainWindow(QMainWindow):
 
             if (
                 has_truss_material
-                or has_section_assignment
+                or has_clearable_section_assignment
                 or has_transformation_assignment
             ):
                 assign.addSeparator()
@@ -29288,7 +32688,7 @@ class MainWindow(QMainWindow):
                 clear_material.triggered.connect(
                     self._clear_truss_material_assignment
                 )
-            if has_section_assignment:
+            if has_clearable_section_assignment:
                 clear_section = assign.addAction("Clear Section")
                 clear_section.triggered.connect(
                     self._clear_section_assignment
@@ -30959,6 +34359,36 @@ class MainWindow(QMainWindow):
             exec_menu()
             return
 
+        if kind == "friction_models_root":
+            create_action = menu.addAction("New Friction Model...")
+            create_action.triggered.connect(self._create_friction_model)
+            menu.addSeparator()
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_tree_root_properties(
+                    "friction_models_root"
+                )
+            )
+            exec_menu()
+            return
+
+        if kind == "friction_model":
+            tag = int(value)
+            properties = menu.addAction("Properties")
+            properties.triggered.connect(
+                lambda: self._show_friction_model_properties(tag)
+            )
+            edit = menu.addAction("Edit...")
+            edit.triggered.connect(
+                lambda: self._edit_friction_model(tag)
+            )
+            delete = menu.addAction("Delete")
+            delete.triggered.connect(
+                lambda: self._delete_friction_model(tag)
+            )
+            exec_menu()
+            return
+
         if kind == "nd_materials_root":
             library_action = menu.addAction("Open nD Material Library...")
             library_action.triggered.connect(
@@ -31518,7 +34948,34 @@ class MainWindow(QMainWindow):
         elif kind == "node":
             self._show_entity_properties("node", int(value))
         elif kind == "element":
-            self._show_entity_properties("element", int(value))
+            element = self.model.elements.get(int(value))
+            if (
+                element is not None
+                and (
+                    element.element_type in CABLE_ELEMENT_TYPES
+                    or element.element_type
+                    == "elastomericBearingPlasticity"
+                )
+            ):
+                self._edit_special_element(int(value))
+            elif (
+                element is not None
+                and element.element_type in FRICTION_BEARING_ELEMENT_TYPES
+            ):
+                self._edit_friction_bearing(int(value))
+            elif (
+                element is not None
+                and element.element_type
+                in {"LeadRubberX", "TripleFrictionPendulum"}
+            ):
+                self._edit_advanced_bearing(int(value))
+            elif (
+                element is not None
+                and element.element_type in CONTACT_ELEMENT_TYPES
+            ):
+                self._edit_contact_element(int(value))
+            else:
+                self._show_entity_properties("element", int(value))
         elif kind == "nodal_mass":
             self.selection.set_selection(nodes={int(value)})
             self._assign_mass()
@@ -31528,6 +34985,8 @@ class MainWindow(QMainWindow):
             self._edit_material(int(value))
         elif kind == "nd_material":
             self._edit_nd_material(int(value))
+        elif kind == "friction_model":
+            self._edit_friction_model(int(value))
         elif kind == "section":
             self._edit_section(int(value))
         elif kind == "transformation":
@@ -32013,6 +35472,7 @@ class MainWindow(QMainWindow):
                 units=temporary_project.units,
                 solution_results=temporary_project.solution_results,
                 nd_materials=temporary_project.nd_materials,
+                friction_models=temporary_project.friction_models,
             )
         except (KeyError, TypeError, ValueError) as exc:
             QMessageBox.warning(
