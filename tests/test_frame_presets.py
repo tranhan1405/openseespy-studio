@@ -9,6 +9,7 @@ from openseespy_studio.frame_presets import (
     frame_preset_from_json,
     frame_preset_to_json,
     frame_spec_from_preset,
+    migrate_frame_preset,
     frame_spec_to_preset,
     unique_frame_preset_name,
 )
@@ -177,3 +178,62 @@ def test_unique_frame_preset_name_uses_stable_numeric_suffix():
     }
     assert unique_frame_preset_name("Office", existing) == "Office (4)"
     assert unique_frame_preset_name("Industrial", existing) == "Industrial"
+
+
+def test_frame_preset_migrates_legacy_flat_recipe():
+    legacy = {
+        "name": "Legacy frame",
+        "nx": 2,
+        "ny": 1,
+        "nz": 3,
+        "dx": 4.75,
+        "planar_2d": True,
+    }
+
+    migrated = migrate_frame_preset(legacy)
+    spec = frame_spec_from_preset(legacy)
+
+    assert migrated["kind"] == FRAME_PRESET_KIND
+    assert migrated["schema_version"] == 1
+    assert migrated["spec"]["nx"] == 2
+    assert migrated["spec"]["dx"] == 4.75
+    assert spec.nx == 2
+    assert spec.nz == 3
+    assert spec.planar_2d is True
+    assert spec.brace_mode == "None"
+
+
+def test_frame_preset_migration_preserves_managed_metadata():
+    managed_snapshot = {
+        "version": 1,
+        "digests": {"nodes": "abc"},
+        "counts": {"nodes": 4},
+    }
+    legacy = {
+        "kind": FRAME_PRESET_KIND,
+        "schema_version": 0,
+        "name": "Managed legacy",
+        "spec": {
+            "nx": 1,
+            "ny": 1,
+            "nz": 1,
+            "planar_2d": False,
+        },
+        "managed_snapshot": managed_snapshot,
+    }
+
+    migrated = migrate_frame_preset(legacy)
+
+    assert migrated["schema_version"] == 1
+    assert migrated["managed_snapshot"] == managed_snapshot
+    assert frame_spec_from_preset(migrated).nx == 1
+
+
+def test_frame_preset_rejects_future_schema_version():
+    data = frame_spec_to_preset(FrameGridSpec(), name="Future")
+    data["schema_version"] = 999
+
+    import pytest
+
+    with pytest.raises(ValueError, match="Unsupported Frame Wizard preset"):
+        frame_spec_from_preset(data)
