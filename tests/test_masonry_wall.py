@@ -313,3 +313,49 @@ def test_masonry_wall_rejects_non_masonry_reuse_dependency():
             ),
         )
 
+def test_custom_masonry_wall_requires_normalized_length_and_area1():
+    with pytest.raises(ValueError, match="normalized L=1"):
+        validate_masonry_wall_spec(
+            MasonryWallSpec(material_strategy="CreateCustom", L=2.0)
+        )
+    with pytest.raises(ValueError, match="normalized Area1=1"):
+        validate_masonry_wall_spec(
+            MasonryWallSpec(material_strategy="CreateCustom", a1=0.8)
+        )
+    with pytest.raises(ValueError, match="Area2"):
+        validate_masonry_wall_spec(
+            MasonryWallSpec(material_strategy="CreateCustom", a2=1.2)
+        )
+
+
+def test_custom_masonry_material_records_opensees_source_reference():
+    project = ProjectDatabase()
+    result = build_masonry_wall(
+        project,
+        MasonryWallSpec(
+            formulation="EquivalentStrut",
+            material_strategy="CreateCustom",
+            replace_geometry=True,
+        ),
+    )
+    material = project.materials[result.material_tags[0]]
+    assert material.source["status"] == "user_defined"
+    assert material.source["model"] == "Masonry"
+    assert "Masonry.cpp" in material.source["reference"]["title"]
+    assert material.source["reference"]["url"].endswith(
+        "SRC/material/uniaxial/Masonry.cpp"
+    )
+
+
+def test_masonry_wizard_locks_normalized_custom_material_controls():
+    wizard = MasonryWallWizard(ProjectDatabase())
+    try:
+        assert wizard.L.minimum() == pytest.approx(1.0)
+        assert wizard.L.maximum() == pytest.approx(1.0)
+        assert wizard.a1.minimum() == pytest.approx(1.0)
+        assert wizard.a1.maximum() == pytest.approx(1.0)
+        assert wizard.a2.maximum() == pytest.approx(1.0)
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+
