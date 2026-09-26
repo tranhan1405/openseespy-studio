@@ -3439,3 +3439,112 @@ print('FRAME_WIZARD_MEMBER_OK', ops.nodeDisp({top_right}, 1))
     assert completed.returncode == 0, completed.stderr
     assert "FRAME_WIZARD_MEMBER_OK" in completed.stdout
 
+def test_frame_wizard_hinge_members_run_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            911,
+            "Hinge Elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=911,
+        beam_section_tag=911,
+        column_element_type="forceBeamColumn",
+        beam_element_type="dispBeamColumn",
+        column_integration_type="HingeRadau",
+        beam_integration_type="HingeEndpoint",
+        column_hinge_i_section_tag=911,
+        column_hinge_j_section_tag=911,
+        column_interior_section_tag=911,
+        beam_hinge_i_section_tag=911,
+        beam_hinge_j_section_tag=911,
+        beam_interior_section_tag=911,
+        column_hinge_i_length=0.25,
+        column_hinge_j_length=0.25,
+        beam_hinge_i_length=0.30,
+        beam_hinge_j_length=0.30,
+        column_mass_per_length=5.0,
+        beam_mass_per_length=4.0,
+        beam_consistent_mass=True,
+    )
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert "ops.beamIntegration('HingeRadau'" in source
+    assert "ops.beamIntegration('HingeEndpoint'" in source
+    assert "'-cMass'" in source
+
+    top_right = max(
+        project.model.nodes,
+        key=lambda tag: (
+            project.model.nodes[tag].xyz[2],
+            project.model.nodes[tag].xyz[0],
+        ),
+    )
+    run_block = f"""
+ops.timeSeries('Linear', 991)
+ops.pattern('Plain', 991, 991)
+ops.load({top_right}, 1000.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Plain')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_hinge_ok = ops.analyze(1)
+if _hinge_ok != 0:
+    raise RuntimeError(
+        f'Frame Wizard hinge analysis failed: {{_hinge_ok}}'
+    )
+print('FRAME_WIZARD_HINGE_OK', ops.nodeDisp({top_right}, 1))
+"""
+    target = tmp_path / "frame-wizard-hinge-smoke.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_WIZARD_HINGE_OK" in completed.stdout
+
