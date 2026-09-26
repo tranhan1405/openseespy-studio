@@ -6,8 +6,11 @@ from openseespy_studio.frame_presets import (
     BUILTIN_FRAME_PRESETS,
     FRAME_PRESET_KIND,
     frame_preset_dependency_issues,
+    frame_preset_from_json,
+    frame_preset_to_json,
     frame_spec_from_preset,
     frame_spec_to_preset,
+    unique_frame_preset_name,
 )
 from openseespy_studio.generator import FrameGridSpec
 from openseespy_studio.project import ProjectDatabase, SectionData
@@ -142,3 +145,35 @@ def test_frame_preset_dependency_check_accepts_resolved_frame_sections():
         beam_section_tag=10,
     )
     assert frame_preset_dependency_issues(project, spec) == []
+
+
+def test_frame_preset_json_export_import_normalizes_as_user_preset():
+    source = BUILTIN_FRAME_PRESETS["3D Moment Frame"]
+    payload = frame_preset_to_json(source)
+    restored = frame_preset_from_json(payload)
+
+    assert restored["kind"] == FRAME_PRESET_KIND
+    assert restored["name"] == "3D Moment Frame"
+    assert restored["builtin"] is False
+    assert asdict(frame_spec_from_preset(restored)) == asdict(
+        frame_spec_from_preset(source)
+    )
+
+
+def test_frame_preset_json_rejects_invalid_document():
+    import pytest
+
+    with pytest.raises(ValueError, match="Invalid Frame Wizard preset JSON"):
+        frame_preset_from_json("{not-json")
+    with pytest.raises(ValueError, match="must contain one object"):
+        frame_preset_from_json("[]")
+
+
+def test_unique_frame_preset_name_uses_stable_numeric_suffix():
+    existing = {
+        "Office",
+        "Office (2)",
+        "Office (3)",
+    }
+    assert unique_frame_preset_name("Office", existing) == "Office (4)"
+    assert unique_frame_preset_name("Industrial", existing) == "Industrial"
