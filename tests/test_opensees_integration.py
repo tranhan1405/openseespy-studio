@@ -3206,6 +3206,7 @@ def test_generated_masonpan12_constructs_in_real_opensees(tmp_path):
     )
     assert len(result.node_tags) == 12
     assert len(result.element_tags) == 1
+    assert len(result.boundary_element_tags) == 12
 
     script = to_openseespy(
         project.model,
@@ -3222,9 +3223,26 @@ def test_generated_masonpan12_constructs_in_real_opensees(tmp_path):
     assert "ops.uniaxialMaterial('Masonry'" in script
     assert "ops.element('MasonPan12'" in script
 
+    top_right = result.node_tags[6]
+    run_block = f"""
+ops.timeSeries('Linear', 901)
+ops.pattern('Plain', 901, 901)
+ops.load({top_right}, 1.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Plain')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_masonry_ok = ops.analyze(1)
+if _masonry_ok != 0:
+    raise RuntimeError(f'MasonPan12 smoke analysis failed: {{_masonry_ok}}')
+print('MASONPAN12_ANALYSIS_OK', ops.nodeDisp({top_right}, 1))
+"""
     script_path = tmp_path / "masonpan12-smoke.py"
     script_path.write_text(
-        script + "\nprint('MASONPAN12_OK')\n",
+        script + "\n" + run_block,
         encoding="utf-8",
     )
     completed = subprocess.run(
@@ -3237,5 +3255,5 @@ def test_generated_masonpan12_constructs_in_real_opensees(tmp_path):
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert "MASONPAN12_OK" in completed.stdout
+    assert "MASONPAN12_ANALYSIS_OK" in completed.stdout
 
