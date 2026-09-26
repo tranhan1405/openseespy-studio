@@ -1456,7 +1456,7 @@ class _Importer:
                     "MasonPan12 needs 12 node tags, two material tags, "
                     "thickness, w_tot and w_1."
                 )
-            masonry_nodes = tuple(int(value) for value in args[1:14])
+            masonry_nodes = tuple(int(value) for value in args[2:14])
             material_1 = int(args[14])
             material_2 = int(args[15])
             thickness = float(args[16])
