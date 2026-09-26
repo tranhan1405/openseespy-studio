@@ -6373,13 +6373,17 @@ class FrameWizard(QWizard):
             joint_large_disp=int(
                 self.joint_large_disp.currentData() or 0
             ),
-            joint_component_material_tags=tuple(
-                (
-                    int(combo.currentData())
-                    if combo.currentData() is not None
-                    else 0
+            joint_component_material_tags=(
+                tuple(
+                    (
+                        int(combo.currentData())
+                        if combo.currentData() is not None
+                        else 0
+                    )
+                    for combo in self.bcj_materials
                 )
-                for combo in self.bcj_materials
+                if self.joint_model.currentData() == "BeamColumnJoint"
+                else ()
             ),
             joint_height_factor=float(self.bcj_height_factor.value()),
             joint_width_factor=float(self.bcj_width_factor.value()),
@@ -6428,12 +6432,20 @@ class FrameWizard(QWizard):
             ),
             foundation_profile_material_tags=(
                 self._foundation_profile_tags()
-                if hasattr(self, "foundation_profile_materials")
+                if (
+                    hasattr(self, "foundation_profile_materials")
+                    and self.foundation_mode.currentData() == "Springs"
+                )
                 else ()
             ),
             foundation_base_profile_indices=(
                 self._foundation_base_profile_indices()
-                if hasattr(self, "foundation_base_table")
+                if (
+                    hasattr(self, "foundation_base_table")
+                    and self.foundation_mode.currentData() == "Springs"
+                    and self.foundation_assignment_mode.currentData()
+                    == "PerBase"
+                )
                 else ()
             ),
             brace_mode=(
