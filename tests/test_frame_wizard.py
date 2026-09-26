@@ -323,6 +323,7 @@ def test_frame_wizard_member_page_filters_sections_by_formulation():
         assert wizard.pageIds() == [
             wizard.geometry_page_id,
             wizard.members_page_id,
+            wizard.joints_page_id,
         ]
         assert wizard.column_section.findData(1) >= 0
         assert wizard.column_section.findData(2) < 0
