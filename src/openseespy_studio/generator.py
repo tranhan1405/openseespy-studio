@@ -121,6 +121,14 @@ class FrameGridSpec:
         tuple[str, int, int, int, str], ...
     ] = ()
     brace_response_preset: str = "Standard"
+    load_mode: str = "None"
+    load_self_weight: bool = False
+    load_self_weight_density: float = 0.0
+    load_beam_udl: bool = False
+    load_beam_udl_coordinate_system: str = "global"
+    load_beam_udl_vector: tuple[float, float, float] = (0.0, 0.0, -10.0)
+    load_beam_scope: str = "Both"
+    load_storeys: tuple[int, ...] = ()
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -841,6 +849,78 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                 "elasticBeamColumn columns."
             )
 
+
+    load_mode = str(spec.load_mode or "None")
+    if load_mode not in {"None", "Static"}:
+        raise ValueError(
+            f"Frame Wizard load mode {load_mode!r} is not supported."
+        )
+    load_storeys = tuple(sorted({int(value) for value in spec.load_storeys}))
+    if load_storeys and any(
+        value < 1 or value > int(spec.nz)
+        for value in load_storeys
+    ):
+        raise ValueError(
+            "Frame Wizard load storeys must be between 1 and the number "
+            "of storeys."
+        )
+    if str(spec.load_beam_scope) not in {"X", "Y", "Both"}:
+        raise ValueError(
+            "Frame Wizard beam load scope must be X, Y, or Both."
+        )
+    if str(spec.load_beam_udl_coordinate_system).lower() not in {
+        "local", "global"
+    }:
+        raise ValueError(
+            "Frame Wizard beam UDL coordinate system must be local or global."
+        )
+    udl_vector = tuple(float(value) for value in spec.load_beam_udl_vector)
+    if len(udl_vector) != 3 or any(
+        not math.isfinite(value) for value in udl_vector
+    ):
+        raise ValueError(
+            "Frame Wizard beam UDL vector requires three finite components."
+        )
+    density_override = float(spec.load_self_weight_density)
+    if (
+        not math.isfinite(density_override)
+        or density_override < 0.0
+    ):
+        raise ValueError(
+            "Frame Wizard self-weight density override must be finite and "
+            "non-negative."
+        )
+    if load_mode == "Static":
+        if joint_model in macro_joint_models:
+            raise ValueError(
+                "Frame Wizard automatic loads currently require the standard "
+                "3D/6DOF frame backend; native 2D macro-joint cores are not "
+                "combined with automatic loads yet."
+            )
+        if not bool(spec.load_self_weight) and not bool(spec.load_beam_udl):
+            raise ValueError(
+                "Frame Wizard static load mode requires self-weight and/or "
+                "beam UDL."
+            )
+        beam_scope = str(spec.load_beam_scope)
+        if spec.planar_2d and beam_scope in {"Y", "Both"}:
+            if beam_scope == "Y":
+                raise ValueError(
+                    "Planar Frame Wizard models have no Y-direction beams."
+                )
+        if bool(spec.load_beam_udl):
+            if beam_scope in {"X", "Both"} and not bool(spec.create_beams_x):
+                raise ValueError(
+                    "X beam UDL requires X-direction beams."
+                )
+            if (
+                not spec.planar_2d
+                and beam_scope in {"Y", "Both"}
+                and not bool(spec.create_beams_y)
+            ):
+                raise ValueError(
+                    "Y beam UDL requires Y-direction beams."
+                )
 
     frame_grid_coordinates(spec)
 
@@ -2277,6 +2357,228 @@ def apply_frame_bracing(
     }
 
 
+def frame_load_storeys(spec: FrameGridSpec) -> tuple[int, ...]:
+    values = tuple(sorted({int(value) for value in spec.load_storeys}))
+    return values if values else tuple(range(1, int(spec.nz) + 1))
+
+
+def _frame_element_storey(
+    model: StructuralModel,
+    element,
+    z_coordinates: list[float],
+    *,
+    tolerance: float,
+) -> int | None:
+    node_i = model.nodes.get(int(element.i))
+    node_j = model.nodes.get(int(element.j))
+    if node_i is None or node_j is None:
+        return None
+    zi = float(node_i.xyz[2])
+    zj = float(node_j.xyz[2])
+    if abs(zi - zj) > tolerance:
+        return None
+    for storey in range(1, len(z_coordinates)):
+        if abs(zi - float(z_coordinates[storey])) <= tolerance:
+            return storey
+    return None
+
+
+def _frame_self_weight_targets(model: StructuralModel) -> list:
+    groups = {
+        "column",
+        "column-2d",
+        "beam-x",
+        "beam-y",
+        "beam-2d",
+    }
+    return [
+        element
+        for element in model.elements.values()
+        if element.group in groups
+    ]
+
+
+def _frame_beam_udl_targets(
+    model: StructuralModel,
+    spec: FrameGridSpec,
+) -> list:
+    _x, _y, z_coordinates = frame_grid_coordinates(spec)
+    span = max(
+        z_coordinates[-1] - z_coordinates[0],
+        1.0,
+    )
+    tolerance = 1.0e-9 * span
+    selected_storeys = set(frame_load_storeys(spec))
+    scope = str(spec.load_beam_scope or "Both")
+    groups: set[str] = set()
+    if scope in {"X", "Both"}:
+        groups.update({"beam-x", "beam-2d"})
+    if not spec.planar_2d and scope in {"Y", "Both"}:
+        groups.add("beam-y")
+
+    targets = []
+    for element in model.elements.values():
+        if element.group not in groups:
+            continue
+        storey = _frame_element_storey(
+            model,
+            element,
+            z_coordinates,
+            tolerance=tolerance,
+        )
+        if storey in selected_storeys:
+            targets.append(element)
+    return targets
+
+
+def _preflight_frame_self_weight(
+    project,
+    spec: FrameGridSpec,
+    targets: list,
+) -> None:
+    density_override = float(spec.load_self_weight_density)
+    for element in targets:
+        if element.section_tag is None:
+            raise ValueError(
+                f"Automatic self-weight: element {element.tag} has no section."
+            )
+        section = project.sections.get(int(element.section_tag))
+        if section is None:
+            raise ValueError(
+                f"Automatic self-weight: section {element.section_tag} "
+                "does not exist."
+            )
+        if section.section_type != "Elastic":
+            raise ValueError(
+                "Automatic self-weight currently requires Elastic frame "
+                f"sections; element {element.tag} uses {section.section_type}."
+            )
+        if element.transf_tag is None or int(element.transf_tag) not in (
+            project.transformations
+        ):
+            raise ValueError(
+                f"Automatic self-weight: element {element.tag} needs a valid "
+                "geometric transformation."
+            )
+        if density_override <= 0.0:
+            if section.material_tag is None:
+                raise ValueError(
+                    "Automatic self-weight needs a positive density override "
+                    f"or section {section.tag} linked to material density."
+                )
+            material = project.materials.get(int(section.material_tag))
+            if material is None or float(material.density) <= 0.0:
+                raise ValueError(
+                    "Automatic self-weight needs a positive density override "
+                    f"or positive linked material density for section "
+                    f"{section.tag}."
+                )
+
+
+def apply_frame_static_loads(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Create one static Plain pattern for frame self-weight and beam UDL."""
+    validate_frame_grid_spec(spec)
+    if str(spec.load_mode or "None") != "Static":
+        return {
+            "load_patterns": 0,
+            "self_weight_loads": 0,
+            "beam_udl_loads": 0,
+        }
+
+    model = project.model
+    self_weight_targets = (
+        _frame_self_weight_targets(model)
+        if bool(spec.load_self_weight)
+        else []
+    )
+    udl_targets = (
+        _frame_beam_udl_targets(model, spec)
+        if bool(spec.load_beam_udl)
+        else []
+    )
+    if self_weight_targets:
+        _preflight_frame_self_weight(
+            project,
+            spec,
+            self_weight_targets,
+        )
+
+    time_series_tag = max(project.time_series, default=0) + 1
+    pattern_tag = max(project.load_patterns, default=0) + 1
+    project.add_time_series(
+        TimeSeriesData(
+            tag=time_series_tag,
+            name="Frame Wizard static",
+            series_type="Linear",
+            factor=1.0,
+        )
+    )
+    project.add_load_pattern(
+        LoadPatternData(
+            tag=pattern_tag,
+            name="Frame Wizard gravity / beam UDL",
+            pattern_type="Plain",
+            time_series_tag=time_series_tag,
+        )
+    )
+
+    next_load_tag = max(project.element_loads, default=0) + 1
+    self_weight_count = 0
+    for element in sorted(
+        self_weight_targets,
+        key=lambda item: int(item.tag),
+    ):
+        project.add_element_load(
+            ElementLoadData(
+                tag=next_load_tag,
+                name=f"Frame self-weight E{element.tag}",
+                pattern_tag=pattern_tag,
+                element_tag=int(element.tag),
+                load_type="SelfWeight",
+                gravity=(0.0, 0.0, -9.81),
+                density_override=float(spec.load_self_weight_density),
+                coordinate_system="global",
+            )
+        )
+        next_load_tag += 1
+        self_weight_count += 1
+
+    udl_count = 0
+    wx, wy, wz = (
+        float(value) for value in spec.load_beam_udl_vector
+    )
+    for element in sorted(
+        udl_targets,
+        key=lambda item: int(item.tag),
+    ):
+        project.add_element_load(
+            ElementLoadData(
+                tag=next_load_tag,
+                name=f"Frame beam UDL E{element.tag}",
+                pattern_tag=pattern_tag,
+                element_tag=int(element.tag),
+                load_type="Uniform",
+                wx=wx,
+                wy=wy,
+                wz=wz,
+                coordinate_system=str(
+                    spec.load_beam_udl_coordinate_system
+                ).lower(),
+            )
+        )
+        next_load_tag += 1
+        udl_count += 1
+
+    return {
+        "load_patterns": 1,
+        "self_weight_loads": self_weight_count,
+        "beam_udl_loads": udl_count,
+    }
+
+
 def frame_foundation_count(spec: FrameGridSpec) -> int:
     """Return the number of base foundation spring connections requested."""
     if str(spec.foundation_mode or "Direct") != "Springs":
@@ -2506,6 +2808,9 @@ def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
 
     if str(spec.foundation_mode or "Direct") == "Springs":
         result.update(apply_frame_foundation_springs(project, spec))
+
+    if str(spec.load_mode or "None") == "Static":
+        result.update(apply_frame_static_loads(project, spec))
     return result
 
 
