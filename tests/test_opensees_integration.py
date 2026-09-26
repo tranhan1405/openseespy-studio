@@ -3760,3 +3760,85 @@ def test_frame_wizard_macro_joint_models_build_in_real_opensees(
     )
     assert completed.returncode == 0, completed.stderr
     assert f"FRAME_MACRO_OK {joint_model}" in completed.stdout
+
+
+def test_frame_wizard_rigid_diaphragm_builds_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            940,
+            "Diaphragm frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=2,
+        dx=5.0,
+        dy=4.0,
+        dz=3.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=940,
+        beam_section_tag=940,
+        diaphragm_mode="Rigid",
+        diaphragm_levels=(1, 2),
+        diaphragm_floor_mass=12.0,
+        diaphragm_rotational_inertia=4.0,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["diaphragm_constraints"] == 2
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.rigidDiaphragm(3,") == 2
+    assert source.count("ops.mass(") >= 2
+
+    master_tags = [
+        constraint.retained_node
+        for constraint in project.constraints.values()
+        if constraint.constraint_type == "rigidDiaphragm"
+    ]
+    assert len(master_tags) == 2
+
+    target = tmp_path / "frame-wizard-rigid-diaphragm.py"
+    target.write_text(
+        source + "\nprint('FRAME_DIAPHRAGM_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_DIAPHRAGM_OK" in completed.stdout
