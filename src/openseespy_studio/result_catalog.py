@@ -154,6 +154,32 @@ def result_choices_for_analysis(
             )
         )
 
+    choices.extend(
+        [
+            ResultChoice(
+                "Masonry Results",
+                "Panel Shear",
+                "MasonryPanelShear",
+                "Masonry Panel Shear",
+                {},
+            ),
+            ResultChoice(
+                "Masonry Results",
+                "Strut Force",
+                "MasonryStrutForce",
+                "Masonry Strut Force",
+                {"component": "P1"},
+            ),
+            ResultChoice(
+                "Masonry Results",
+                "Strut Strain",
+                "MasonryStrutStrain",
+                "Masonry Strut Strain",
+                {"component": "E1"},
+            ),
+        ]
+    )
+
     for label, component in (
         ("Shell Total Displacement", "|U|"),
         ("Shell Displacement UX", "UX"),
