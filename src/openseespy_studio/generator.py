@@ -666,18 +666,27 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
         )
 
     brace_x_bays = tuple(sorted({int(value) for value in spec.brace_x_bays}))
-    if brace_x_bays and any(
-        value < 0 or value >= int(spec.nx)
-        for value in brace_x_bays
+    if (
+        plane_mode in {"X", "Both"}
+        and brace_x_bays
+        and any(
+            value < 0 or value >= int(spec.nx)
+            for value in brace_x_bays
+        )
     ):
         raise ValueError(
             "Brace X-bay selections must be zero-based indices inside the "
             "frame grid."
         )
     brace_y_bays = tuple(sorted({int(value) for value in spec.brace_y_bays}))
-    if brace_y_bays and any(
-        value < 0 or value >= int(spec.ny)
-        for value in brace_y_bays
+    if (
+        not spec.planar_2d
+        and plane_mode in {"Y", "Both"}
+        and brace_y_bays
+        and any(
+            value < 0 or value >= int(spec.ny)
+            for value in brace_y_bays
+        )
     ):
         raise ValueError(
             "Brace Y-bay selections must be zero-based indices inside the "
