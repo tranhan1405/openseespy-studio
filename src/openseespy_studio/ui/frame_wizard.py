@@ -5125,10 +5125,10 @@ class FrameWizard(QWizard):
             if not isinstance(combo, QComboBox):
                 continue
             key = (
-                axis_item.text(),
-                int(plane_item.text()),
-                int(bay_item.text()),
-                int(storey_item.text()),
+                str(axis_item.data(Qt.UserRole)),
+                int(plane_item.data(Qt.UserRole)),
+                int(bay_item.data(Qt.UserRole)),
+                int(storey_item.data(Qt.UserRole)),
             )
             if key in panel_map:
                 self._set_combo_data(combo, panel_map[key])
@@ -5216,12 +5216,12 @@ class FrameWizard(QWizard):
         name: str,
     ) -> list[str]:
         spec = frame_spec_from_preset(preset)
-        self._apply_frame_spec(spec)
-        self.active_preset_name = str(name)
         issues = frame_preset_dependency_issues(
             self.project,
-            self.spec(),
+            spec,
         )
+        self._apply_frame_spec(spec)
+        self.active_preset_name = str(name)
         if issues:
             self.preset_status.setText(
                 f"Loaded <b>{name}</b>.<br>"
