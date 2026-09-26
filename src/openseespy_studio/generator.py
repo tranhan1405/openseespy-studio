@@ -104,6 +104,16 @@ class FrameGridSpec:
         tuple[int, ...], ...
     ] = ()
     foundation_base_profile_indices: tuple[int, ...] = ()
+    brace_mode: str = "None"
+    brace_pattern: str = "X"
+    brace_element_type: str = "truss"
+    brace_material_tag: int | None = None
+    brace_area: float = 0.01
+    brace_mass_per_length: float = 0.0
+    brace_do_rayleigh: bool = False
+    brace_x_bays: tuple[int, ...] = ()
+    brace_storeys: tuple[int, ...] = ()
+    brace_y_plane_scope: str = "All"
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -606,6 +616,110 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                     f"Foundation profile {label} requires at least one active "
                     "uniaxial spring material."
                 )
+
+    brace_mode = str(spec.brace_mode or "None")
+    if brace_mode not in {"None", "Truss"}:
+        raise ValueError(
+            f"Frame Wizard brace mode {brace_mode!r} is not supported."
+        )
+    brace_pattern = str(spec.brace_pattern or "X")
+    supported_brace_patterns = {
+        "DiagonalForward",
+        "DiagonalBackward",
+        "X",
+        "VUpper",
+        "VLower",
+        "KLeft",
+    }
+    if brace_pattern not in supported_brace_patterns:
+        raise ValueError(
+            f"Frame Wizard brace pattern {brace_pattern!r} is not supported."
+        )
+    if str(spec.brace_element_type) not in {"truss", "corotTruss"}:
+        raise ValueError(
+            "Frame Wizard braces currently support truss or corotTruss."
+        )
+
+    brace_x_bays = tuple(sorted({int(value) for value in spec.brace_x_bays}))
+    if brace_x_bays and any(
+        value < 0 or value >= int(spec.nx)
+        for value in brace_x_bays
+    ):
+        raise ValueError(
+            "Brace X-bay selections must be zero-based indices inside the "
+            "frame grid."
+        )
+    brace_storeys = tuple(
+        sorted({int(value) for value in spec.brace_storeys})
+    )
+    if brace_storeys and any(
+        value < 1 or value > int(spec.nz)
+        for value in brace_storeys
+    ):
+        raise ValueError(
+            "Brace storey selections must be between 1 and the number of "
+            "storeys."
+        )
+    if str(spec.brace_y_plane_scope) not in {
+        "All",
+        "Exterior",
+        "YMin",
+        "YMax",
+    }:
+        raise ValueError(
+            "Brace Y-plane scope must be All, Exterior, YMin, or YMax."
+        )
+
+    if brace_mode == "Truss":
+        if joint_model in macro_joint_models:
+            raise ValueError(
+                "Frame Wizard bracing currently requires the standard "
+                "3D/6DOF frame backend; native 2D macro-joint cores are not "
+                "combined with braces yet."
+            )
+        if not bool(spec.create_columns) or not bool(spec.create_beams_x):
+            raise ValueError(
+                "X-plane bracing requires columns and X-direction beams."
+            )
+        if (
+            spec.brace_material_tag is None
+            or int(spec.brace_material_tag) <= 0
+        ):
+            raise ValueError(
+                "Frame bracing requires a positive uniaxial material tag."
+            )
+        brace_area = float(spec.brace_area)
+        if not math.isfinite(brace_area) or brace_area <= 0.0:
+            raise ValueError("Brace area must be finite and positive.")
+        brace_mass = float(spec.brace_mass_per_length)
+        if not math.isfinite(brace_mass) or brace_mass < 0.0:
+            raise ValueError(
+                "Brace mass per length must be finite and non-negative."
+            )
+        selected_storeys = (
+            brace_storeys
+            if brace_storeys
+            else tuple(range(1, int(spec.nz) + 1))
+        )
+        if brace_pattern == "VLower" and 1 in selected_storeys:
+            raise ValueError(
+                "Chevron-to-lower-beam bracing cannot use storey 1 because "
+                "Frame Wizard does not create a beam on the base line."
+            )
+        if brace_pattern in {"VUpper", "VLower"} and (
+            str(spec.beam_element_type) != "elasticBeamColumn"
+        ):
+            raise ValueError(
+                "Chevron bracing that meets a beam midpoint currently "
+                "requires elasticBeamColumn beams."
+            )
+        if brace_pattern == "KLeft" and (
+            str(spec.column_element_type) != "elasticBeamColumn"
+        ):
+            raise ValueError(
+                "K bracing at a column midpoint currently requires "
+                "elasticBeamColumn columns."
+            )
 
     frame_grid_coordinates(spec)
 
@@ -1644,6 +1758,288 @@ def apply_frame_shell_slabs(
     }
 
 
+def frame_brace_x_bays(spec: FrameGridSpec) -> tuple[int, ...]:
+    values = tuple(sorted({int(value) for value in spec.brace_x_bays}))
+    return values if values else tuple(range(int(spec.nx)))
+
+
+def frame_brace_storeys(spec: FrameGridSpec) -> tuple[int, ...]:
+    values = tuple(sorted({int(value) for value in spec.brace_storeys}))
+    return values if values else tuple(range(1, int(spec.nz) + 1))
+
+
+def frame_brace_y_grid_lines(spec: FrameGridSpec) -> tuple[int, ...]:
+    if spec.planar_2d:
+        return (0,)
+    ny = int(spec.ny)
+    scope = str(spec.brace_y_plane_scope or "All")
+    if scope == "YMin":
+        return (0,)
+    if scope == "YMax":
+        return (ny,)
+    if scope == "Exterior":
+        return (0,) if ny == 0 else (0, ny)
+    return tuple(range(ny + 1))
+
+
+def frame_brace_panel_count(spec: FrameGridSpec) -> int:
+    if str(spec.brace_mode or "None") != "Truss":
+        return 0
+    return (
+        len(frame_brace_x_bays(spec))
+        * len(frame_brace_storeys(spec))
+        * len(frame_brace_y_grid_lines(spec))
+    )
+
+
+def frame_brace_element_count(spec: FrameGridSpec) -> int:
+    panels = frame_brace_panel_count(spec)
+    if panels <= 0:
+        return 0
+    return panels * (
+        1
+        if str(spec.brace_pattern) in {
+            "DiagonalForward",
+            "DiagonalBackward",
+        }
+        else 2
+    )
+
+
+def _frame_point_on_segment(
+    point: tuple[float, float, float],
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+    *,
+    tolerance: float,
+) -> bool:
+    ab = tuple(float(b[i]) - float(a[i]) for i in range(3))
+    ap = tuple(float(point[i]) - float(a[i]) for i in range(3))
+    length2 = sum(value * value for value in ab)
+    if length2 <= tolerance * tolerance:
+        return False
+    ratio = sum(ap[i] * ab[i] for i in range(3)) / length2
+    if ratio <= tolerance or ratio >= 1.0 - tolerance:
+        return False
+    closest = tuple(float(a[i]) + ratio * ab[i] for i in range(3))
+    return (
+        sum(
+            (float(point[i]) - closest[i]) ** 2
+            for i in range(3)
+        )
+        <= tolerance * tolerance
+    )
+
+
+def _frame_insert_member_midpoint_node(
+    model: StructuralModel,
+    point: tuple[float, float, float],
+    *,
+    groups: set[str],
+    tolerance: float,
+) -> tuple[int, int]:
+    lookup = _frame_coordinate_node_lookup(model, tolerance=tolerance)
+    node_tag, _ = _frame_find_or_create_node(
+        model,
+        lookup,
+        point,
+        tolerance=tolerance,
+    )
+
+    for element in model.elements.values():
+        if element.group not in groups:
+            continue
+        if node_tag in {int(element.i), int(element.j)}:
+            return int(node_tag), 0
+
+    target = None
+    for element in list(model.elements.values()):
+        if element.group not in groups:
+            continue
+        node_i = model.nodes[int(element.i)]
+        node_j = model.nodes[int(element.j)]
+        if _frame_point_on_segment(
+            point,
+            tuple(node_i.xyz),
+            tuple(node_j.xyz),
+            tolerance=tolerance,
+        ):
+            target = element
+            break
+    if target is None:
+        raise ValueError(
+            "Brace midpoint could not be inserted on a matching frame member."
+        )
+    if str(target.element_type) != "elasticBeamColumn":
+        raise ValueError(
+            "Brace midpoint insertion requires elasticBeamColumn frame members."
+        )
+
+    old_tag = int(target.tag)
+    old_j = int(target.j)
+    model.elements.pop(old_tag)
+    _frame_clone_member_segment(
+        model,
+        target,
+        old_tag,
+        int(target.i),
+        int(node_tag),
+    )
+    new_tag = max(model.elements, default=0) + 1
+    _frame_clone_member_segment(
+        model,
+        target,
+        new_tag,
+        int(node_tag),
+        old_j,
+    )
+    return int(node_tag), 1
+
+
+def apply_frame_bracing(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Create first-stage XZ-plane truss bracing for selected frame panels."""
+    validate_frame_grid_spec(spec)
+    if str(spec.brace_mode or "None") != "Truss":
+        return {
+            "brace_panels": 0,
+            "brace_elements": 0,
+            "brace_midpoint_nodes": 0,
+            "brace_member_splits": 0,
+        }
+
+    material_tag = int(spec.brace_material_tag)
+    if material_tag not in project.materials:
+        raise ValueError(
+            f"Brace material tag {material_tag} does not exist."
+        )
+
+    model = project.model
+    x_coordinates, y_coordinates, z_coordinates = frame_grid_coordinates(spec)
+    span = max(
+        x_coordinates[-1] - x_coordinates[0],
+        (y_coordinates[-1] - y_coordinates[0]) if len(y_coordinates) > 1 else 0.0,
+        z_coordinates[-1] - z_coordinates[0],
+        1.0,
+    )
+    tolerance = 1.0e-9 * span
+    pattern = str(spec.brace_pattern)
+    next_element_tag = max(model.elements, default=0) + 1
+    midpoint_nodes: set[int] = set()
+    split_count = 0
+    brace_count = 0
+
+    def add_brace(node_i: int, node_j: int, panel_label: str) -> None:
+        nonlocal next_element_tag, brace_count
+        while next_element_tag in model.elements:
+            next_element_tag += 1
+        model.add_element(
+            next_element_tag,
+            int(node_i),
+            int(node_j),
+            element_type=str(spec.brace_element_type),
+            group=f"brace-x:{panel_label}",
+            truss_area=float(spec.brace_area),
+            truss_material_tag=material_tag,
+            mass_per_length=float(spec.brace_mass_per_length),
+            truss_do_rayleigh=bool(spec.brace_do_rayleigh),
+        )
+        next_element_tag += 1
+        brace_count += 1
+
+    for storey in frame_brace_storeys(spec):
+        lower_k = int(storey) - 1
+        upper_k = int(storey)
+        for y_index in frame_brace_y_grid_lines(spec):
+            for bay in frame_brace_x_bays(spec):
+                left = int(bay)
+                right = left + 1
+                n_bl = _frame_center_node_tag(
+                    spec, left, y_index, lower_k
+                )
+                n_br = _frame_center_node_tag(
+                    spec, right, y_index, lower_k
+                )
+                n_tl = _frame_center_node_tag(
+                    spec, left, y_index, upper_k
+                )
+                n_tr = _frame_center_node_tag(
+                    spec, right, y_index, upper_k
+                )
+                label = f"S{storey}:X{bay + 1}:Y{y_index + 1}"
+
+                if pattern == "DiagonalForward":
+                    add_brace(n_bl, n_tr, label)
+                elif pattern == "DiagonalBackward":
+                    add_brace(n_br, n_tl, label)
+                elif pattern == "X":
+                    add_brace(n_bl, n_tr, label)
+                    add_brace(n_br, n_tl, label)
+                elif pattern == "VUpper":
+                    point = (
+                        0.5 * (
+                            x_coordinates[left] + x_coordinates[right]
+                        ),
+                        y_coordinates[y_index],
+                        z_coordinates[upper_k],
+                    )
+                    mid, split = _frame_insert_member_midpoint_node(
+                        model,
+                        point,
+                        groups={"beam-2d", "beam-x"},
+                        tolerance=tolerance,
+                    )
+                    midpoint_nodes.add(mid)
+                    split_count += split
+                    add_brace(n_bl, mid, label)
+                    add_brace(n_br, mid, label)
+                elif pattern == "VLower":
+                    point = (
+                        0.5 * (
+                            x_coordinates[left] + x_coordinates[right]
+                        ),
+                        y_coordinates[y_index],
+                        z_coordinates[lower_k],
+                    )
+                    mid, split = _frame_insert_member_midpoint_node(
+                        model,
+                        point,
+                        groups={"beam-2d", "beam-x"},
+                        tolerance=tolerance,
+                    )
+                    midpoint_nodes.add(mid)
+                    split_count += split
+                    add_brace(n_tl, mid, label)
+                    add_brace(n_tr, mid, label)
+                elif pattern == "KLeft":
+                    point = (
+                        x_coordinates[left],
+                        y_coordinates[y_index],
+                        0.5 * (
+                            z_coordinates[lower_k] + z_coordinates[upper_k]
+                        ),
+                    )
+                    mid, split = _frame_insert_member_midpoint_node(
+                        model,
+                        point,
+                        groups={"column-2d", "column"},
+                        tolerance=tolerance,
+                    )
+                    midpoint_nodes.add(mid)
+                    split_count += split
+                    add_brace(mid, n_br, label)
+                    add_brace(mid, n_tr, label)
+
+    return {
+        "brace_panels": frame_brace_panel_count(spec),
+        "brace_elements": brace_count,
+        "brace_midpoint_nodes": len(midpoint_nodes),
+        "brace_member_splits": split_count,
+    }
+
+
 def frame_foundation_count(spec: FrameGridSpec) -> int:
     """Return the number of base foundation spring connections requested."""
     if str(spec.foundation_mode or "Direct") != "Springs":
@@ -1867,6 +2263,9 @@ def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
         result.update(apply_frame_rigid_diaphragms(project, spec))
     elif floor_mode == "Shell":
         result.update(apply_frame_shell_slabs(project, spec))
+
+    if str(spec.brace_mode or "None") == "Truss":
+        result.update(apply_frame_bracing(project, spec))
 
     if str(spec.foundation_mode or "Direct") == "Springs":
         result.update(apply_frame_foundation_springs(project, spec))
