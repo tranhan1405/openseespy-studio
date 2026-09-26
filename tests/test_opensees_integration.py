@@ -4371,3 +4371,220 @@ def test_frame_wizard_chevron_bracing_builds_in_real_opensees(
     )
     assert completed.returncode == 0, completed.stderr
     assert "FRAME_CHEVRON_OK" in completed.stdout
+
+
+def test_frame_wizard_yz_bracing_runs_in_real_opensees(tmp_path: Path):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            984,
+            "YZ brace elastic",
+            "Elastic",
+            parameters={"E": 2.0e11},
+            source={
+                "response_quantity": "stress_strain",
+                "parameter_dimensions": {"E": "stress"},
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            985,
+            "YZ braced frame",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.5,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=985,
+        beam_section_tag=985,
+        brace_mode="Truss",
+        brace_plane_mode="Y",
+        brace_pattern="X",
+        brace_element_type="corotTruss",
+        brace_material_tag=984,
+        brace_area=0.002,
+        brace_y_bays=(0,),
+        brace_storeys=(1,),
+        brace_x_plane_scope="XMin",
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["brace_yz_panels"] == 1
+    assert result["brace_elements"] == 2
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('corotTruss'") == 2
+
+    top_far = max(
+        (
+            tag
+            for tag, node in project.model.nodes.items()
+            if abs(node.xyz[2] - 3.5) < 1.0e-12
+        ),
+        key=lambda tag: project.model.nodes[tag].xyz[1],
+    )
+    run_block = f"""
+ops.timeSeries('Linear', 999)
+ops.pattern('Plain', 999, 999)
+ops.load({top_far}, 0.0, 1000.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Transformation')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_ok = ops.analyze(1)
+if _ok != 0:
+    raise RuntimeError(f'YZ braced frame analysis failed: {{_ok}}')
+print('FRAME_YZ_BRACING_OK', ops.nodeDisp({top_far}, 2))
+"""
+    target = tmp_path / "frame-wizard-yz-bracing.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_YZ_BRACING_OK" in completed.stdout
+
+
+def test_frame_wizard_mixed_bracing_builds_in_real_opensees(tmp_path: Path):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            986,
+            "Mixed brace steel",
+            "Steel01",
+            parameters={
+                "Fy": 3.5e8,
+                "E0": 2.0e11,
+                "b": 0.01,
+            },
+            source={
+                "response_quantity": "stress_strain",
+                "parameter_dimensions": {
+                    "Fy": "stress",
+                    "E0": "stress",
+                },
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            987,
+            "Mixed braced frame",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=4.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=987,
+        beam_section_tag=987,
+        brace_mode="Truss",
+        brace_plane_mode="Both",
+        brace_pattern="X",
+        brace_element_type="corotTruss",
+        brace_material_tag=986,
+        brace_area=0.002,
+        brace_x_bays=(0,),
+        brace_y_bays=(0,),
+        brace_storeys=(1,),
+        brace_y_plane_scope="YMin",
+        brace_x_plane_scope="XMin",
+        brace_panel_patterns=(
+            ("X", 0, 0, 1, "DiagonalForward"),
+            ("Y", 0, 0, 1, "KRight"),
+        ),
+        brace_response_preset="BRBReady",
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["brace_panels"] == 2
+    assert result["brace_elements"] == 3
+    assert result["brace_member_splits"] == 1
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('corotTruss'") == 3
+    target = tmp_path / "frame-wizard-mixed-bracing.py"
+    target.write_text(
+        source + "\nprint('FRAME_MIXED_BRACING_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_MIXED_BRACING_OK" in completed.stdout
