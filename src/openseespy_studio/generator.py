@@ -99,6 +99,11 @@ class FrameGridSpec:
     slab_mass_per_area: float = 0.0
     foundation_mode: str = "Direct"
     foundation_material_tags: tuple[int, ...] = (0, 0, 0, 0, 0, 0)
+    foundation_assignment_mode: str = "Uniform"
+    foundation_profile_material_tags: tuple[
+        tuple[int, ...], ...
+    ] = ()
+    foundation_base_profile_indices: tuple[int, ...] = ()
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -513,6 +518,13 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
         raise ValueError(
             f"Frame Wizard foundation mode {foundation_mode!r} is not supported."
         )
+
+    assignment_mode = str(spec.foundation_assignment_mode or "Uniform")
+    if assignment_mode not in {"Uniform", "PerBase"}:
+        raise ValueError(
+            "Foundation assignment mode must be Uniform or PerBase."
+        )
+
     foundation_tags = tuple(
         int(tag) for tag in spec.foundation_material_tags
     )
@@ -521,6 +533,28 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
             "Foundation definition requires six material slots; "
             "zero means rigid transfer."
         )
+
+    profile_tags = tuple(
+        tuple(int(tag) for tag in profile)
+        for profile in spec.foundation_profile_material_tags
+    )
+    if profile_tags:
+        if len(profile_tags) > 3:
+            raise ValueError(
+                "Frame Wizard supports up to three equivalent foundation "
+                "profiles in this workflow."
+            )
+        if any(
+            len(profile) != 6 or any(tag < 0 for tag in profile)
+            for profile in profile_tags
+        ):
+            raise ValueError(
+                "Every foundation profile requires six material slots; "
+                "zero means rigid transfer."
+            )
+    else:
+        profile_tags = (foundation_tags,)
+
     if foundation_mode == "Springs":
         if joint_model in macro_joint_models:
             raise ValueError(
@@ -532,12 +566,46 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
             raise ValueError(
                 "Foundation springs require columns and base-column nodes."
             )
-        active_dofs = (1, 3, 5) if spec.planar_2d else (1, 2, 3, 4, 5, 6)
-        if not any(foundation_tags[dof - 1] > 0 for dof in active_dofs):
-            raise ValueError(
-                "Foundation spring mode requires at least one active "
-                "uniaxial spring material."
+
+        base_count = (
+            int(spec.nx) + 1
+            if spec.planar_2d
+            else (int(spec.nx) + 1) * (int(spec.ny) + 1)
+        )
+        if assignment_mode == "PerBase":
+            assignments = tuple(
+                int(value) for value in spec.foundation_base_profile_indices
             )
+            if len(assignments) != base_count:
+                raise ValueError(
+                    "Per-base foundation assignment count must match the "
+                    f"{base_count} column bases."
+                )
+            if any(
+                index < 0 or index >= len(profile_tags)
+                for index in assignments
+            ):
+                raise ValueError(
+                    "Foundation base assignment references an unavailable "
+                    "profile."
+                )
+            used_profile_indices = sorted(set(assignments))
+        else:
+            used_profile_indices = [0]
+
+        active_dofs = (
+            (1, 3, 5)
+            if spec.planar_2d
+            else (1, 2, 3, 4, 5, 6)
+        )
+        for profile_index in used_profile_indices:
+            profile = profile_tags[profile_index]
+            if not any(profile[dof - 1] > 0 for dof in active_dofs):
+                label = chr(ord("A") + profile_index)
+                raise ValueError(
+                    f"Foundation profile {label} requires at least one active "
+                    "uniaxial spring material."
+                )
 
     frame_grid_coordinates(spec)
 
@@ -1587,22 +1655,49 @@ def frame_foundation_count(spec: FrameGridSpec) -> int:
     return (int(spec.nx) + 1) * (int(spec.ny) + 1)
 
 
+def frame_foundation_profiles(
+    spec: FrameGridSpec,
+) -> tuple[tuple[int, ...], ...]:
+    """Return normalized A/B/C equivalent foundation spring profiles."""
+    profiles = tuple(
+        tuple(int(tag) for tag in profile)
+        for profile in spec.foundation_profile_material_tags
+    )
+    if profiles:
+        return profiles
+    return (
+        tuple(int(tag) for tag in spec.foundation_material_tags),
+    )
+
+
+def frame_foundation_profile_assignments(
+    spec: FrameGridSpec,
+) -> tuple[int, ...]:
+    """Return one normalized profile index per frame base, row-major in X/Y."""
+    count = frame_foundation_count(spec)
+    if count <= 0:
+        return ()
+    if str(spec.foundation_assignment_mode or "Uniform") == "PerBase":
+        values = tuple(
+            int(value) for value in spec.foundation_base_profile_indices
+        )
+        if values:
+            return values
+    return (0,) * count
+
+
 def apply_frame_foundation_springs(
     project,
     spec: FrameGridSpec,
 ) -> dict[str, int]:
-    """Attach each frame base node to a coincident fixed ground node.
-
-    Positive material tags create zeroLength springs in those DOFs. Remaining
-    active frame DOFs are tied rigidly to the fixed ground node with equalDOF.
-    In planar 2D standard mode, out-of-plane DOFs remain restrained directly.
-    """
+    """Attach frame bases to fixed ground through assigned spring profiles."""
     validate_frame_grid_spec(spec)
     if str(spec.foundation_mode or "Direct") != "Springs":
         return {
             "foundation_connections": 0,
             "foundation_ground_nodes": 0,
             "foundation_constraints": 0,
+            "foundation_profiles_used": 0,
         }
 
     model = project.model
@@ -1611,19 +1706,27 @@ def apply_frame_foundation_springs(
             "Foundation springs require the standard 3D/6DOF frame backend."
         )
 
-    material_tags = tuple(
-        int(tag) for tag in spec.foundation_material_tags
+    profiles = frame_foundation_profiles(spec)
+    assignments = frame_foundation_profile_assignments(spec)
+    active_dofs = (
+        (1, 3, 5)
+        if spec.planar_2d
+        else (1, 2, 3, 4, 5, 6)
     )
-    active_dofs = (1, 3, 5) if spec.planar_2d else (1, 2, 3, 4, 5, 6)
-    spring_materials = {
-        dof: material_tags[dof - 1]
-        for dof in active_dofs
-        if material_tags[dof - 1] > 0
-    }
+
+    used_profile_indices = sorted(set(assignments))
     missing = sorted({
         int(tag)
-        for tag in spring_materials.values()
-        if int(tag) not in project.materials
+        for profile_index in used_profile_indices
+        for dof, tag in enumerate(
+            profiles[profile_index],
+            start=1,
+        )
+        if (
+            dof in active_dofs
+            and int(tag) > 0
+            and int(tag) not in project.materials
+        )
     })
     if missing:
         raise ValueError(
@@ -1652,10 +1755,19 @@ def apply_frame_foundation_springs(
     connection_count = 0
     constraint_count = 0
 
-    for base_tag in base_nodes:
+    for base_index, base_tag in enumerate(base_nodes):
         base = model.nodes.get(int(base_tag))
         if base is None:
             continue
+
+        profile_index = int(assignments[base_index])
+        material_tags = profiles[profile_index]
+        spring_materials = {
+            dof: int(material_tags[dof - 1])
+            for dof in active_dofs
+            if int(material_tags[dof - 1]) > 0
+        }
+        profile_label = chr(ord("A") + profile_index)
 
         if spec.planar_2d:
             model.set_fixity(base_tag, (0, 1, 0, 1, 0, 1))
@@ -1681,7 +1793,9 @@ def apply_frame_foundation_springs(
         if rigid_dofs:
             constraint = ConstraintData(
                 tag=next_constraint_tag,
-                name=f"Foundation rigid transfer N{base_tag}",
+                name=(
+                    f"Foundation {profile_label} rigid transfer N{base_tag}"
+                ),
                 constraint_type="equalDOF",
                 retained_node=ground_tag,
                 constrained_nodes=[base_tag],
@@ -1694,13 +1808,19 @@ def apply_frame_foundation_springs(
 
         connection = ConnectionData(
             tag=next_connection_tag,
-            name=f"Foundation spring N{base_tag}",
+            name=(
+                f"Foundation {profile_label} spring N{base_tag}"
+            ),
             connection_type="zeroLength",
             node_i=ground_tag,
             node_j=base_tag,
             materials_by_dof=dict(spring_materials),
             generated_ground_node=ground_tag,
             generated_constraint_tag=generated_constraint_tag,
+            parameters={
+                "foundation_profile_index": profile_index,
+                "foundation_profile_label": profile_label,
+            },
         )
         project.add_connection(connection)
         next_connection_tag += 1
@@ -1710,6 +1830,7 @@ def apply_frame_foundation_springs(
         "foundation_connections": connection_count,
         "foundation_ground_nodes": connection_count,
         "foundation_constraints": constraint_count,
+        "foundation_profiles_used": len(used_profile_indices),
     }
 
 
