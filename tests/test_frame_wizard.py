@@ -963,3 +963,207 @@ def test_frame_wizard_rejects_future_joint_macros_until_core_topology_phase():
     )
     with pytest.raises(ValueError, match="not available in this phase"):
         validate_frame_grid_spec(spec)
+
+
+def _macro_joint_project() -> ProjectDatabase:
+    project = _member_project()
+    for tag in range(21, 35):
+        project.materials[tag] = MaterialData(
+            tag=tag,
+            name=f"Joint material {tag}",
+            material_type="Elastic",
+            parameters={"E": 1.0e7 + tag},
+            source={
+                "response_quantity": "moment_rotation",
+                "parameter_dimensions": {"E": "stiffness"},
+            },
+        )
+    return project
+
+
+def test_frame_wizard_exposes_task3_macro_joint_controls():
+    wizard = FrameWizard(_macro_joint_project())
+    try:
+        assert wizard.joint_model.findData("Joint2D") >= 0
+        assert wizard.joint_model.findData("BeamColumnJoint") >= 0
+        assert wizard.joint_model.findData("KrawinklerPanelZone") >= 0
+
+        wizard.joint_model.setCurrentIndex(
+            wizard.joint_model.findData("Joint2D")
+        )
+        wizard.joint_material.setCurrentIndex(
+            wizard.joint_material.findData(21)
+        )
+        _APP.processEvents()
+        assert wizard.joint_panel_group.isVisible()
+        assert wizard.joint2d_group.isVisible()
+        assert not wizard.bcj_group.isVisible()
+        assert not wizard.kraw_group.isVisible()
+
+        wizard.joint_model.setCurrentIndex(
+            wizard.joint_model.findData("BeamColumnJoint")
+        )
+        for index, combo in enumerate(wizard.bcj_materials):
+            combo.setCurrentIndex(combo.findData(21 + index))
+        _APP.processEvents()
+        assert wizard.bcj_group.isVisible()
+        assert not wizard.joint_material.isEnabled()
+        assert wizard.spec().joint_component_material_tags == tuple(
+            range(21, 34)
+        )
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_macro_joint_validation_is_native_2d_only():
+    spec = FrameGridSpec(
+        planar_2d=False,
+        joint_model="Joint2D",
+        joint_material_tag=21,
+    )
+    with pytest.raises(ValueError, match="switch the frame dimension to 2D"):
+        validate_frame_grid_spec(spec)
+
+
+def test_generate_joint2d_frame_creates_external_core_nodes_and_shortens_members():
+    project = _macro_joint_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        joint_model="Joint2D",
+        joint_material_tag=21,
+        joint_panel_width=0.40,
+        joint_panel_height=0.50,
+        joint_interface_material_tags=(0, 0, 0, 0),
+        joint_large_disp=0,
+    )
+    result = generate_frame_project(project, spec)
+
+    assert project.model.ndm == 2
+    assert project.model.ndf == 3
+    assert result["joint_connections"] == 2
+    assert result["panel_external_nodes"] == 8
+    assert len(project.connections) == 2
+    assert all(
+        connection.connection_type == "Joint2D"
+        for connection in project.connections.values()
+    )
+
+    first = project.connections[min(project.connections)]
+    left, top, right, bottom = first.parameters["external_nodes"]
+    coords = project.model.nodes
+    assert coords[left].xyz[:2] == pytest.approx((-0.20, 3.5))
+    assert coords[top].xyz[:2] == pytest.approx((0.0, 3.75))
+    assert coords[right].xyz[:2] == pytest.approx((0.20, 3.5))
+    assert coords[bottom].xyz[:2] == pytest.approx((0.0, 3.25))
+
+    columns = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "column-2d"
+    ]
+    beams = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "beam-2d"
+    ]
+    assert len(columns) == 2
+    assert len(beams) == 1
+    assert any(
+        project.model.nodes[element.j].xyz[1] == pytest.approx(3.25)
+        for element in columns
+    )
+
+
+def test_generate_beamcolumnjoint_uses_thirteen_component_materials():
+    project = _macro_joint_project()
+    tags = tuple(range(21, 34))
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        joint_model="BeamColumnJoint",
+        joint_panel_width=0.40,
+        joint_panel_height=0.50,
+        joint_component_material_tags=tags,
+        joint_height_factor=0.95,
+        joint_width_factor=0.90,
+    )
+    result = generate_frame_project(project, spec)
+    assert result["joint_connections"] == 2
+    assert all(
+        tuple(connection.parameters["component_materials"]) == tags
+        for connection in project.connections.values()
+    )
+    assert all(
+        connection.parameters["height_factor"] == pytest.approx(0.95)
+        and connection.parameters["width_factor"] == pytest.approx(0.90)
+        for connection in project.connections.values()
+    )
+
+
+def test_generate_krawinkler_native_2d_uses_rotational_dof_three():
+    project = _macro_joint_project()
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        joint_model="KrawinklerPanelZone",
+        joint_material_tag=21,
+        joint_panel_width=0.40,
+        joint_panel_height=0.50,
+        joint_rigid_a=1000.0,
+        joint_rigid_e=2.0e12,
+        joint_rigid_i=1000.0,
+    )
+    generate_frame_project(project, spec)
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "ops.model('basic', '-ndm', 2, '-ndf', 3)" in source
+    assert "Krawinkler panel-zone macro" in source
+    assert "'-dir', 3" in source
+
+
+def test_frame_macro_joint_panel_must_fit_grid_spacing():
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        dx=0.40,
+        dz=0.50,
+        planar_2d=True,
+        joint_model="Joint2D",
+        joint_material_tag=21,
+        joint_panel_width=0.40,
+        joint_panel_height=0.25,
+    )
+    with pytest.raises(ValueError, match="smaller than every X bay"):
+        validate_frame_grid_spec(spec)
