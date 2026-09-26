@@ -199,3 +199,117 @@ def test_masonpan12_export_import_round_trip_preserves_topology_and_materials():
     assert all(material.parameters["Fm"] == pytest.approx(-5.0e6) for material in masonry_materials)
     assert all(material.parameters["Emo"] == pytest.approx(2.5e9) for material in masonry_materials)
 
+def test_masonry_material_accepts_legacy_a1_a2_aliases():
+    material = MaterialData(
+        11,
+        "Legacy masonry",
+        "Masonry",
+        parameters={
+            "Fm": -5.0e6,
+            "Ft": 0.2e6,
+            "Emo": 2.5e9,
+            "a1": 0.85,
+            "a2": 0.15,
+        },
+    )
+    assert material.parameters["A1"] == pytest.approx(0.85)
+    assert material.parameters["A2"] == pytest.approx(0.15)
+    assert "a1" not in material.parameters
+    assert "a2" not in material.parameters
+
+
+def test_equivalent_strut_can_reuse_existing_masonry_material():
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(7, "Calibrated infill", "Masonry")
+    )
+    result = build_masonry_wall(
+        project,
+        MasonryWallSpec(
+            formulation="EquivalentStrut",
+            material_strategy="UseExisting",
+            existing_material_tag=7,
+            crossed_struts=True,
+            replace_geometry=True,
+        ),
+    )
+
+    assert result.material_tags == [7]
+    assert set(project.materials) == {7}
+    assert all(
+        project.model.elements[tag].truss_material_tag == 7
+        for tag in result.element_tags
+    )
+
+
+def test_masonpan12_can_reuse_distinct_central_and_lateral_materials():
+    project = ProjectDatabase()
+    project.add_material(MaterialData(7, "Central", "Masonry"))
+    project.add_material(MaterialData(8, "Lateral", "Masonry"))
+
+    result = build_masonry_wall(
+        project,
+        MasonryWallSpec(
+            formulation="MasonPan12",
+            material_strategy="UseExisting",
+            existing_material_tag=7,
+            existing_lateral_material_tag=8,
+            replace_geometry=True,
+        ),
+    )
+
+    assert result.material_tags == [7, 8]
+    assert set(project.materials) == {7, 8}
+    element = project.model.elements[result.element_tags[0]]
+    assert element.special_parameters["mat_1"] == 7
+    assert element.special_parameters["mat_2"] == 8
+
+
+def test_masonry_wall_wizard_reuses_project_materials_and_locks_custom_fields():
+    project = ProjectDatabase()
+    project.add_material(MaterialData(7, "Central", "Masonry"))
+    project.add_material(MaterialData(8, "Lateral", "Masonry"))
+    wizard = MasonryWallWizard(project)
+    try:
+        wizard.material_strategy.setCurrentIndex(
+            wizard.material_strategy.findData("UseExisting")
+        )
+        wizard.formulation.setCurrentIndex(
+            wizard.formulation.findData("MasonPan12")
+        )
+        wizard.existing_material.setCurrentIndex(
+            wizard.existing_material.findData(7)
+        )
+        wizard.existing_lateral_material.setCurrentIndex(
+            wizard.existing_lateral_material.findData(8)
+        )
+
+        assert not wizard.Fm.isEnabled()
+        assert wizard.existing_material.isEnabled()
+        assert wizard.existing_lateral_material.isEnabled()
+        spec = wizard.data()
+        assert spec.material_strategy == "UseExisting"
+        assert spec.existing_material_tag == 7
+        assert spec.existing_lateral_material_tag == 8
+        assert wizard._validation_messages() == []
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+
+
+def test_masonry_wall_rejects_non_masonry_reuse_dependency():
+    project = ProjectDatabase()
+    project.add_material(
+        MaterialData(3, "Elastic spring", "Elastic", parameters={"E": 1.0e6})
+    )
+    with pytest.raises(ValueError, match="must be Masonry"):
+        build_masonry_wall(
+            project,
+            MasonryWallSpec(
+                formulation="EquivalentStrut",
+                material_strategy="UseExisting",
+                existing_material_tag=3,
+                replace_geometry=True,
+            ),
+        )
+
