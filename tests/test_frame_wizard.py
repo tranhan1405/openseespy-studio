@@ -1655,3 +1655,59 @@ def test_main_window_frame_wizard_reports_explicit_shell_slab_generation():
     assert '"slab_floors"' in source
     assert '"slab_elements"' in source
     assert "shell slab floor(s)" in source
+
+
+def test_frame_shell_slab_mesh_guard_blocks_oversized_generation():
+    spec = FrameGridSpec(
+        nx=10,
+        ny=10,
+        nz=3,
+        planar_2d=False,
+        create_beams_x=True,
+        create_beams_y=True,
+        diaphragm_mode="Shell",
+        slab_section_tag=95,
+        slab_divisions_x=20,
+        slab_divisions_y=20,
+    )
+    with pytest.raises(ValueError, match="50,000"):
+        validate_frame_grid_spec(spec)
+
+
+def test_frame_shell_asdshell_corotational_option_reaches_export():
+    project = _slab_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        diaphragm_mode="Shell",
+        diaphragm_levels=(1,),
+        slab_section_tag=95,
+        slab_element_type="ASDShellQ4",
+        slab_divisions_x=1,
+        slab_divisions_y=1,
+        slab_corotational=True,
+    )
+    prepare_frame_grid(project, spec)
+    generate_frame_project(project, spec)
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "ops.element('ASDShellQ4'" in source
+    assert "'-corotational'" in source
