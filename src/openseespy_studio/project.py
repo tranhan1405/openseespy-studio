@@ -14,6 +14,7 @@ from .model import (
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     FRICTION_BEARING_ELEMENT_TYPES,
+    MASONRY_PANEL_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
     TRUSS_MATERIAL_ELEMENT_TYPES,
@@ -9401,6 +9402,25 @@ class ProjectDatabase:
                         f"BeamContact3D element {element_tag} references "
                         f"missing transformation {transf_tag}."
                     )
+
+        if element.element_type in MASONRY_PANEL_ELEMENT_TYPES:
+            if (int(self.model.ndm), int(self.model.ndf)) != (2, 3):
+                raise ValueError(
+                    f"{element.element_type} requires an ndm=2/ndf=3 model."
+                )
+            referenced = {
+                int(element.special_parameters[key])
+                for key in ("mat_1", "mat_2")
+            }
+            missing = sorted(
+                tag for tag in referenced if tag not in self.materials
+            )
+            if missing:
+                raise ValueError(
+                    f"{element.element_type} element {element_tag} "
+                    "references missing uniaxial material tag(s): "
+                    + ", ".join(map(str, missing))
+                )
 
         if element.element_type in CONTINUUM_QUAD_ELEMENT_TYPES:
             material_tag = element.continuum_material_tag
