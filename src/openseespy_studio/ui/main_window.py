@@ -5706,6 +5706,18 @@ class MainWindow(QMainWindow):
                 f" / {brace_elements} brace element(s)"
             )
 
+        self_weight_loads = int(
+            joint_result.get("self_weight_loads", 0)
+        )
+        beam_udl_loads = int(
+            joint_result.get("beam_udl_loads", 0)
+        )
+        if self_weight_loads or beam_udl_loads:
+            message += (
+                f" · {self_weight_loads} self-weight load(s)"
+                f" / {beam_udl_loads} beam UDL(s)"
+            )
+
         self._refresh_all(message)
         self.frame_grid_panel.set_assignment_tags(
             column_section_tag=spec.column_section_tag,
