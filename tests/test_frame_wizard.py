@@ -352,9 +352,12 @@ def test_frame_wizard_member_page_filters_sections_by_formulation():
 def test_frame_wizard_member_page_requires_sections_when_members_exist():
     wizard = FrameWizard(ProjectDatabase())
     try:
+        wizard.show()
+        _APP.processEvents()
         wizard.setCurrentId(wizard.members_page_id)
         _APP.processEvents()
 
+        assert wizard.currentId() == wizard.members_page_id
         assert not wizard.validateCurrentPage()
         assert "require a compatible section" in (
             wizard.member_validation_status.text()
