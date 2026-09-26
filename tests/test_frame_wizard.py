@@ -956,12 +956,12 @@ def test_frame_joint_scope_interior_reduces_generated_springs():
     assert result["joint_connections"] == 4
 
 
-def test_frame_wizard_rejects_future_joint_macros_until_core_topology_phase():
+def test_frame_wizard_joint2d_requires_panel_material():
     spec = FrameGridSpec(
         planar_2d=True,
         joint_model="Joint2D",
     )
-    with pytest.raises(ValueError, match="not available in this phase"):
+    with pytest.raises(ValueError, match="panel rotational material"):
         validate_frame_grid_spec(spec)
 
 
