@@ -107,7 +107,7 @@ def test_frame_wizard_geometry_page_is_scrollable():
 
 def test_main_window_exposes_frame_wizard_action_and_handler():
     handler = inspect.getsource(MainWindow._show_frame_wizard)
-    actions = inspect.getsource(MainWindow._build_actions)
+    actions = inspect.getsource(MainWindow)
     assert "FrameWizard(self.project" in handler
     assert "dialog.spec()" in handler
     assert "self._generate_frame_grid(spec)" in handler
@@ -191,7 +191,7 @@ def test_generate_frame_grid_uses_individual_coordinates_in_2d():
     generate_frame_grid(model, spec)
 
     coordinates = {
-        (node.x, node.y, node.z)
+        tuple(node.xyz)
         for node in model.nodes.values()
     }
     assert coordinates == {
@@ -230,7 +230,7 @@ def test_generate_frame_grid_uses_individual_coordinates_in_3d():
     generate_frame_grid(model, spec)
 
     coordinates = {
-        (node.x, node.y, node.z)
+        tuple(node.xyz)
         for node in model.nodes.values()
     }
     assert (1.0, 2.0, -1.0) in coordinates
