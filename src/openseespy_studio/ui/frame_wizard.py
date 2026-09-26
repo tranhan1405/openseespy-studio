@@ -3785,6 +3785,14 @@ class FrameWizard(QWizard):
 
     def _load_geometry_changed(self, *_args) -> None:
         if (
+            hasattr(self, "load_floor_area")
+            and self.dimension.currentData() == "2D"
+            and self.load_floor_area.isChecked()
+        ):
+            self.load_floor_area.blockSignals(True)
+            self.load_floor_area.setChecked(False)
+            self.load_floor_area.blockSignals(False)
+        if (
             hasattr(self, "load_beam_scope")
             and self.dimension.currentData() == "2D"
             and self.load_beam_scope.currentData() != "X"
