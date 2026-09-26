@@ -12,6 +12,7 @@ from .project import (
     SelectionSetData,
     ShellLayerData,
 )
+from .units import UnitSystem
 
 
 @dataclass(slots=True)
@@ -1045,6 +1046,229 @@ def _unique_selection_name(
     return f"{candidate} {index}"
 
 
+def _auto_mvlem_shear_stiffness_si(
+    project: ProjectDatabase,
+    spec: RCWallSpec,
+) -> float:
+    """Return one macro-row elastic shear stiffness in N/m."""
+    units = UnitSystem.from_mapping(project.units)
+    width_m = units.length_to_m_value(float(spec.width))
+    thickness_m = units.length_to_m_value(float(spec.thickness))
+    height_m = units.length_to_m_value(float(spec.height))
+    row_height_m = height_m / max(int(spec.vertical_elements), 1)
+    if min(width_m, thickness_m, row_height_m) <= 0.0:
+        raise ValueError(
+            "Cannot derive MVLEM shear stiffness from non-positive geometry."
+        )
+
+    # Concrete02 initial tangent in the wall workflow is 2|f'c|/|epsc0|.
+    ec = (
+        2.0
+        * abs(float(spec.concrete_fc_web))
+        / abs(float(spec.concrete_eps_web))
+    )
+    nu = float(spec.macro_poisson)
+    if not -1.0 < nu < 0.5:
+        nu = 0.25
+    shear_modulus = ec / (2.0 * (1.0 + nu))
+    area = width_m * thickness_m
+    return shear_modulus * area / row_height_m
+
+
+def _ensure_mvlem_shear_material(
+    project: ProjectDatabase,
+    spec: RCWallSpec,
+) -> tuple[int, bool]:
+    """Resolve or create the force-deformation shear spring for MVLEM."""
+    if spec.macro_shear_material_tag is not None:
+        tag = int(spec.macro_shear_material_tag)
+        if tag not in project.materials:
+            raise ValueError(
+                f"{spec.formulation} shear material {tag} does not exist."
+            )
+        return tag, False
+
+    tag = _next_tags(project.materials, 1)[0]
+    stiffness = _auto_mvlem_shear_stiffness_si(project, spec)
+    project.add_material(
+        MaterialData(
+            tag,
+            f"{spec.name} · Auto MVLEM Shear",
+            "Elastic",
+            parameters={"E": stiffness},
+            source={
+                "status": "generated",
+                "role": "mvlem_shear",
+                "parameter_dimensions": {"E": "force_per_length"},
+                "method": "K=G*A/h; G=Ec/[2(1+nu)]",
+                "Ec_source": "2*abs(fc_web)/abs(epsc0_web)",
+            },
+        )
+    )
+    return tag, True
+
+
+def _concrete_cm_parameters(
+    spec: RCWallSpec,
+    *,
+    boundary: bool,
+) -> dict[str, float]:
+    fc = (
+        float(spec.concrete_fc_boundary)
+        if boundary
+        else float(spec.concrete_fc_web)
+    )
+    eps = (
+        float(spec.concrete_eps_boundary)
+        if boundary
+        else float(spec.concrete_eps_web)
+    )
+    ec = 2.0 * abs(fc) / abs(eps)
+    ft = abs(float(spec.concrete_ft))
+    return {
+        "fpcc": fc,
+        "epcc": eps,
+        "Ec": ec,
+        "rc": 7.0,
+        "xcrn": 1.02,
+        "ft": ft,
+        "et": ft / ec if ec > 0.0 else 1.0e-4,
+        "rt": 1.2,
+        "xcrp": 10000.0,
+        "GapClose": 0.0,
+    }
+
+
+def _ensure_sfi_fsam_materials(
+    project: ProjectDatabase,
+    spec: RCWallSpec,
+) -> tuple[int, int, list[int], list[int]]:
+    """Resolve existing FSAM materials or generate a complete default pair."""
+    web_tag = spec.macro_web_fsam_tag
+    boundary_tag = spec.macro_boundary_fsam_tag
+    if web_tag is not None or boundary_tag is not None:
+        if web_tag is None or boundary_tag is None:
+            raise ValueError(
+                "SFI_MVLEM requires both web and boundary FSAM materials, "
+                "or leave both on Auto."
+            )
+        resolved = (int(web_tag), int(boundary_tag))
+        for tag, role in zip(resolved, ("web", "boundary")):
+            material = project.nd_materials.get(tag)
+            if material is None:
+                raise ValueError(
+                    f"SFI_MVLEM {role} FSAM material {tag} does not exist."
+                )
+            if material.material_type != "FSAM":
+                raise ValueError(
+                    f"SFI_MVLEM {role} material {tag} must be FSAM, got "
+                    f"{material.material_type}."
+                )
+        return resolved[0], resolved[1], [], sorted(set(resolved))
+
+    created = _next_tags(project.materials, 5)
+    sx, syw, syb, c_web, c_boundary = created
+    for tag, name, fy in (
+        (sx, "Steel X", spec.steel_fx),
+        (syw, "Steel Y Web", spec.steel_fy_web),
+        (syb, "Steel Y Boundary", spec.steel_fy_boundary),
+    ):
+        project.add_material(
+            MaterialData(
+                int(tag),
+                f"{spec.name} · SFI {name}",
+                "Steel02",
+                parameters=_rw_a20_steel02_parameters(
+                    fy=float(fy),
+                    e0=float(spec.steel_E),
+                    b=(
+                        float(spec.steel_bx)
+                        if tag == sx
+                        else float(spec.steel_by_web)
+                        if tag == syw
+                        else float(spec.steel_by_boundary)
+                    ),
+                ),
+                source={
+                    "status": "generated",
+                    "role": "sfi_mvlem_dependency",
+                },
+            )
+        )
+    project.add_material(
+        MaterialData(
+            c_web,
+            f"{spec.name} · SFI ConcreteCM Web",
+            "ConcreteCM",
+            parameters=_concrete_cm_parameters(spec, boundary=False),
+            source={
+                "status": "generated",
+                "role": "sfi_mvlem_dependency",
+            },
+        )
+    )
+    project.add_material(
+        MaterialData(
+            c_boundary,
+            f"{spec.name} · SFI ConcreteCM Boundary",
+            "ConcreteCM",
+            parameters=_concrete_cm_parameters(spec, boundary=True),
+            source={
+                "status": "generated",
+                "role": "sfi_mvlem_dependency",
+            },
+        )
+    )
+
+    nd_created = _next_tags(project.nd_materials, 2)
+    web_fsam, boundary_fsam = nd_created
+    for tag, name, steel_y, concrete, rou_x, rou_y in (
+        (
+            web_fsam,
+            "FSAM Web",
+            syw,
+            c_web,
+            spec.rho_x_web,
+            spec.rho_y_web,
+        ),
+        (
+            boundary_fsam,
+            "FSAM Boundary",
+            syb,
+            c_boundary,
+            spec.rho_x_boundary,
+            spec.rho_y_boundary,
+        ),
+    ):
+        project.add_nd_material(
+            NDMaterialData(
+                int(tag),
+                f"{spec.name} · {name}",
+                "FSAM",
+                parameters={
+                    "rho": 0.0,
+                    "sX": float(sx),
+                    "sY": float(steel_y),
+                    "conc": float(concrete),
+                    "rouX": float(rou_x),
+                    "rouY": float(rou_y),
+                    "nu": 0.35,
+                    "alfadow": 0.005,
+                },
+                source={
+                    "status": "generated",
+                    "role": "sfi_mvlem_dependency",
+                },
+            )
+        )
+    return (
+        int(web_fsam),
+        int(boundary_fsam),
+        list(created),
+        list(nd_created),
+    )
+
+
 def build_rc_wall_macro_2d(
     project: ProjectDatabase,
     spec: RCWallSpec,
@@ -1111,15 +1335,10 @@ def build_rc_wall_macro_2d(
     web_fsam = boundary_fsam = None
 
     if formulation == "MVLEM":
-        if spec.macro_shear_material_tag is None:
-            raise ValueError(
-                "MVLEM requires an existing uniaxial shear material."
-            )
-        shear_tag = int(spec.macro_shear_material_tag)
-        if shear_tag not in project.materials:
-            raise ValueError(
-                f"MVLEM shear material {shear_tag} does not exist."
-            )
+        shear_tag, auto_shear = _ensure_mvlem_shear_material(
+            project,
+            spec,
+        )
 
         created = _next_tags(project.materials, 4)
         web_steel, boundary_steel, web_concrete, boundary_concrete = created
@@ -1190,29 +1409,16 @@ def build_rc_wall_macro_2d(
             )
         )
         material_tags = list(created)
+        if auto_shear:
+            material_tags.insert(0, int(shear_tag))
     else:
-        if spec.macro_web_fsam_tag is None or spec.macro_boundary_fsam_tag is None:
-            raise ValueError(
-                "SFI_MVLEM requires existing FSAM materials for web and "
-                "boundary macro-fibers."
-            )
-        web_fsam = int(spec.macro_web_fsam_tag)
-        boundary_fsam = int(spec.macro_boundary_fsam_tag)
-        for tag, role in (
-            (web_fsam, "web"),
-            (boundary_fsam, "boundary"),
-        ):
-            material = project.nd_materials.get(tag)
-            if material is None:
-                raise ValueError(
-                    f"SFI_MVLEM {role} FSAM material {tag} does not exist."
-                )
-            if material.material_type != "FSAM":
-                raise ValueError(
-                    f"SFI_MVLEM {role} material {tag} must be FSAM, got "
-                    f"{material.material_type}."
-                )
-        nd_material_tags = sorted({web_fsam, boundary_fsam})
+        (
+            web_fsam,
+            boundary_fsam,
+            auto_material_tags,
+            nd_material_tags,
+        ) = _ensure_sfi_fsam_materials(project, spec)
+        material_tags = list(auto_material_tags)
 
     first_node = model.next_node_tag()
     node_tags: list[int] = []
@@ -1332,15 +1538,10 @@ def build_rc_wall_macro_3d(
     _validate(spec)
     if str(spec.formulation).strip() != "MVLEM_3D":
         raise ValueError("3D macro wall builder requires MVLEM_3D.")
-    if spec.macro_shear_material_tag is None:
-        raise ValueError(
-            "MVLEM_3D requires an existing uniaxial shear material."
-        )
-    shear_tag = int(spec.macro_shear_material_tag)
-    if shear_tag not in project.materials:
-        raise ValueError(
-            f"MVLEM_3D shear material {shear_tag} does not exist."
-        )
+    shear_tag, auto_shear = _ensure_mvlem_shear_material(
+        project,
+        spec,
+    )
     if not 0.0 <= float(spec.macro_center_ratio) <= 1.0:
         raise ValueError("Wall center-of-rotation ratio must be in [0, 1].")
     if float(spec.macro_density) < 0.0:
@@ -1553,7 +1754,10 @@ def build_rc_wall_macro_3d(
     return RCWallBuildResult(
         node_tags=node_tags,
         element_tags=element_tags,
-        material_tags=list(created),
+        material_tags=(
+            ([int(shear_tag)] if auto_shear else [])
+            + list(created)
+        ),
         top_node_tags=(node_tags[-2], node_tags[-1]),
         selection_set_names=selection_set_names,
     )
