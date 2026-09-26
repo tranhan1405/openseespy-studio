@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from openseespy_studio.generator import material_to_openseespy, to_openseespy
+from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.masonry_wall import (
     MasonryWallSpec,
     build_masonry_wall,
@@ -157,3 +158,44 @@ def test_masonry_wall_wizard_switches_formulation_controls():
     finally:
         wizard.close()
         wizard.deleteLater()
+
+def test_masonpan12_export_import_round_trip_preserves_topology_and_materials():
+    source_project = ProjectDatabase()
+    source_result = build_masonry_wall(
+        source_project,
+        MasonryWallSpec(
+            width=3.2,
+            height=2.6,
+            thickness=0.18,
+            formulation="MasonPan12",
+            masonpan_w_tot=0.30,
+            masonpan_w1=0.45,
+            name="Round Trip Panel",
+        ),
+    )
+    source = _script(source_project)
+
+    imported = import_openseespy_source(
+        source,
+        units=source_project.units,
+    ).project
+
+    assert len(imported.model.nodes) == 12
+    assert len(imported.model.elements) == 1
+    element = next(iter(imported.model.elements.values()))
+    assert element.element_type == "MasonPan12"
+    assert len(element.node_tags()) == 12
+    assert element.node_tags() == tuple(source_result.node_tags)
+    assert element.special_parameters["thick"] == pytest.approx(0.18)
+    assert element.special_parameters["w_tot"] == pytest.approx(0.30)
+    assert element.special_parameters["w_1"] == pytest.approx(0.45)
+
+    masonry_materials = [
+        material
+        for material in imported.materials.values()
+        if material.material_type == "Masonry"
+    ]
+    assert len(masonry_materials) == 2
+    assert all(material.parameters["Fm"] == pytest.approx(-5.0e6) for material in masonry_materials)
+    assert all(material.parameters["Emo"] == pytest.approx(2.5e9) for material in masonry_materials)
+
