@@ -5397,6 +5397,15 @@ class MainWindow(QMainWindow):
                     f"{len(result.element_tags)} "
                     f"(expected {expected_elements})."
                 )
+            expected_boundary = (
+                12 if spec.formulation == "MasonPan12" else 4
+            )
+            if len(result.boundary_element_tags) != expected_boundary:
+                raise ValueError(
+                    "Masonry builder returned an unexpected boundary-frame "
+                    f"element count: {len(result.boundary_element_tags)} "
+                    f"(expected {expected_boundary})."
+                )
         except (KeyError, TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
@@ -5420,6 +5429,7 @@ class MainWindow(QMainWindow):
         message = (
             f"Created {spec.name} · {len(result.node_tags)} nodes · "
             f"{len(result.element_tags)} masonry element(s) · "
+            f"{len(result.boundary_element_tags)} boundary-frame element(s) · "
             f"named selections: {named}"
         )
         self._refresh_tree()
