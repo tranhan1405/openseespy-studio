@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
 
 from ..generator import (
     FrameGridSpec,
+    frame_diaphragm_count,
+    frame_diaphragm_levels,
     frame_grid_coordinates,
     frame_joint_connection_count,
     generate_frame_project,
@@ -127,6 +129,8 @@ class FramePreview(QWidget):
         self.joint_scope = "all"
         self.joint_panel_width = 0.40
         self.joint_panel_height = 0.50
+        self.diaphragm_mode = "None"
+        self.diaphragm_levels: tuple[int, ...] = ()
         self.setMinimumHeight(285)
 
     def set_frame(
@@ -143,6 +147,8 @@ class FramePreview(QWidget):
         joint_scope: str = "all",
         joint_panel_width: float = 0.40,
         joint_panel_height: float = 0.50,
+        diaphragm_mode: str = "None",
+        diaphragm_levels: tuple[int, ...] = (),
     ) -> None:
         self.dimension = str(dimension)
         self.x_coordinates = list(x_coordinates)
@@ -155,6 +161,10 @@ class FramePreview(QWidget):
         self.joint_scope = str(joint_scope)
         self.joint_panel_width = float(joint_panel_width)
         self.joint_panel_height = float(joint_panel_height)
+        self.diaphragm_mode = str(diaphragm_mode)
+        self.diaphragm_levels = tuple(
+            int(level) for level in diaphragm_levels
+        )
         self.update()
 
     @staticmethod
@@ -350,6 +360,55 @@ class FramePreview(QWidget):
                                 )
                             )
 
+        if self.dimension == "3D" and self.diaphragm_mode == "Rigid":
+            diaphragm_pen = QPen(self.palette().highlight().color())
+            diaphragm_pen.setWidthF(1.8)
+            painter.setPen(diaphragm_pen)
+            levels = (
+                self.diaphragm_levels
+                if self.diaphragm_levels
+                else tuple(range(1, len(self.z_coordinates)))
+            )
+            for level in levels:
+                if level <= 0 or level >= len(self.z_coordinates):
+                    continue
+                corners = [
+                    p(0, 0, level),
+                    p(len(self.x_coordinates) - 1, 0, level),
+                    p(
+                        len(self.x_coordinates) - 1,
+                        len(self.y_coordinates) - 1,
+                        level,
+                    ),
+                    p(0, len(self.y_coordinates) - 1, level),
+                ]
+                for index in range(4):
+                    painter.drawLine(
+                        corners[index],
+                        corners[(index + 1) % 4],
+                    )
+                center = map_point(
+                    self._project_3d(
+                        0.5 * (
+                            self.x_coordinates[0]
+                            + self.x_coordinates[-1]
+                        ),
+                        0.5 * (
+                            self.y_coordinates[0]
+                            + self.y_coordinates[-1]
+                        ),
+                        self.z_coordinates[level],
+                    )
+                )
+                painter.drawEllipse(
+                    QRectF(
+                        center.x() - 4.0,
+                        center.y() - 4.0,
+                        8.0,
+                        8.0,
+                    )
+                )
+
         painter.setPen(self.palette().text().color())
 
         # X bay dimensions at the base.
@@ -428,13 +487,16 @@ class FrameWizard(QWizard):
         self._build_geometry_page()
         self._build_members_page()
         self._build_joints_page()
+        self._build_floors_page()
         self._sync_dimension()
         self._sync_spacing_mode()
         self._sync_member_controls()
         self._sync_joint_controls()
+        self._sync_diaphragm_controls()
         self._update_preview()
         self._update_member_summary()
         self._update_joint_summary()
+        self._update_diaphragm_summary()
 
     @staticmethod
     def _spin(value: int, lo: int = 1, hi: int = 50) -> QSpinBox:
@@ -1321,6 +1383,262 @@ class FrameWizard(QWizard):
         """Generate the current Frame Wizard definition into the project."""
         return generate_frame_project(self.project, self.spec())
 
+    def _build_floors_page(self) -> None:
+        page = QWizardPage()
+        page.setTitle("Floors & Diaphragms")
+        page.setSubTitle(
+            "Select elevated floors for rigid in-plane diaphragm behaviour "
+            "and optional lumped floor mass at a generated centroid master node."
+        )
+
+        scroll = QScrollArea()
+        scroll.setObjectName("frame-wizard-floors-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+
+        self.diaphragm_mode = QComboBox()
+        self.diaphragm_mode.addItem(
+            "None · flexible frame floor",
+            "None",
+        )
+        self.diaphragm_mode.addItem(
+            "Rigid diaphragm · centroid master node",
+            "Rigid",
+        )
+
+        mode_group = QGroupBox("Floor diaphragm")
+        mode_form = QFormLayout(mode_group)
+        mode_form.addRow("Diaphragm mode:", self.diaphragm_mode)
+        layout.addWidget(mode_group)
+
+        self.diaphragm_level_table = QTableWidget(0, 2)
+        self.diaphragm_level_table.setHorizontalHeaderLabels(
+            ["Floor", f"Elevation [{self.units.length}]"]
+        )
+        self.diaphragm_level_table.horizontalHeader().setStretchLastSection(
+            True
+        )
+        self.diaphragm_level_table.setSelectionMode(
+            QAbstractItemView.NoSelection
+        )
+        self.diaphragm_level_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers
+        )
+        self.diaphragm_level_table.setMinimumHeight(170)
+        self.diaphragm_level_table.setMaximumHeight(260)
+        floor_group = QGroupBox("Apply diaphragm to floors")
+        floor_layout = QVBoxLayout(floor_group)
+        floor_layout.addWidget(self.diaphragm_level_table)
+        layout.addWidget(floor_group)
+        self.diaphragm_floor_group = floor_group
+
+        self.diaphragm_floor_mass = self._nonnegative(0.0)
+        self.diaphragm_rotational_inertia = self._nonnegative(0.0)
+        mass_group = QGroupBox("Optional lumped master-node mass")
+        mass_form = QFormLayout(mass_group)
+        mass_form.addRow(
+            f"Translational mass / floor [{self.units.mass_label}]:",
+            self.diaphragm_floor_mass,
+        )
+        mass_form.addRow(
+            "RZ rotational inertia [mass·length²]:",
+            self.diaphragm_rotational_inertia,
+        )
+        mass_hint = QLabel(
+            "The generated master node carries UX/UY mass and optional RZ "
+            "rotational inertia. UZ/RX/RY are restrained so the retained node "
+            "does not introduce free zero-stiffness modes."
+        )
+        mass_hint.setWordWrap(True)
+        mass_form.addRow(mass_hint)
+        layout.addWidget(mass_group)
+        self.diaphragm_mass_group = mass_group
+
+        note = QLabel(
+            "Rigid diaphragm is available for the standard 3D/6DOF frame "
+            "workflow. FEWIZ creates one centroid retained node per selected "
+            "floor and one OpenSees rigidDiaphragm(perpDirn=3) constraint. "
+            "Semi-rigid shell slabs are reserved for the second half of Task 4."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("padding:8px;")
+        layout.addWidget(note)
+
+        self.diaphragm_summary = QLabel()
+        self.diaphragm_summary.setWordWrap(True)
+        self.diaphragm_summary.setStyleSheet("padding:8px;")
+        layout.addWidget(self.diaphragm_summary)
+
+        self.diaphragm_validation_status = QLabel()
+        self.diaphragm_validation_status.setWordWrap(True)
+        self.diaphragm_validation_status.setObjectName(
+            "frame-wizard-diaphragm-validation-status"
+        )
+        self.diaphragm_validation_status.setStyleSheet("padding:8px;")
+        layout.addWidget(self.diaphragm_validation_status)
+        layout.addStretch(1)
+
+        outer = QVBoxLayout(page)
+        outer.addWidget(scroll)
+        self.floors_scroll = scroll
+        self.floors_page_id = self.addPage(page)
+
+        self._refresh_diaphragm_levels()
+        self.diaphragm_mode.currentIndexChanged.connect(
+            self._diaphragm_control_changed
+        )
+        self.diaphragm_level_table.itemChanged.connect(
+            self._diaphragm_control_changed
+        )
+        self.diaphragm_floor_mass.valueChanged.connect(
+            self._diaphragm_control_changed
+        )
+        self.diaphragm_rotational_inertia.valueChanged.connect(
+            self._diaphragm_control_changed
+        )
+        self.storeys.valueChanged.connect(self._refresh_diaphragm_levels)
+        self.dimension.currentIndexChanged.connect(
+            self._diaphragm_control_changed
+        )
+
+    def _selected_diaphragm_levels(self) -> tuple[int, ...]:
+        levels: list[int] = []
+        for row in range(self.diaphragm_level_table.rowCount()):
+            item = self.diaphragm_level_table.item(row, 0)
+            if (
+                item is not None
+                and item.checkState() == Qt.Checked
+            ):
+                level = item.data(Qt.UserRole)
+                if level is not None:
+                    levels.append(int(level))
+        return tuple(levels)
+
+    def _refresh_diaphragm_levels(self, *_args) -> None:
+        if not hasattr(self, "diaphragm_level_table"):
+            return
+        selected = set(self._selected_diaphragm_levels())
+        had_rows = self.diaphragm_level_table.rowCount() > 0
+        try:
+            _, _, z_coordinates = frame_grid_coordinates(self.spec())
+        except (TypeError, ValueError):
+            z_coordinates = [
+                float(self.origin_z.value())
+                + index * float(self.storey_height.value())
+                for index in range(int(self.storeys.value()) + 1)
+            ]
+
+        table = self.diaphragm_level_table
+        table.blockSignals(True)
+        table.setRowCount(int(self.storeys.value()))
+        for row in range(table.rowCount()):
+            level = row + 1
+            item = QTableWidgetItem(f"Floor {level}")
+            item.setFlags(
+                Qt.ItemIsEnabled | Qt.ItemIsUserCheckable
+            )
+            item.setData(Qt.UserRole, level)
+            item.setCheckState(
+                Qt.Checked
+                if (not had_rows or level in selected)
+                else Qt.Unchecked
+            )
+            table.setItem(row, 0, item)
+
+            elevation = (
+                z_coordinates[level]
+                if level < len(z_coordinates)
+                else float(self.origin_z.value())
+            )
+            elevation_item = QTableWidgetItem(f"{elevation:g}")
+            elevation_item.setFlags(Qt.ItemIsEnabled)
+            table.setItem(row, 1, elevation_item)
+        table.blockSignals(False)
+        self._update_diaphragm_summary()
+        self._update_preview()
+
+    def _diaphragm_control_changed(self, *_args) -> None:
+        self._sync_diaphragm_controls()
+        self._update_diaphragm_summary()
+        self._update_preview()
+
+    def _sync_diaphragm_controls(self, *_args) -> None:
+        if not hasattr(self, "diaphragm_mode"):
+            return
+        active = self.diaphragm_mode.currentData() == "Rigid"
+        self.diaphragm_floor_group.setEnabled(active)
+        self.diaphragm_mass_group.setEnabled(active)
+
+    def _diaphragm_validation_error(self) -> str:
+        try:
+            validate_frame_grid_spec(self.spec())
+        except (TypeError, ValueError) as exc:
+            return str(exc)
+        if (
+            self.diaphragm_mode.currentData() == "Rigid"
+            and not self._selected_diaphragm_levels()
+        ):
+            return "Select at least one elevated floor for the diaphragm."
+        return ""
+
+    def _update_diaphragm_summary(self, *_args) -> None:
+        if not hasattr(self, "diaphragm_summary"):
+            return
+        self._sync_diaphragm_controls()
+        try:
+            spec = self.spec()
+            count = frame_diaphragm_count(spec)
+            levels = frame_diaphragm_levels(spec)
+            error = self._diaphragm_validation_error()
+        except (TypeError, ValueError) as exc:
+            spec = self.spec()
+            count = 0
+            levels = ()
+            error = str(exc)
+
+        if spec.diaphragm_mode == "Rigid":
+            nodes_per_floor = (
+                (int(spec.nx) + 1) * (int(spec.ny) + 1)
+                if not spec.planar_2d
+                else 0
+            )
+            self.diaphragm_summary.setText(
+                "<b>Floor diaphragm summary</b><br>"
+                f"Rigid diaphragms: {count} · floors: "
+                + ", ".join(map(str, levels))
+                + "<br>"
+                f"Centroid master nodes: {count} · constrained grid nodes / "
+                f"floor: {nodes_per_floor}<br>"
+                f"Mass / floor: {spec.diaphragm_floor_mass:g} "
+                f"{self.units.mass_label} · RZ inertia: "
+                f"{spec.diaphragm_rotational_inertia:g}"
+            )
+        else:
+            self.diaphragm_summary.setText(
+                "<b>Floor diaphragm summary</b><br>"
+                "No diaphragm constraints or floor master nodes will be "
+                "generated."
+            )
+
+        finish = self.button(QWizard.FinishButton)
+        if error:
+            self.diaphragm_validation_status.setText(
+                "<b>Floor definition needs attention</b><br>" + error
+            )
+            if finish is not None and self.currentId() == self.floors_page_id:
+                finish.setEnabled(False)
+        else:
+            self.diaphragm_validation_status.setText(
+                "<b>Floor definition ready</b><br>"
+                "Selected floors, retained nodes and optional lumped mass "
+                "are consistent with the frame definition."
+            )
+            if finish is not None and self.currentId() == self.floors_page_id:
+                finish.setEnabled(True)
+
     @staticmethod
     def _section_is_compatible(
         section_type: str,
@@ -1738,6 +2056,9 @@ class FrameWizard(QWizard):
     ) -> None:
         editor.set_count(count)
         editor.connect_value_changed(self._update_preview)
+        if hasattr(self, "diaphragm_level_table"):
+            editor.connect_value_changed(self._refresh_diaphragm_levels)
+            self._refresh_diaphragm_levels()
         self._update_preview()
 
     def _uniform_changed(
@@ -1748,6 +2069,8 @@ class FrameWizard(QWizard):
         editor.set_default(value)
         if self.spacing_mode.currentData() == "Uniform":
             editor.fill(value)
+        if hasattr(self, "diaphragm_level_table"):
+            self._refresh_diaphragm_levels()
         self._update_preview()
 
     def _sync_dimension(self, *_args) -> None:
@@ -1770,6 +2093,9 @@ class FrameWizard(QWizard):
         if hasattr(self, "joint_model"):
             self._sync_joint_controls()
             self._update_joint_summary()
+        if hasattr(self, "diaphragm_mode"):
+            self._sync_diaphragm_controls()
+            self._update_diaphragm_summary()
         self._update_preview()
         self._update_member_summary()
 
@@ -1961,6 +2287,16 @@ class FrameWizard(QWizard):
             joint_rigid_a=float(self.kraw_rigid_a.value()),
             joint_rigid_e=float(self.kraw_rigid_e.value()),
             joint_rigid_i=float(self.kraw_rigid_i.value()),
+            diaphragm_mode=str(
+                self.diaphragm_mode.currentData() or "None"
+            ),
+            diaphragm_levels=self._selected_diaphragm_levels(),
+            diaphragm_floor_mass=float(
+                self.diaphragm_floor_mass.value()
+            ),
+            diaphragm_rotational_inertia=float(
+                self.diaphragm_rotational_inertia.value()
+            ),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
                 self.base_support.currentData() or "Fixed"
@@ -2032,6 +2368,8 @@ class FrameWizard(QWizard):
             joint_scope=spec.joint_scope,
             joint_panel_width=spec.joint_panel_width,
             joint_panel_height=spec.joint_panel_height,
+            diaphragm_mode=spec.diaphragm_mode,
+            diaphragm_levels=spec.diaphragm_levels,
         )
 
         counts = self._object_counts(spec)
@@ -2106,6 +2444,13 @@ class FrameWizard(QWizard):
                     "<b>Joint definition needs attention</b><br>" + error
                 )
                 return False
+        if self.currentId() == self.floors_page_id:
+            error = self._diaphragm_validation_error()
+            if error:
+                self.diaphragm_validation_status.setText(
+                    "<b>Floor definition needs attention</b><br>" + error
+                )
+                return False
         return True
 
     def initializePage(self, page_id: int) -> None:  # noqa: N802
@@ -2118,3 +2463,7 @@ class FrameWizard(QWizard):
             self._populate_joint_materials()
             self._sync_joint_controls()
             self._update_joint_summary()
+        elif page_id == self.floors_page_id:
+            self._refresh_diaphragm_levels()
+            self._sync_diaphragm_controls()
+            self._update_diaphragm_summary()
