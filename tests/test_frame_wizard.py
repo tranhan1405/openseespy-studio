@@ -499,3 +499,300 @@ def test_frame_grid_validation_rejects_unsupported_member_formulation():
     with pytest.raises(ValueError, match="Column formulation"):
         validate_frame_grid_spec(spec)
 
+def test_frame_wizard_hinge_integration_controls_and_defaults():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.column_formulation.setCurrentIndex(
+            wizard.column_formulation.findData("forceBeamColumn")
+        )
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.column_integration.setCurrentIndex(
+            wizard.column_integration.findData("HingeRadau")
+        )
+        _APP.processEvents()
+
+        assert wizard.column_hinge_i_section.isEnabled()
+        assert wizard.column_hinge_j_section.isEnabled()
+        assert wizard.column_interior_section.isEnabled()
+        assert wizard.column_hinge_i_length.isEnabled()
+        assert wizard.column_hinge_j_length.isEnabled()
+        assert not wizard.column_integration_points.isEnabled()
+        assert wizard.column_hinge_i_section.currentData() == 1
+        assert wizard.column_hinge_j_section.currentData() == 1
+        assert wizard.column_interior_section.currentData() == 1
+
+        wizard.column_integration.setCurrentIndex(
+            wizard.column_integration.findData(
+                "ConcentratedPlasticity"
+            )
+        )
+        _APP.processEvents()
+        assert not wizard.column_hinge_i_length.isEnabled()
+        assert not wizard.column_hinge_j_length.isEnabled()
+
+        wizard.column_formulation.setCurrentIndex(
+            wizard.column_formulation.findData("elasticBeamColumn")
+        )
+        _APP.processEvents()
+        assert not wizard.column_integration.isEnabled()
+        assert not wizard.column_hinge_i_section.isEnabled()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_force_based_disables_consistent_mass():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.column_consistent_mass.setChecked(True)
+        wizard.column_formulation.setCurrentIndex(
+            wizard.column_formulation.findData("forceBeamColumn")
+        )
+        _APP.processEvents()
+
+        assert not wizard.column_consistent_mass.isEnabled()
+        assert not wizard.column_consistent_mass.isChecked()
+
+        wizard.beam_formulation.setCurrentIndex(
+            wizard.beam_formulation.findData("dispBeamColumn")
+        )
+        wizard.beam_consistent_mass.setChecked(True)
+        _APP.processEvents()
+        assert wizard.beam_consistent_mass.isEnabled()
+        assert wizard.spec().beam_consistent_mass
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_advanced_hinge_and_mass_settings_flow_to_spec():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.column_formulation.setCurrentIndex(
+            wizard.column_formulation.findData("forceBeamColumn")
+        )
+        wizard.beam_formulation.setCurrentIndex(
+            wizard.beam_formulation.findData("dispBeamColumn")
+        )
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
+        wizard.column_integration.setCurrentIndex(
+            wizard.column_integration.findData("HingeRadauTwo")
+        )
+        wizard.beam_integration.setCurrentIndex(
+            wizard.beam_integration.findData(
+                "ConcentratedPlasticity"
+            )
+        )
+
+        for combo in (
+            wizard.column_hinge_i_section,
+            wizard.column_hinge_j_section,
+            wizard.column_interior_section,
+            wizard.beam_hinge_i_section,
+            wizard.beam_hinge_j_section,
+            wizard.beam_interior_section,
+        ):
+            combo.setCurrentIndex(combo.findData(1))
+
+        wizard.column_hinge_i_length.setValue(0.25)
+        wizard.column_hinge_j_length.setValue(0.35)
+        wizard.beam_mass_per_length.setValue(12.5)
+        wizard.column_mass_per_length.setValue(15.0)
+        wizard.beam_consistent_mass.setChecked(True)
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.column_integration_type == "HingeRadauTwo"
+        assert spec.column_hinge_i_section_tag == 1
+        assert spec.column_hinge_j_section_tag == 1
+        assert spec.column_interior_section_tag == 1
+        assert spec.column_hinge_i_length == pytest.approx(0.25)
+        assert spec.column_hinge_j_length == pytest.approx(0.35)
+        assert spec.beam_integration_type == "ConcentratedPlasticity"
+        assert spec.beam_hinge_i_section_tag == 1
+        assert spec.beam_hinge_j_section_tag == 1
+        assert spec.beam_interior_section_tag == 1
+        assert spec.column_mass_per_length == pytest.approx(15.0)
+        assert spec.beam_mass_per_length == pytest.approx(12.5)
+        assert not spec.column_consistent_mass
+        assert spec.beam_consistent_mass
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_grid_backend_assigns_hinges_mass_and_consistent_mass():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        column_element_type="forceBeamColumn",
+        beam_element_type="dispBeamColumn",
+        column_integration_type="HingeRadau",
+        beam_integration_type="ConcentratedPlasticity",
+        column_hinge_i_section_tag=1,
+        column_hinge_j_section_tag=1,
+        column_interior_section_tag=1,
+        beam_hinge_i_section_tag=1,
+        beam_hinge_j_section_tag=1,
+        beam_interior_section_tag=1,
+        column_hinge_i_length=0.25,
+        column_hinge_j_length=0.30,
+        column_mass_per_length=10.0,
+        beam_mass_per_length=8.0,
+        beam_consistent_mass=True,
+    )
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    columns = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "column-2d"
+    ]
+    beams = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "beam-2d"
+    ]
+    assert columns
+    assert beams
+    assert all(
+        element.integration_type == "HingeRadau"
+        and element.hinge_i_section_tag == 1
+        and element.hinge_j_section_tag == 1
+        and element.interior_section_tag == 1
+        and element.hinge_i_length == pytest.approx(0.25)
+        and element.hinge_j_length == pytest.approx(0.30)
+        and element.mass_per_length == pytest.approx(10.0)
+        for element in columns
+    )
+    assert all(
+        element.integration_type == "ConcentratedPlasticity"
+        and element.hinge_i_section_tag == 1
+        and element.hinge_j_section_tag == 1
+        and element.interior_section_tag == 1
+        and element.mass_per_length == pytest.approx(8.0)
+        and element.consistent_mass
+        for element in beams
+    )
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "ops.beamIntegration('HingeRadau'" in script
+    assert "ops.beamIntegration('ConcentratedPlasticity'" in script
+    assert "'-mass', 10" in script
+    assert "'-cMass'" in script
+    assert "'-mass', 8" in script
+    assert "# ERROR:" not in script
+
+
+@pytest.mark.parametrize(
+    "integration",
+    [
+        "HingeRadau",
+        "HingeRadauTwo",
+        "HingeMidpoint",
+        "HingeEndpoint",
+    ],
+)
+def test_frame_grid_validation_accepts_supported_hinge_integrations(
+    integration: str,
+):
+    spec = FrameGridSpec(
+        planar_2d=True,
+        column_element_type="forceBeamColumn",
+        column_integration_type=integration,
+        column_hinge_i_section_tag=1,
+        column_hinge_j_section_tag=1,
+        column_interior_section_tag=1,
+        column_hinge_i_length=0.20,
+        column_hinge_j_length=0.20,
+    )
+    validate_frame_grid_spec(spec)
+
+
+def test_frame_grid_validation_rejects_incomplete_hinge_definition():
+    missing = FrameGridSpec(
+        planar_2d=True,
+        column_element_type="forceBeamColumn",
+        column_integration_type="HingeRadau",
+    )
+    with pytest.raises(ValueError, match="I-end, J-end"):
+        validate_frame_grid_spec(missing)
+
+    zero_length = FrameGridSpec(
+        planar_2d=True,
+        column_element_type="forceBeamColumn",
+        column_integration_type="HingeMidpoint",
+        column_hinge_i_section_tag=1,
+        column_hinge_j_section_tag=1,
+        column_interior_section_tag=1,
+        column_hinge_i_length=0.0,
+        column_hinge_j_length=0.20,
+    )
+    with pytest.raises(ValueError, match="positive I/J"):
+        validate_frame_grid_spec(zero_length)
+
+
+def test_member_review_reports_hinge_and_mass_configuration():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.beam_formulation.setCurrentIndex(
+            wizard.beam_formulation.findData("dispBeamColumn")
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
+        wizard.beam_integration.setCurrentIndex(
+            wizard.beam_integration.findData("HingeEndpoint")
+        )
+        for combo in (
+            wizard.beam_hinge_i_section,
+            wizard.beam_hinge_j_section,
+            wizard.beam_interior_section,
+        ):
+            combo.setCurrentIndex(combo.findData(1))
+        wizard.beam_hinge_i_length.setValue(0.2)
+        wizard.beam_hinge_j_length.setValue(0.3)
+        wizard.beam_mass_per_length.setValue(7.5)
+        wizard.beam_consistent_mass.setChecked(True)
+        wizard._update_member_summary()
+        _APP.processEvents()
+
+        review = wizard.member_summary.text()
+        assert "HingeEndpoint" in review
+        assert "LpI=0.2" in review
+        assert "LpJ=0.3" in review
+        assert "mass/L=7.5" in review
+        assert "consistent mass" in review
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
