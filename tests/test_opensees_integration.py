@@ -3635,3 +3635,128 @@ def test_frame_wizard_zero_length_joints_build_in_real_opensees(
 
     assert completed.returncode == 0, completed.stderr
     assert "FRAME_WIZARD_JOINT_OK" in completed.stdout
+
+
+def _real_macro_joint_project() -> ProjectDatabase:
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_material(
+        MaterialData(
+            930,
+            "Joint component elastic",
+            "Elastic",
+            parameters={"E": 2.0e7},
+            source={
+                "response_quantity": "moment_rotation",
+                "parameter_dimensions": {"E": "stiffness"},
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            931,
+            "Macro-joint frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    return project
+
+
+@pytest.mark.parametrize(
+    "joint_model",
+    ["Joint2D", "BeamColumnJoint", "KrawinklerPanelZone"],
+)
+def test_frame_wizard_macro_joint_models_build_in_real_opensees(
+    tmp_path: Path,
+    joint_model: str,
+):
+    project = _real_macro_joint_project()
+    kwargs = {
+        "joint_model": joint_model,
+        "joint_panel_width": 0.40,
+        "joint_panel_height": 0.50,
+    }
+    if joint_model == "Joint2D":
+        kwargs.update({
+            "joint_material_tag": 930,
+            "joint_interface_material_tags": (0, 0, 0, 0),
+            "joint_large_disp": 0,
+        })
+    elif joint_model == "BeamColumnJoint":
+        kwargs.update({
+            "joint_component_material_tags": (930,) * 13,
+            "joint_height_factor": 1.0,
+            "joint_width_factor": 1.0,
+        })
+    else:
+        kwargs.update({
+            "joint_material_tag": 930,
+            "joint_rigid_a": 10.0,
+            "joint_rigid_e": 2.0e14,
+            "joint_rigid_i": 10.0,
+        })
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=931,
+        beam_section_tag=931,
+        **kwargs,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["joint_connections"] == 2
+    assert project.model.ndm == 2
+    assert project.model.ndf == 3
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    if joint_model == "Joint2D":
+        assert "ops.element('Joint2D'" in source
+    elif joint_model == "BeamColumnJoint":
+        assert "ops.element('beamColumnJoint'" in source
+    else:
+        assert "Krawinkler panel-zone macro" in source
+        assert "'-dir', 3" in source
+
+    target = tmp_path / f"frame-wizard-{joint_model}.py"
+    target.write_text(
+        source + f"\nprint('FRAME_MACRO_OK {joint_model}')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert f"FRAME_MACRO_OK {joint_model}" in completed.stdout
