@@ -8,7 +8,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QComboBox
 
 from openseespy_studio.frame_setup import prepare_frame_grid
 from openseespy_studio.generator import (
@@ -17,6 +17,8 @@ from openseespy_studio.generator import (
     frame_diaphragm_levels,
     frame_floor_levels,
     frame_foundation_count,
+    frame_foundation_profile_assignments,
+    frame_foundation_profiles,
     frame_grid_coordinates,
     frame_slab_count,
     frame_joint_connection_count,
@@ -1919,3 +1921,164 @@ def test_main_window_frame_wizard_reports_foundation_springs():
     source = inspect.getsource(MainWindow._generate_frame_grid)
     assert '"foundation_connections"' in source
     assert "foundation spring connection(s)" in source
+
+
+def test_frame_wizard_foundation_per_base_profiles_flow_to_spec():
+    wizard = FrameWizard(_foundation_project())
+    try:
+        wizard.foundation_mode.setCurrentIndex(
+            wizard.foundation_mode.findData("Springs")
+        )
+        wizard.foundation_assignment_mode.setCurrentIndex(
+            wizard.foundation_assignment_mode.findData("PerBase")
+        )
+
+        # Profile A = isolated footing equivalent.
+        for dof, tag in ((1, 61), (3, 62), (5, 63)):
+            combo = wizard.foundation_profile_materials[0][dof - 1]
+            combo.setCurrentIndex(combo.findData(tag))
+
+        # Profile B = pile-group equivalent.
+        for dof, tag in ((1, 64), (3, 65), (5, 66)):
+            combo = wizard.foundation_profile_materials[1][dof - 1]
+            combo.setCurrentIndex(combo.findData(tag))
+
+        # Use A/B alternately across the default four planar bases.
+        for row, profile_index in enumerate((0, 1, 0, 1)):
+            combo = wizard.foundation_base_table.cellWidget(row, 3)
+            assert isinstance(combo, QComboBox)
+            combo.setCurrentIndex(combo.findData(profile_index))
+
+        _APP.processEvents()
+        spec = wizard.spec()
+
+        assert spec.foundation_assignment_mode == "PerBase"
+        assert spec.foundation_profile_material_tags[0] == (
+            61, 0, 62, 0, 63, 0
+        )
+        assert spec.foundation_profile_material_tags[1] == (
+            64, 0, 65, 0, 66, 0
+        )
+        assert spec.foundation_base_profile_indices == (0, 1, 0, 1)
+        assert frame_foundation_profile_assignments(spec) == (0, 1, 0, 1)
+        assert frame_foundation_profiles(spec)[1] == (
+            64, 0, 65, 0, 66, 0
+        )
+        assert "Profile A: 2 base(s)" in wizard.foundation_summary.text()
+        assert "Profile B: 2 base(s)" in wizard.foundation_summary.text()
+        assert wizard.preview.foundation_base_profiles == (0, 1, 0, 1)
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_foundation_per_base_assignment_count_must_match_bases():
+    spec = FrameGridSpec(
+        nx=2,
+        nz=1,
+        planar_2d=True,
+        foundation_mode="Springs",
+        foundation_assignment_mode="PerBase",
+        foundation_profile_material_tags=(
+            (61, 0, 62, 0, 63, 0),
+            (64, 0, 65, 0, 66, 0),
+        ),
+        foundation_base_profile_indices=(0, 1),
+    )
+    with pytest.raises(ValueError, match="3 column bases"):
+        validate_frame_grid_spec(spec)
+
+
+def test_frame_foundation_per_base_assignment_rejects_missing_profile():
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        foundation_mode="Springs",
+        foundation_assignment_mode="PerBase",
+        foundation_profile_material_tags=(
+            (61, 0, 62, 0, 63, 0),
+        ),
+        foundation_base_profile_indices=(0, 1),
+    )
+    with pytest.raises(ValueError, match="unavailable profile"):
+        validate_frame_grid_spec(spec)
+
+
+def test_generate_per_base_foundation_profiles_map_materials_to_each_base():
+    project = _foundation_project()
+    spec = FrameGridSpec(
+        nx=2,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        foundation_mode="Springs",
+        foundation_assignment_mode="PerBase",
+        foundation_profile_material_tags=(
+            (61, 0, 62, 0, 63, 0),
+            (64, 0, 65, 0, 66, 0),
+        ),
+        foundation_base_profile_indices=(0, 1, 0),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["foundation_connections"] == 3
+    assert result["foundation_profiles_used"] == 2
+
+    foundation = sorted(
+        (
+            connection
+            for connection in project.connections.values()
+            if connection.name.startswith("Foundation ")
+        ),
+        key=lambda connection: connection.node_j,
+    )
+    assert len(foundation) == 3
+    assert foundation[0].materials_by_dof == {1: 61, 3: 62, 5: 63}
+    assert foundation[1].materials_by_dof == {1: 64, 3: 65, 5: 66}
+    assert foundation[2].materials_by_dof == {1: 61, 3: 62, 5: 63}
+    assert [
+        connection.parameters["foundation_profile_label"]
+        for connection in foundation
+    ] == ["A", "B", "A"]
+
+
+def test_frame_foundation_uniform_mode_keeps_profile_a_back_compatibility():
+    spec = FrameGridSpec(
+        nx=2,
+        nz=1,
+        planar_2d=True,
+        foundation_mode="Springs",
+        foundation_material_tags=(61, 0, 62, 0, 63, 0),
+    )
+    assert frame_foundation_profiles(spec) == (
+        (61, 0, 62, 0, 63, 0),
+    )
+    assert frame_foundation_profile_assignments(spec) == (0, 0, 0)
+
+
+def test_frame_foundation_profile_tabs_have_equivalent_preset_names():
+    wizard = FrameWizard(_foundation_project())
+    try:
+        labels = [
+            wizard.foundation_profile_tabs.tabText(index)
+            for index in range(wizard.foundation_profile_tabs.count())
+        ]
+        assert labels == [
+            "A · Isolated footing equivalent",
+            "B · Pile-group equivalent",
+            "C · Custom soil spring group",
+        ]
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
