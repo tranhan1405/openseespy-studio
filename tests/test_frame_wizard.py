@@ -14,12 +14,14 @@ from openseespy_studio.frame_setup import prepare_frame_grid
 from openseespy_studio.generator import (
     FrameGridSpec,
     frame_grid_coordinates,
+    frame_joint_connection_count,
     generate_frame_grid,
+    generate_frame_project,
     to_openseespy,
     validate_frame_grid_spec,
 )
 from openseespy_studio.model import StructuralModel
-from openseespy_studio.project import ProjectDatabase, SectionData
+from openseespy_studio.project import MaterialData, ProjectDatabase, SectionData
 from openseespy_studio.ui.frame_wizard import FrameWizard
 from openseespy_studio.ui.main_window import MainWindow
 
@@ -796,3 +798,167 @@ def test_member_review_reports_hinge_and_mass_configuration():
         wizard.deleteLater()
         _APP.processEvents()
 
+
+
+def _joint_project() -> ProjectDatabase:
+    project = ProjectDatabase()
+    project.materials[9] = MaterialData(
+        tag=9,
+        name="Frame rotational spring",
+        material_type="Elastic",
+        parameters={"E": 1.0e6},
+        source={
+            "response_quantity": "moment_rotation",
+            "parameter_dimensions": {"E": "stiffness"},
+        },
+    )
+    return project
+
+
+def test_frame_wizard_task3_zero_length_joint_spec_and_summary():
+    wizard = FrameWizard(_joint_project())
+    try:
+        wizard.joint_model.setCurrentIndex(
+            wizard.joint_model.findData("ZeroLength")
+        )
+        wizard.joint_material.setCurrentIndex(
+            wizard.joint_material.findData(9)
+        )
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.joint_model == "ZeroLength"
+        assert spec.joint_material_tag == 9
+        assert spec.joint_scope == "all"
+        assert frame_joint_connection_count(spec) == 12
+        assert "Explicit springs: 12" in wizard.joint_summary.text()
+        assert "Duplicate beam-side nodes: 12" in wizard.joint_summary.text()
+        assert "Joint definition ready" in wizard.joint_validation_status.text()
+        assert wizard.joints_scroll.widgetResizable()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_joint_material_is_required_for_zero_length_mode():
+    wizard = FrameWizard(ProjectDatabase())
+    try:
+        wizard.joint_model.setCurrentIndex(
+            wizard.joint_model.findData("ZeroLength")
+        )
+        _APP.processEvents()
+        assert "rotational" in wizard._joint_validation_error().lower()
+        with pytest.raises(ValueError, match="rotational"):
+            validate_frame_grid_spec(wizard.spec())
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_generate_frame_project_builds_2d_zero_length_joint_topology():
+    project = _joint_project()
+    spec = FrameGridSpec(
+        nx=2,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        joint_model="ZeroLength",
+        joint_material_tag=9,
+    )
+
+    result = generate_frame_project(project, spec)
+
+    assert result == {
+        "joint_nodes": 3,
+        "joint_connections": 3,
+        "duplicate_nodes": 3,
+        "joint_constraints": 3,
+    }
+    assert len(project.model.nodes) == 9
+    assert len(project.connections) == 3
+    assert len(project.constraints) == 3
+
+    original_top_nodes = {4, 5, 6}
+    duplicate_nodes = set(project.model.nodes) - set(range(1, 7))
+    assert duplicate_nodes == {7, 8, 9}
+
+    beams = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "beam-2d"
+    ]
+    assert len(beams) == 2
+    assert all(
+        element.i in duplicate_nodes and element.j in duplicate_nodes
+        for element in beams
+    )
+    assert all(
+        connection.node_i in original_top_nodes
+        and connection.node_j in duplicate_nodes
+        and connection.materials_by_dof == {5: 9}
+        for connection in project.connections.values()
+    )
+    assert all(
+        constraint.dofs == (1, 2, 3, 4, 6)
+        for constraint in project.constraints.values()
+    )
+
+
+def test_generate_frame_project_builds_independent_x_y_springs_in_3d():
+    project = _joint_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        joint_model="ZeroLength",
+        joint_material_tag=9,
+    )
+
+    result = generate_frame_project(project, spec)
+
+    assert result["joint_nodes"] == 4
+    assert result["joint_connections"] == 8
+    assert result["duplicate_nodes"] == 8
+    assert {
+        next(iter(connection.materials_by_dof))
+        for connection in project.connections.values()
+    } == {4, 5}
+
+
+def test_frame_joint_scope_interior_reduces_generated_springs():
+    project = _joint_project()
+    spec = FrameGridSpec(
+        nx=3,
+        ny=1,
+        nz=2,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        joint_model="ZeroLength",
+        joint_material_tag=9,
+        joint_scope="interior",
+    )
+    assert frame_joint_connection_count(spec) == 4
+    result = generate_frame_project(project, spec)
+    assert result["joint_connections"] == 4
+
+
+def test_frame_wizard_rejects_future_joint_macros_until_core_topology_phase():
+    spec = FrameGridSpec(
+        planar_2d=True,
+        joint_model="Joint2D",
+    )
+    with pytest.raises(ValueError, match="not available in this phase"):
+        validate_frame_grid_spec(spec)
