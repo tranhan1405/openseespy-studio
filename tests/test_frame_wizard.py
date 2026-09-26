@@ -2844,6 +2844,12 @@ def test_generate_frame_self_weight_uses_density_override_after_member_split():
 def test_frame_wizard_self_weight_without_density_reports_section_problem():
     wizard = FrameWizard(_member_project())
     try:
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
         wizard.load_mode.setCurrentIndex(
             wizard.load_mode.findData("Static")
         )
