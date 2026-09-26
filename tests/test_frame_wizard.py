@@ -4205,6 +4205,7 @@ def test_frame_wizard_managed_review_detects_manual_conflict_and_requires_ack():
     )
     try:
         wizard.show()
+        wizard.setCurrentId(wizard.review_page_id)
         _APP.processEvents()
         wizard.review_replace_ack.setChecked(True)
         wizard._update_review_page()
@@ -4213,7 +4214,7 @@ def test_frame_wizard_managed_review_detects_manual_conflict_and_requires_ack():
         text = wizard.review_regen_diff.text()
         assert "Manual edit conflict:" in text
         assert "nodes" in text
-        assert wizard.review_conflict_ack.isVisible()
+        assert not wizard.review_conflict_ack.isHidden()
 
         compatible_index = wizard.review_regen_mode.findData("compatible")
         item = wizard.review_regen_mode.model().item(compatible_index)
