@@ -32,6 +32,7 @@ CONTINUUM_QUAD_ELEMENT_TYPES = {
     "enhancedQuad",
 }
 SOLID_ELEMENT_TYPES = {"stdBrick", "SSPbrick", "bbarBrick"}
+MASONRY_PANEL_ELEMENT_TYPES = {"MasonPan12"}
 WALL_MACRO_2D_ELEMENT_TYPES = {"MVLEM", "SFI_MVLEM"}
 WALL_MACRO_3D_ELEMENT_TYPES = {"MVLEM_3D"}
 WALL_MACRO_ELEMENT_TYPES = (
@@ -78,6 +79,7 @@ SUPPORTED_ELEMENT_TYPES = (
     FRAME_ELEMENT_TYPES
     | QUAD_ELEMENT_TYPES
     | SOLID_ELEMENT_TYPES
+    | MASONRY_PANEL_ELEMENT_TYPES
     | WALL_MACRO_2D_ELEMENT_TYPES
     | TRUSS_ELEMENT_TYPES
     | SPECIAL_TWO_NODE_ELEMENT_TYPES
@@ -120,7 +122,9 @@ def _normalize_special_element_parameters(
     parameters: object,
 ) -> dict[str, object]:
     if element_type not in (
-        SPECIAL_TWO_NODE_ELEMENT_TYPES | BEAM_CONTACT_ELEMENT_TYPES
+        SPECIAL_TWO_NODE_ELEMENT_TYPES
+        | BEAM_CONTACT_ELEMENT_TYPES
+        | MASONRY_PANEL_ELEMENT_TYPES
     ):
         return {}
     if not isinstance(parameters, dict):
@@ -128,6 +132,44 @@ def _normalize_special_element_parameters(
             f"{element_type} special parameters must be an object."
         )
     raw = dict(parameters)
+
+    if element_type == "MasonPan12":
+        required = ("mat_1", "mat_2", "thick", "w_tot", "w_1")
+        missing = [key for key in required if key not in raw]
+        if missing:
+            raise ValueError(
+                "MasonPan12 requires parameter(s): "
+                + ", ".join(missing)
+                + "."
+            )
+        extra = sorted(set(raw) - set(required))
+        if extra:
+            raise ValueError(
+                "Unsupported MasonPan12 parameter(s): "
+                + ", ".join(extra)
+                + "."
+            )
+        result = {
+            "mat_1": _strict_int(raw["mat_1"], "MasonPan12 central material"),
+            "mat_2": _strict_int(raw["mat_2"], "MasonPan12 lateral material"),
+            "thick": float(raw["thick"]),
+            "w_tot": float(raw["w_tot"]),
+            "w_1": float(raw["w_1"]),
+        }
+        if int(result["mat_1"]) <= 0 or int(result["mat_2"]) <= 0:
+            raise ValueError("MasonPan12 material tags must be positive.")
+        for key in ("thick", "w_tot", "w_1"):
+            if not math.isfinite(float(result[key])):
+                raise ValueError(f"MasonPan12 {key} must be finite.")
+        if float(result["thick"]) <= 0.0:
+            raise ValueError("MasonPan12 thickness must be positive.")
+        if float(result["w_tot"]) <= 0.0:
+            raise ValueError("MasonPan12 total-width ratio must be positive.")
+        if not 0.0 < float(result["w_1"]) <= 1.0:
+            raise ValueError(
+                "MasonPan12 central-width ratio must satisfy 0 < w_1 <= 1."
+            )
+        return result
 
     if element_type == "CatenaryCable":
         required = (
@@ -944,6 +986,7 @@ class Element:
     wall_poisson: float = 0.25
     beam_center_ratio: float = 0.4
     special_parameters: dict[str, object] = field(default_factory=dict)
+    additional_node_tags: tuple[int, ...] = ()
 
     @property
     def is_shell(self) -> bool:
@@ -969,8 +1012,38 @@ class Element:
     def is_wall_macro(self) -> bool:
         return self.element_type in WALL_MACRO_ELEMENT_TYPES
 
+    @property
+    def is_masonry_panel(self) -> bool:
+        return self.element_type in MASONRY_PANEL_ELEMENT_TYPES
+
     def node_tags(self) -> tuple[int, ...]:
-        if self.is_solid:
+        if self.is_masonry_panel:
+            return (
+                self.i,
+                self.j,
+                *(int(value) for value in self.additional_node_tags),
+            )
+        if self.is_masonry_panel:
+            values = tuple(
+                _strict_int(value, "Masonry panel node tag")
+                for value in self.additional_node_tags
+            )
+            if len(values) != 10:
+                raise ValueError(
+                    f"{self.element_type} requires twelve node tags."
+                )
+            self.additional_node_tags = values
+            if len(set(self.node_tags())) != 12:
+                raise ValueError(
+                    f"{self.element_type} requires twelve distinct node tags."
+                )
+            self.k = None
+            self.l = None
+            self.m = None
+            self.n = None
+            self.p = None
+            self.q = None
+        elif self.is_solid:
             tail = (self.k, self.l, self.m, self.n, self.p, self.q)
             if any(value is None for value in tail):
                 return (self.i, self.j)
@@ -1150,6 +1223,9 @@ class Element:
             self.n = None
             self.p = None
             self.q = None
+
+        if not self.is_masonry_panel:
+            self.additional_node_tags = ()
 
         if not self.is_shell:
             self.shell_corotational = False
@@ -1712,6 +1788,7 @@ class StructuralModel:
         wall_poisson: float = 0.25,
         beam_center_ratio: float = 0.4,
         special_parameters: dict[str, object] | None = None,
+        additional_node_tags: tuple[int, ...] | list[int] = (),
     ) -> Element:
         tag = _strict_int(tag, "Element tag")
         i = _strict_int(i, "Element I-node tag")
@@ -1728,8 +1805,19 @@ class StructuralModel:
         is_embedded = element_type in EMBEDDED_ELEMENT_TYPES
         is_solid = element_type in SOLID_ELEMENT_TYPES
         is_beam_contact = element_type in BEAM_CONTACT_ELEMENT_TYPES
+        is_masonry_panel = element_type in MASONRY_PANEL_ELEMENT_TYPES
         raw_nodes = [i, j]
-        if is_solid:
+        if is_masonry_panel:
+            extra_nodes = tuple(
+                _strict_int(value, "Masonry panel node tag")
+                for value in additional_node_tags
+            )
+            if len(extra_nodes) != 10:
+                raise ValueError(
+                    f"{element_type} element {tag} requires twelve nodes."
+                )
+            raw_nodes.extend(extra_nodes)
+        elif is_solid:
             tail = (k, l, m, n, p, q)
             if any(value is None for value in tail):
                 raise ValueError(
@@ -1751,6 +1839,11 @@ class StructuralModel:
             l = _strict_int(l, "Element L-node tag")
             raw_nodes.extend([k, l])
         if len(set(raw_nodes)) != len(raw_nodes):
+            if is_masonry_panel:
+                raise ValueError(
+                    f"{element_type} element {tag} requires twelve distinct "
+                    "node tags."
+                )
             if is_solid:
                 raise ValueError(
                     f"{element_type} element {tag} requires eight distinct "
@@ -2081,6 +2174,7 @@ class StructuralModel:
             wall_poisson=wall_poisson,
             beam_center_ratio=beam_center_ratio,
             special_parameters=normalized_special,
+            additional_node_tags=tuple(additional_node_tags),
         )
         self.elements[tag] = ele
         return ele
@@ -2652,6 +2746,10 @@ class StructuralModel:
                     wall_poisson=source.wall_poisson,
                     beam_center_ratio=source.beam_center_ratio,
                     special_parameters=dict(source.special_parameters),
+                    additional_node_tags=tuple(
+                        node_map[tag]
+                        for tag in source.additional_node_tags
+                    ),
                 )
                 created_elements.add(new_tag)
 
@@ -2739,6 +2837,9 @@ class StructuralModel:
                     "wall_poisson": element.wall_poisson,
                     "beam_center_ratio": element.beam_center_ratio,
                     "special_parameters": dict(element.special_parameters),
+                    "additional_node_tags": list(
+                        element.additional_node_tags
+                    ),
                 }
                 for element in sorted(self.elements.values(), key=lambda item: item.tag)
             ],
@@ -2894,6 +2995,9 @@ class StructuralModel:
                 ),
                 special_parameters=dict(
                     item.get("special_parameters", {})
+                ),
+                additional_node_tags=tuple(
+                    item.get("additional_node_tags", ())
                 ),
             )
 
