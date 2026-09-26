@@ -30,6 +30,7 @@ from openseespy_studio.generator import (
     frame_grid_coordinates,
     frame_slab_count,
     frame_joint_connection_count,
+    frame_load_storeys,
     generate_frame_grid,
     generate_frame_project,
     to_openseespy,
@@ -342,6 +343,7 @@ def test_frame_wizard_member_page_filters_sections_by_formulation():
             wizard.floors_page_id,
             wizard.foundation_page_id,
             wizard.bracing_page_id,
+            wizard.loads_page_id,
         ]
         assert wizard.column_section.findData(1) >= 0
         assert wizard.column_section.findData(2) < 0
@@ -2660,3 +2662,203 @@ def test_frame_brace_panel_override_validation_rejects_duplicates():
     )
     with pytest.raises(ValueError, match="duplicate panel keys"):
         validate_frame_grid_spec(spec)
+
+
+def test_frame_wizard_load_page_maps_static_udl_and_storey_scope():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.load_mode.setCurrentIndex(
+            wizard.load_mode.findData("Static")
+        )
+        wizard.load_beam_udl.setChecked(True)
+        wizard.load_beam_scope.setCurrentIndex(
+            wizard.load_beam_scope.findData("X")
+        )
+        wizard.load_beam_udl_coordinate.setCurrentIndex(
+            wizard.load_beam_udl_coordinate.findData("global")
+        )
+        wizard.load_udl_x.setValue(0.0)
+        wizard.load_udl_y.setValue(0.0)
+        wizard.load_udl_z.setValue(-12.5)
+
+        for row in range(wizard.load_storey_table.rowCount()):
+            wizard.load_storey_table.item(row, 1).setCheckState(
+                Qt.Checked if row == 1 else Qt.Unchecked
+            )
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.load_mode == "Static"
+        assert not spec.load_self_weight
+        assert spec.load_beam_udl
+        assert spec.load_beam_scope == "X"
+        assert spec.load_beam_udl_coordinate_system == "global"
+        assert spec.load_beam_udl_vector == pytest.approx(
+            (0.0, 0.0, -12.5)
+        )
+        assert spec.load_storeys == (2,)
+        assert frame_load_storeys(spec) == (2,)
+        assert "Beam UDL" in wizard.load_summary.text()
+        assert "storeys 2" in wizard.load_summary.text()
+        assert wizard.loads_scroll.widgetResizable()
+        assert "Load definition ready" in wizard.load_validation_status.text()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_load_page_planar_forces_x_beam_scope():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.load_mode.setCurrentIndex(
+            wizard.load_mode.findData("Static")
+        )
+        wizard.load_beam_udl.setChecked(True)
+        _APP.processEvents()
+        assert wizard.dimension.currentData() == "2D"
+        assert wizard.load_beam_scope.currentData() == "X"
+        assert not wizard.load_beam_scope.isEnabled()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_static_load_validation_rejects_zero_udl():
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        load_mode="Static",
+        load_beam_udl=True,
+        load_beam_scope="X",
+        load_beam_udl_vector=(0.0, 0.0, 0.0),
+    )
+    with pytest.raises(ValueError, match="cannot be zero"):
+        validate_frame_grid_spec(spec)
+
+
+def test_frame_static_load_validation_rejects_macro_joint_core():
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        joint_model="Joint2D",
+        joint_material_tag=9,
+        load_mode="Static",
+        load_beam_udl=True,
+        load_beam_scope="X",
+        load_beam_udl_vector=(0.0, 0.0, -1.0),
+    )
+    with pytest.raises(ValueError, match="automatic loads"):
+        validate_frame_grid_spec(spec)
+
+
+def test_generate_frame_udl_targets_final_chevron_split_beam_segments():
+    project = _brace_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=6.0,
+        dz=4.0,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        brace_mode="Truss",
+        brace_pattern="VUpper",
+        brace_material_tag=81,
+        brace_area=0.01,
+        load_mode="Static",
+        load_beam_udl=True,
+        load_beam_scope="X",
+        load_storeys=(1,),
+        load_beam_udl_vector=(0.0, 0.0, -15.0),
+        load_beam_udl_coordinate_system="global",
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["brace_member_splits"] == 1
+    assert result["beam_udl_loads"] == 2
+    beam_segments = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "beam-2d"
+    ]
+    assert len(beam_segments) == 2
+    load_targets = {
+        load.element_tag
+        for load in project.element_loads.values()
+        if load.load_type == "Uniform"
+    }
+    assert load_targets == {element.tag for element in beam_segments}
+    assert len(project.time_series) == 1
+    assert len(project.load_patterns) == 1
+
+
+def test_generate_frame_self_weight_uses_density_override_after_member_split():
+    project = _brace_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=6.0,
+        dz=4.0,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        brace_mode="Truss",
+        brace_pattern="KLeft",
+        brace_material_tag=81,
+        brace_area=0.01,
+        load_mode="Static",
+        load_self_weight=True,
+        load_self_weight_density=7850.0,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    # K bracing splits one column: 3 column segments + 1 beam.
+    assert result["brace_member_splits"] == 1
+    assert result["self_weight_loads"] == 4
+    self_weight = [
+        load
+        for load in project.element_loads.values()
+        if load.load_type == "SelfWeight"
+    ]
+    assert len(self_weight) == 4
+    assert all(
+        load.density_override == pytest.approx(7850.0)
+        for load in self_weight
+    )
+
+
+def test_frame_wizard_self_weight_without_density_reports_section_problem():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.load_mode.setCurrentIndex(
+            wizard.load_mode.findData("Static")
+        )
+        wizard.load_self_weight.setChecked(True)
+        wizard.load_self_weight_density.setValue(0.0)
+        _APP.processEvents()
+        assert "density" in wizard._load_validation_error().lower()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_main_window_frame_wizard_reports_automatic_loads():
+    source = inspect.getsource(MainWindow._generate_frame_grid)
+    assert '"self_weight_loads"' in source
+    assert '"beam_udl_loads"' in source
+    assert "beam UDL(s)" in source
