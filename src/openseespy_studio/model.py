@@ -1023,27 +1023,7 @@ class Element:
                 self.j,
                 *(int(value) for value in self.additional_node_tags),
             )
-        if self.is_masonry_panel:
-            values = tuple(
-                _strict_int(value, "Masonry panel node tag")
-                for value in self.additional_node_tags
-            )
-            if len(values) != 10:
-                raise ValueError(
-                    f"{self.element_type} requires twelve node tags."
-                )
-            self.additional_node_tags = values
-            if len(set(self.node_tags())) != 12:
-                raise ValueError(
-                    f"{self.element_type} requires twelve distinct node tags."
-                )
-            self.k = None
-            self.l = None
-            self.m = None
-            self.n = None
-            self.p = None
-            self.q = None
-        elif self.is_solid:
+        if self.is_solid:
             tail = (self.k, self.l, self.m, self.n, self.p, self.q)
             if any(value is None for value in tail):
                 return (self.i, self.j)
@@ -1052,7 +1032,11 @@ class Element:
                 self.j,
                 *(int(value) for value in tail if value is not None),
             )
-        if self.is_quad or self.is_embedded or self.element_type in BEAM_CONTACT_ELEMENT_TYPES:
+        if (
+            self.is_quad
+            or self.is_embedded
+            or self.element_type in BEAM_CONTACT_ELEMENT_TYPES
+        ):
             if self.k is None or self.l is None:
                 return (self.i, self.j)
             return (self.i, self.j, self.k, self.l)
@@ -1181,7 +1165,27 @@ class Element:
                     "Shell local X vector cannot be zero."
                 )
             self.shell_local_x = values
-        if self.is_solid:
+        if self.is_masonry_panel:
+            values = tuple(
+                _strict_int(value, "Masonry panel node tag")
+                for value in self.additional_node_tags
+            )
+            if len(values) != 10:
+                raise ValueError(
+                    f"{self.element_type} requires twelve node tags."
+                )
+            self.additional_node_tags = values
+            if len(set((self.i, self.j, *values))) != 12:
+                raise ValueError(
+                    f"{self.element_type} requires twelve distinct node tags."
+                )
+            self.k = None
+            self.l = None
+            self.m = None
+            self.n = None
+            self.p = None
+            self.q = None
+        elif self.is_solid:
             tail = (self.k, self.l, self.m, self.n, self.p, self.q)
             if any(value is None for value in tail):
                 raise ValueError(
