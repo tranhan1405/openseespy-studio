@@ -71,7 +71,7 @@ def _require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 PROJECT_FORMAT = "openseespy-studio"
-PROJECT_FORMAT_VERSION = 52
+PROJECT_FORMAT_VERSION = 53
 
 MATERIAL_CATEGORIES: dict[str, str] = {
     "Elastic": "General",
@@ -4167,6 +4167,9 @@ SOLUTION_RESULT_TYPES = {
     "NodalDisplacement",
     "NodalReaction",
     "MemberForce",
+    "MasonryPanelShear",
+    "MasonryStrutForce",
+    "MasonryStrutStrain",
     "ShellForce",
     "ShellDeformation",
     "ShellDisplacement",
