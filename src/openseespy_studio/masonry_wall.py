@@ -27,6 +27,11 @@ class MasonryWallSpec:
     masonpan_w_tot: float = 0.25
     masonpan_w1: float = 0.50
 
+    # OpenSees Masonry material strategy.
+    material_strategy: str = "CreateCustom"
+    existing_material_tag: int | None = None
+    existing_lateral_material_tag: int | None = None
+
     # OpenSees Masonry material (Crisafulli/Torrisi).
     Fm: float = -5.0e6
     Ft: float = 0.20e6
@@ -69,6 +74,11 @@ def validate_masonry_wall_spec(spec: MasonryWallSpec) -> None:
         raise ValueError("Masonry wall width, height and thickness must be positive.")
     if not math.isfinite(float(spec.origin_x)) or not math.isfinite(float(spec.origin_y)):
         raise ValueError("Masonry wall origin must be finite.")
+
+    if str(spec.material_strategy) not in {"CreateCustom", "UseExisting"}:
+        raise ValueError(
+            "Masonry material strategy must be CreateCustom or UseExisting."
+        )
 
     if float(spec.Fm) >= 0.0:
         raise ValueError("Masonry compression strength Fm must be negative.")
@@ -153,6 +163,26 @@ def _material_source() -> dict[str, object]:
     }
 
 
+def _require_masonry_material(
+    project: ProjectDatabase,
+    tag: int | None,
+    *,
+    role: str,
+) -> int:
+    if tag is None:
+        raise ValueError(f"{role} Masonry material is not selected.")
+    material_tag = int(tag)
+    material = project.materials.get(material_tag)
+    if material is None:
+        raise ValueError(f"{role} Masonry material {material_tag} does not exist.")
+    if material.material_type != "Masonry":
+        raise ValueError(
+            f"{role} material {material_tag} must be Masonry, got "
+            f"{material.material_type}."
+        )
+    return material_tag
+
+
 def _check_append_overlap(
     project: ProjectDatabase,
     points: list[tuple[float, float, float]],
@@ -224,16 +254,23 @@ def _build_equivalent_strut(
     project.model.nodes[node_tags[0]].fixity = (1, 1, 1)
     project.model.nodes[node_tags[1]].fixity = (1, 1, 1)
 
-    material_tag = _next_tags(project.materials, 1)[0]
-    project.add_material(
-        MaterialData(
-            material_tag,
-            f"{spec.name} · Masonry Strut",
-            "Masonry",
-            parameters=_material_parameters(spec),
-            source=_material_source(),
+    if str(spec.material_strategy) == "UseExisting":
+        material_tag = _require_masonry_material(
+            project,
+            spec.existing_material_tag,
+            role="Equivalent-strut",
         )
-    )
+    else:
+        material_tag = _next_tags(project.materials, 1)[0]
+        project.add_material(
+            MaterialData(
+                material_tag,
+                f"{spec.name} · Masonry Strut",
+                "Masonry",
+                parameters=_material_parameters(spec),
+                source=_material_source(),
+            )
+        )
 
     diagonal = math.hypot(width, height)
     area = float(spec.thickness) * float(spec.strut_width_ratio) * diagonal
@@ -321,27 +358,43 @@ def _build_masonpan12(
     for tag in node_tags[:4]:
         project.model.nodes[tag].fixity = (1, 1, 1)
 
-    central_tag, lateral_tag = _next_tags(project.materials, 2)
-    params = _material_parameters(spec)
-    source = _material_source()
-    project.add_material(
-        MaterialData(
-            central_tag,
-            f"{spec.name} · Masonry Central Strut",
-            "Masonry",
-            parameters=params,
-            source=source,
+    if str(spec.material_strategy) == "UseExisting":
+        central_tag = _require_masonry_material(
+            project,
+            spec.existing_material_tag,
+            role="Central-strut",
         )
-    )
-    project.add_material(
-        MaterialData(
-            lateral_tag,
-            f"{spec.name} · Masonry Lateral Struts",
-            "Masonry",
-            parameters=params,
-            source=source,
+        lateral_tag = _require_masonry_material(
+            project,
+            (
+                spec.existing_lateral_material_tag
+                if spec.existing_lateral_material_tag is not None
+                else spec.existing_material_tag
+            ),
+            role="Lateral-strut",
         )
-    )
+    else:
+        central_tag, lateral_tag = _next_tags(project.materials, 2)
+        params = _material_parameters(spec)
+        source = _material_source()
+        project.add_material(
+            MaterialData(
+                central_tag,
+                f"{spec.name} · Masonry Central Strut",
+                "Masonry",
+                parameters=params,
+                source=source,
+            )
+        )
+        project.add_material(
+            MaterialData(
+                lateral_tag,
+                f"{spec.name} · Masonry Lateral Struts",
+                "Masonry",
+                parameters=params,
+                source=source,
+            )
+        )
 
     element_tag = project.next_element_tag()
     while element_tag in project.model.elements or element_tag in project.connections:
