@@ -1450,6 +1450,36 @@ class _Importer:
             self.count("Elements")
             return
 
+        if kind == "MasonPan12":
+            if len(args) != 19:
+                raise ValueError(
+                    "MasonPan12 needs 12 node tags, two material tags, "
+                    "thickness, w_tot and w_1."
+                )
+            masonry_nodes = tuple(int(value) for value in args[1:14])
+            material_1 = int(args[14])
+            material_2 = int(args[15])
+            thickness = float(args[16])
+            w_tot = float(args[17])
+            w_1 = float(args[18])
+            self.project.model.add_element(
+                tag,
+                masonry_nodes[0],
+                masonry_nodes[1],
+                element_type="MasonPan12",
+                group="masonry",
+                special_parameters={
+                    "mat_1": material_1,
+                    "mat_2": material_2,
+                    "thick": thickness,
+                    "w_tot": w_tot,
+                    "w_1": w_1,
+                },
+                additional_node_tags=masonry_nodes[2:],
+            )
+            self.count("Elements")
+            return
+
         if kind == "MEFI":
             if len(args) < 11:
                 raise ValueError(
