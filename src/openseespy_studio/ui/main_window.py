@@ -3777,8 +3777,6 @@ class MainWindow(QMainWindow):
         )
         add_group(
             home,
-            "Modify",        add_group(
-            home,
             "Modify",
             large=("move",),
             small=("copy", "rotate", "mirror", "delete"),
@@ -3950,7 +3948,7 @@ class MainWindow(QMainWindow):
         loads_page.finish()
         self.ribbon_tabs.addTab(loads_page, "Loads")
 
-        analysis_page = RibbonPage()        analysis_page = RibbonPage()
+        analysis_page = RibbonPage()
         add_group(
             analysis_page,
             "Analysis Wizard",
@@ -4022,8 +4020,6 @@ class MainWindow(QMainWindow):
         self._sync_analysis_ribbon_cpu_controls()
 
         add_group(
-            analysis_page,
-            "Post-processing",        add_group(
             analysis_page,
             "Post-processing",
             large=("plot",),
@@ -6794,7 +6790,7 @@ class MainWindow(QMainWindow):
             item.setData(0, Qt.UserRole, ("transformation", tag))
             transformations_root.addChild(item)
 
-        constrained_nodes = {        constrained_nodes = {
+        constrained_nodes = {
             tag: classify_fixity(
                 node.fixity,
                 ndm=self.model.ndm,
