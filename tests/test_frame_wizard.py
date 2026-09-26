@@ -9,7 +9,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QComboBox
+from PySide6.QtWidgets import QApplication, QComboBox, QWizard
 
 from openseespy_studio.frame_setup import prepare_frame_grid
 from openseespy_studio.generator import (
@@ -346,6 +346,7 @@ def test_frame_wizard_member_page_filters_sections_by_formulation():
             wizard.bracing_page_id,
             wizard.loads_page_id,
             wizard.mass_page_id,
+            wizard.review_page_id,
         ]
         assert wizard.column_section.findData(1) >= 0
         assert wizard.column_section.findData(2) < 0
@@ -3301,6 +3302,105 @@ def test_frame_wizard_modal_controls_map_to_spec_and_summary():
         assert "8 mode(s)" in wizard.mass_summary.text()
         assert "Modal analysis" in wizard.mass_summary.text()
         assert "Mass definition ready" in wizard.mass_validation_status.text()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_final_review_page_is_live_and_ready_for_valid_model():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.show()
+        _APP.processEvents()
+        wizard.setCurrentId(wizard.review_page_id)
+        _APP.processEvents()
+
+        assert wizard.currentId() == wizard.review_page_id
+        assert wizard.review_scroll.widgetResizable()
+        assert wizard.review_preview.objectName() == "frame-wizard-final-preview"
+        assert "2D X-Z frame" in wizard.review_geometry.text()
+        assert "Members:" in wizard.review_modeling.text()
+        assert "Static loads:" in wizard.review_loading.text()
+        assert "New model" in wizard.review_impact.text()
+        assert "Ready to generate" in wizard.review_validation_status.text()
+        assert wizard.button(QWizard.FinishButton).text() == "Generate Model"
+        assert wizard.validateCurrentPage()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_final_review_warns_before_replacing_existing_fe_domain():
+    project = _member_project()
+    project.model.add_node(100, 0.0, 0.0, 0.0)
+    project.model.add_node(101, 1.0, 0.0, 0.0)
+    project.model.add_element(
+        100,
+        100,
+        101,
+        section_tag=1,
+    )
+    wizard = FrameWizard(project)
+    try:
+        wizard.show()
+        _APP.processEvents()
+        wizard.setCurrentId(wizard.review_page_id)
+        _APP.processEvents()
+
+        impact = wizard.review_impact.text()
+        assert "Replacement mode" in impact
+        assert "2 node(s)" in impact
+        assert "1 element(s)" in impact
+        assert "Material and section libraries are preserved" in impact
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_final_review_blocks_generate_for_invalid_definition():
+    wizard = FrameWizard(ProjectDatabase())
+    try:
+        wizard.show()
+        _APP.processEvents()
+        wizard.setCurrentId(wizard.review_page_id)
+        _APP.processEvents()
+
+        assert not wizard.validateCurrentPage()
+        assert "Model definition needs attention" in (
+            wizard.review_validation_status.text()
+        )
+        assert not wizard.button(QWizard.FinishButton).isEnabled()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_final_review_updates_3d_system_summary():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.dimension.setCurrentIndex(
+            wizard.dimension.findData("3D")
+        )
+        wizard.brace_mode.setCurrentIndex(
+            wizard.brace_mode.findData("Truss")
+        )
+        if wizard.brace_material.count() > 1:
+            wizard.brace_material.setCurrentIndex(1)
+        wizard.brace_area.setValue(0.01)
+        wizard._refresh_brace_scope_tables()
+        _APP.processEvents()
+
+        wizard.show()
+        wizard.setCurrentId(wizard.review_page_id)
+        _APP.processEvents()
+
+        assert "3D frame" in wizard.review_geometry.text()
+        assert "Bracing:" in wizard.review_modeling.text()
+        assert wizard.review_preview.dimension == "3D"
     finally:
         wizard.close()
         wizard.deleteLater()
