@@ -5061,10 +5061,7 @@ class FrameWizard(QWizard):
         )
         self._write_user_presets(presets)
         target = f"user:{desired}"
-        self._remember_recent_preset(target)
-        self.active_preset_name = desired
         self._select_preset_token(target)
-        self._update_review_page()
         return desired
 
     def _duplicate_selected_preset(self, *_args) -> None:
@@ -5210,10 +5207,7 @@ class FrameWizard(QWizard):
         )
         self._write_user_presets(users)
         token = f"user:{name}"
-        self._remember_recent_preset(token)
-        self.active_preset_name = name
         self._select_preset_token(token)
-        self._update_review_page()
         return name
 
     def _import_preset_json(self, *_args) -> None:
@@ -5227,15 +5221,18 @@ class FrameWizard(QWizard):
             return
         try:
             name = self._import_preset_from_path(path)
-            resolved = self._preset_for_token(f"user:{name}")
-            issues: list[str] = []
-            if resolved is not None:
-                issues = frame_preset_dependency_issues(
-                    self.project,
-                    frame_spec_from_preset(resolved[1]),
-                )
+            token = f"user:{name}"
+            resolved = self._preset_for_token(token)
+            if resolved is None:
+                raise ValueError("Imported preset could not be resolved.")
+            issues = self._load_preset_data(
+                resolved[1],
+                name=name,
+            )
+            self._remember_recent_preset(token)
+            self._select_preset_token(token)
             self.preset_status.setText(
-                f"Imported <b>{name}</b>."
+                f"Imported and loaded <b>{name}</b>."
                 + (
                     "<br>"
                     + "<br>".join(
@@ -5686,24 +5683,14 @@ class FrameWizard(QWizard):
 
     def _load_selected_preset(self, *_args) -> None:
         token = self.preset_combo.currentData()
-        if not token:
+        resolved = self._preset_for_token(token)
+        if resolved is None:
             return
-        token = str(token)
-        if token.startswith("builtin:"):
-            name = token.split(":", 1)[1]
-            preset = BUILTIN_FRAME_PRESETS.get(name)
-        elif token.startswith("user:"):
-            name = token.split(":", 1)[1]
-            preset = self._user_presets().get(name)
-        else:
-            return
-        if preset is None:
-            self.preset_status.setText(
-                "<b>Preset not found.</b>"
-            )
-            return
+        name, preset, _ = resolved
         try:
             self._load_preset_data(preset, name=name)
+            self._remember_recent_preset(str(token))
+            self._select_preset_token(str(token))
         except (TypeError, ValueError) as exc:
             self.preset_status.setText(
                 "<b>Preset could not be loaded</b><br>" + str(exc)
