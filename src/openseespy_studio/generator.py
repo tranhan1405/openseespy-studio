@@ -8,6 +8,7 @@ from .beam_loads import (
     resolve_element_load_local_end_components,
     resolve_self_weight_local,
 )
+from .mass_source import apply_mass_source
 from .units import UnitSystem
 from .model import (
     BEAM_CONTACT_ELEMENT_TYPES,
@@ -26,7 +27,7 @@ from .model import (
     WALL_MACRO_ELEMENT_TYPES,
     StructuralModel,
 )
-from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MaterialData, FrictionModelData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, MEMBRANE_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
+from .project import ELEMENT_BACKED_CONNECTION_TYPES, MATERIAL_PARAMETER_ORDER, AnalysisSettingsData, ConnectionData, ConstraintData, ElementLoadData, FiberComponentData, LoadPatternData, MassSourceData, MaterialData, FrictionModelData, NDMaterialData, NodalLoadData, PrescribedDisplacementData, RecorderData, SHELL_SECTION_TYPES, MEMBRANE_SECTION_TYPES, SectionData, TimeSeriesData, TransformationData, material_parameter_kind, nd_material_parameter_kind, resolve_transformation_vecxz
 from .section_response import automatic_moment_curvature_spec, build_section_response_specs
 from .response_spectrum import build_period_grid
 
@@ -132,6 +133,12 @@ class FrameGridSpec:
     load_floor_area: bool = False
     load_floor_area_pressure: float = 0.0
     load_floor_area_direction: str = "X"
+    mass_source_mode: str = "None"
+    mass_include_self: bool = True
+    mass_include_static_loads: bool = True
+    mass_static_load_factor: float = 1.0
+    mass_gravity_axis: int = 3
+    mass_directions: tuple[int, ...] = (1, 2)
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -903,6 +910,77 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
         raise ValueError(
             "Frame Wizard floor area load direction must be X or Y."
         )
+    mass_mode = str(spec.mass_source_mode or "None")
+    if mass_mode not in {"None", "Source"}:
+        raise ValueError(
+            f"Frame Wizard mass source mode {mass_mode!r} is not supported."
+        )
+    mass_factor = float(spec.mass_static_load_factor)
+    if not math.isfinite(mass_factor) or mass_factor < 0.0:
+        raise ValueError(
+            "Frame Wizard mass-source static load factor must be finite and "
+            "non-negative."
+        )
+    mass_axis = int(spec.mass_gravity_axis)
+    if mass_axis not in (1, 2, 3):
+        raise ValueError(
+            "Frame Wizard mass-source gravity axis must be X, Y, or Z."
+        )
+    mass_directions = tuple(
+        sorted({int(value) for value in spec.mass_directions})
+    )
+    if mass_directions and any(
+        value not in (1, 2, 3) for value in mass_directions
+    ):
+        raise ValueError(
+            "Frame Wizard mass-source directions must be translational DOFs "
+            "1, 2, or 3."
+        )
+    if mass_mode == "Source":
+        if not mass_directions:
+            raise ValueError(
+                "Frame Wizard mass source needs at least one direction."
+            )
+        if (
+            not bool(spec.mass_include_self)
+            and not bool(spec.mass_include_static_loads)
+        ):
+            raise ValueError(
+                "Frame Wizard mass source must include structural self mass "
+                "and/or the generated static load pattern."
+            )
+        if bool(spec.mass_include_static_loads):
+            if load_mode != "Static":
+                raise ValueError(
+                    "Frame Wizard mass source cannot convert static loads "
+                    "because automatic static load generation is disabled."
+                )
+            if mass_factor <= 0.0:
+                raise ValueError(
+                    "Frame Wizard mass-source static load factor must be "
+                    "positive when static loads are included."
+                )
+        if (
+            str(spec.diaphragm_mode or "None") == "Rigid"
+            and float(spec.diaphragm_floor_mass) > 0.0
+        ):
+            raise ValueError(
+                "Automatic Mass Source replaces selected nodal mass and cannot "
+                "be combined with explicit rigid-diaphragm floor mass. Set the "
+                "floor mass to zero and derive mass from gravity loads, or "
+                "disable the automatic Mass Source."
+            )
+        if (
+            str(spec.diaphragm_mode or "None") == "Shell"
+            and float(spec.slab_mass_per_area) > 0.0
+        ):
+            raise ValueError(
+                "Automatic Mass Source replaces selected nodal mass and cannot "
+                "be combined with additional slab nodal mass. Set slab mass "
+                "per area to zero and derive mass from gravity loads, or "
+                "disable the automatic Mass Source."
+            )
+
     if load_mode == "Static":
         if joint_model in macro_joint_models:
             raise ValueError(
@@ -2592,6 +2670,7 @@ def apply_frame_static_loads(
     if str(spec.load_mode or "None") != "Static":
         return {
             "load_patterns": 0,
+            "load_pattern_tag": 0,
             "self_weight_loads": 0,
             "beam_udl_loads": 0,
             "floor_area_loads": 0,
@@ -2707,9 +2786,58 @@ def apply_frame_static_loads(
 
     return {
         "load_patterns": 1,
+        "load_pattern_tag": int(pattern_tag),
         "self_weight_loads": self_weight_count,
         "beam_udl_loads": udl_count,
         "floor_area_loads": floor_area_count,
+    }
+
+
+def apply_frame_mass_source(
+    project,
+    spec: FrameGridSpec,
+    *,
+    static_pattern_tag: int | None = None,
+) -> dict[str, int | float]:
+    """Create and apply one FEWIZ mass source after frame/load generation."""
+    validate_frame_grid_spec(spec)
+    if str(spec.mass_source_mode or "None") != "Source":
+        return {
+            "mass_sources": 0,
+            "mass_source_tag": 0,
+            "mass_nodes": 0,
+            "generated_nodal_mass": 0.0,
+        }
+
+    load_factors: dict[int, float] = {}
+    if bool(spec.mass_include_static_loads):
+        if static_pattern_tag is None or int(static_pattern_tag) <= 0:
+            raise ValueError(
+                "Frame Wizard mass source expected the generated static load "
+                "pattern but no valid pattern tag was produced."
+            )
+        load_factors[int(static_pattern_tag)] = float(
+            spec.mass_static_load_factor
+        )
+
+    source_tag = max(project.mass_sources, default=0) + 1
+    source = MassSourceData(
+        tag=source_tag,
+        name="Frame Wizard seismic mass",
+        include_self_mass=bool(spec.mass_include_self),
+        load_factors=load_factors,
+        gravity_axis=int(spec.mass_gravity_axis),
+        directions=tuple(
+            sorted({int(value) for value in spec.mass_directions})
+        ),
+    )
+    project.add_mass_source(source)
+    summary = apply_mass_source(project, source)
+    return {
+        "mass_sources": 1,
+        "mass_source_tag": int(source_tag),
+        "mass_nodes": int(summary.active_nodes),
+        "generated_nodal_mass": float(summary.total_mass),
     }
 
 
@@ -2943,8 +3071,21 @@ def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
     if str(spec.foundation_mode or "Direct") == "Springs":
         result.update(apply_frame_foundation_springs(project, spec))
 
+    static_pattern_tag: int | None = None
     if str(spec.load_mode or "None") == "Static":
-        result.update(apply_frame_static_loads(project, spec))
+        load_result = apply_frame_static_loads(project, spec)
+        result.update(load_result)
+        tag = int(load_result.get("load_pattern_tag", 0))
+        static_pattern_tag = tag if tag > 0 else None
+
+    if str(spec.mass_source_mode or "None") == "Source":
+        result.update(
+            apply_frame_mass_source(
+                project,
+                spec,
+                static_pattern_tag=static_pattern_tag,
+            )
+        )
     return result
 
 
