@@ -87,6 +87,7 @@ from ..model import (
     CONTINUUM_QUAD_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     FRICTION_BEARING_ELEMENT_TYPES,
+    MASONRY_PANEL_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
     TRUSS_ELEMENT_TYPES,
@@ -10928,6 +10929,60 @@ class MainWindow(QMainWindow):
                             "Edit",
                             "Macro-fiber layout is managed by the RC Wall "
                             "Wizard / project data.",
+                        ),
+                    ],
+                    context={"kind": "element", "tag": int(tag)},
+                )
+                return
+
+            if element.element_type in MASONRY_PANEL_ELEMENT_TYPES:
+                p = element.special_parameters
+                mat_1_tag = int(p["mat_1"])
+                mat_2_tag = int(p["mat_2"])
+                mat_1 = self.project.materials.get(mat_1_tag)
+                mat_2 = self.project.materials.get(mat_2_tag)
+                mat_1_text = (
+                    f"{mat_1_tag} - {mat_1.name} ({mat_1.material_type})"
+                    if mat_1 is not None
+                    else f"{mat_1_tag} (missing)"
+                )
+                mat_2_text = (
+                    f"{mat_2_tag} - {mat_2.name} ({mat_2.material_type})"
+                    if mat_2 is not None
+                    else f"{mat_2_tag} (missing)"
+                )
+                self.properties_panel.set_properties(
+                    "Masonry Panel Element",
+                    [
+                        ("Tag", tag),
+                        ("Type", element.element_type),
+                        (
+                            "Nodes",
+                            ", ".join(map(str, element.node_tags())),
+                        ),
+                        (
+                            "Topology",
+                            "12-node panel · 6 diagonal struts "
+                            "(3 each direction)",
+                        ),
+                        ("Central strut material", mat_1_text),
+                        ("Lateral strut material", mat_2_text),
+                        ("Thickness", f"{float(p['thick']):g}"),
+                        (
+                            "Total strut width / diagonal",
+                            f"{float(p['w_tot']):g}",
+                        ),
+                        (
+                            "Central / total strut width",
+                            f"{float(p['w_1']):g}",
+                        ),
+                        ("Group", element.group),
+                        ("Section", "Not used by MasonPan12"),
+                        ("Transformation", "Internal to MasonPan12"),
+                        (
+                            "Edit",
+                            "Recreate / calibrate through Masonry Wall Wizard; "
+                            "materials remain editable in Material Library.",
                         ),
                     ],
                     context={"kind": "element", "tag": int(tag)},
