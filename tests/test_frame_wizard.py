@@ -16,6 +16,7 @@ from openseespy_studio.generator import (
     frame_diaphragm_count,
     frame_diaphragm_levels,
     frame_floor_levels,
+    frame_foundation_count,
     frame_grid_coordinates,
     frame_slab_count,
     frame_joint_connection_count,
@@ -329,6 +330,7 @@ def test_frame_wizard_member_page_filters_sections_by_formulation():
             wizard.members_page_id,
             wizard.joints_page_id,
             wizard.floors_page_id,
+            wizard.foundation_page_id,
         ]
         assert wizard.column_section.findData(1) >= 0
         assert wizard.column_section.findData(2) < 0
@@ -1711,3 +1713,209 @@ def test_frame_shell_asdshell_corotational_option_reaches_export():
     )
     assert "ops.element('ASDShellQ4'" in source
     assert "'-corotational'" in source
+
+
+def _foundation_project() -> ProjectDatabase:
+    project = _member_project()
+    for tag, stiffness in (
+        (61, 2.0e8),
+        (62, 3.0e8),
+        (63, 4.0e7),
+        (64, 2.5e8),
+        (65, 3.5e8),
+        (66, 5.0e7),
+    ):
+        project.add_material(
+            MaterialData(
+                tag=tag,
+                name=f"Foundation elastic {tag}",
+                material_type="Elastic",
+                parameters={"E": stiffness},
+                source={
+                    "response_quantity": "force_deformation",
+                    "parameter_dimensions": {"E": "stiffness"},
+                },
+            )
+        )
+    return project
+
+
+def test_frame_wizard_foundation_page_maps_planar_active_dofs():
+    wizard = FrameWizard(_foundation_project())
+    try:
+        assert wizard.foundation_mode.currentData() == "Direct"
+        wizard.foundation_mode.setCurrentIndex(
+            wizard.foundation_mode.findData("Springs")
+        )
+        for dof, tag in ((1, 61), (3, 62), (5, 63)):
+            combo = wizard.foundation_materials[dof - 1]
+            combo.setCurrentIndex(combo.findData(tag))
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.foundation_mode == "Springs"
+        assert spec.foundation_material_tags == (61, 0, 62, 0, 63, 0)
+        assert frame_foundation_count(spec) == 4
+        assert not wizard.base_support.isEnabled()
+        assert wizard.foundation_materials[0].isEnabled()
+        assert not wizard.foundation_materials[1].isEnabled()
+        assert wizard.foundation_materials[2].isEnabled()
+        assert not wizard.foundation_materials[3].isEnabled()
+        assert wizard.foundation_materials[4].isEnabled()
+        assert not wizard.foundation_materials[5].isEnabled()
+        assert "UX, UZ, RY" in wizard.foundation_summary.text()
+        assert "Foundation definition ready" in (
+            wizard.foundation_validation_status.text()
+        )
+        assert wizard.foundation_scroll.widgetResizable()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_foundation_spring_mode_requires_active_material():
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        foundation_mode="Springs",
+    )
+    with pytest.raises(ValueError, match="at least one active"):
+        validate_frame_grid_spec(spec)
+
+
+def test_frame_foundation_springs_reject_native_2d_joint_core_backend():
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        joint_model="Joint2D",
+        joint_material_tag=61,
+        joint_interface_material_tags=(0, 0, 0, 0),
+        foundation_mode="Springs",
+        foundation_material_tags=(61, 0, 62, 0, 63, 0),
+    )
+    with pytest.raises(ValueError, match="standard 3D/6DOF"):
+        validate_frame_grid_spec(spec)
+
+
+def test_generate_planar_foundation_springs_create_ground_nodes_and_zero_length():
+    project = _foundation_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        foundation_mode="Springs",
+        foundation_material_tags=(61, 0, 62, 0, 63, 0),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["foundation_connections"] == 2
+    assert result["foundation_ground_nodes"] == 2
+    assert result["foundation_constraints"] == 0
+    assert frame_foundation_count(spec) == 2
+
+    foundation = [
+        connection
+        for connection in project.connections.values()
+        if connection.name.startswith("Foundation spring")
+    ]
+    assert len(foundation) == 2
+    assert all(
+        connection.materials_by_dof == {1: 61, 3: 62, 5: 63}
+        for connection in foundation
+    )
+    assert all(connection.generated_ground_node is not None for connection in foundation)
+
+    base_tags = [1, 2]
+    assert all(
+        project.model.nodes[tag].fixity == (0, 1, 0, 1, 0, 1)
+        for tag in base_tags
+    )
+    ground_tags = [
+        int(connection.generated_ground_node)
+        for connection in foundation
+    ]
+    assert all(
+        project.model.nodes[tag].fixity == (1, 1, 1, 1, 1, 1)
+        for tag in ground_tags
+    )
+
+
+def test_generate_3d_foundation_springs_rigidly_tie_unsprung_dofs():
+    project = _foundation_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        foundation_mode="Springs",
+        foundation_material_tags=(61, 0, 62, 0, 0, 0),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["foundation_connections"] == 4
+    assert result["foundation_ground_nodes"] == 4
+    assert result["foundation_constraints"] == 4
+
+    rigid_transfers = [
+        constraint
+        for constraint in project.constraints.values()
+        if constraint.name.startswith("Foundation rigid transfer")
+    ]
+    assert len(rigid_transfers) == 4
+    assert all(
+        constraint.dofs == (2, 4, 5, 6)
+        for constraint in rigid_transfers
+    )
+
+    foundation = [
+        connection
+        for connection in project.connections.values()
+        if connection.name.startswith("Foundation spring")
+    ]
+    assert all(
+        connection.materials_by_dof == {1: 61, 3: 62}
+        for connection in foundation
+    )
+
+
+def test_frame_foundation_generator_rejects_missing_project_material():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        foundation_mode="Springs",
+        foundation_material_tags=(999, 0, 0, 0, 0, 0),
+    )
+    prepare_frame_grid(project, spec)
+    with pytest.raises(ValueError, match="do not exist"):
+        generate_frame_project(project, spec)
+
+
+def test_main_window_frame_wizard_reports_foundation_springs():
+    source = inspect.getsource(MainWindow._generate_frame_grid)
+    assert '"foundation_connections"' in source
+    assert "foundation spring connection(s)" in source
