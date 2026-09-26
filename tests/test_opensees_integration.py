@@ -4685,3 +4685,95 @@ print('FRAME_STATIC_LOADS_OK', ops.nodeDisp({top_right}, 3))
     )
     assert completed.returncode == 0, completed.stderr
     assert "FRAME_STATIC_LOADS_OK" in completed.stdout
+
+
+def test_frame_wizard_mass_to_modal_runs_eigen_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            990,
+            "Modal frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.5,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=990,
+        beam_section_tag=990,
+        load_mode="Static",
+        load_floor_area=True,
+        load_floor_area_pressure=1000.0,
+        load_floor_area_direction="X",
+        load_storeys=(1,),
+        mass_source_mode="Source",
+        mass_include_self=False,
+        mass_include_static_loads=True,
+        mass_static_load_factor=1.0,
+        mass_gravity_axis=3,
+        mass_directions=(1, 2),
+        modal_mode="Modal",
+        modal_num_modes=2,
+        modal_eigen_solver="-fullGenLapack",
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["mass_sources"] == 1
+    assert result["modal_analyses"] == 1
+    assert result["modal_results"] == 3
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        element_loads=project.element_loads,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    run_block = """
+ops.wipeAnalysis()
+_eigs = ops.eigen('-fullGenLapack', 2)
+if len(_eigs) != 2 or any(float(value) <= 0.0 for value in _eigs):
+    raise RuntimeError(f'Frame modal eigen failed: {_eigs}')
+print('FRAME_MODAL_OK', _eigs)
+"""
+    target = tmp_path / "frame-wizard-modal.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_MODAL_OK" in completed.stdout
