@@ -374,7 +374,7 @@ def test_masonpan12_rejects_incomplete_or_duplicate_topology():
         "w_tot": 0.25,
         "w_1": 0.50,
     }
-    with pytest.raises(ValueError, match="twelve node tags"):
+    with pytest.raises(ValueError, match="requires twelve nodes"):
         project.model.add_element(
             1,
             1,
