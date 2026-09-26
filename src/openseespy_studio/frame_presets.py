@@ -117,20 +117,68 @@ def unique_frame_preset_name(
     return f"{base} ({index})"
 
 
-def frame_spec_from_preset(data: dict[str, Any]) -> FrameGridSpec:
+def migrate_frame_preset(data: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade legacy Frame Wizard recipes to the current schema.
+
+    Schema 0 represents early/unversioned recipes. Those recipes may store
+    FrameGridSpec fields directly at the top level or under ``spec``. Current
+    schema recipes are returned normalized without discarding management
+    metadata such as ``managed_snapshot``.
+    """
     if not isinstance(data, dict):
         raise ValueError("Frame Wizard preset must be an object.")
     if str(data.get("kind", FRAME_PRESET_KIND)) != FRAME_PRESET_KIND:
         raise ValueError("This preset is not a Frame Wizard preset.")
-    version = int(data.get("schema_version", FRAME_PRESET_SCHEMA_VERSION))
-    if version != FRAME_PRESET_SCHEMA_VERSION:
+
+    raw_version = data.get("schema_version")
+    if raw_version is None:
+        version = (
+            FRAME_PRESET_SCHEMA_VERSION
+            if isinstance(data.get("spec"), dict)
+            else 0
+        )
+    else:
+        try:
+            version = int(raw_version)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Frame Wizard preset schema version must be an integer."
+            ) from exc
+
+    if version < 0 or version > FRAME_PRESET_SCHEMA_VERSION:
         raise ValueError(
             "Unsupported Frame Wizard preset schema version "
-            f"{version}; expected {FRAME_PRESET_SCHEMA_VERSION}."
+            f"{version}; expected 0..{FRAME_PRESET_SCHEMA_VERSION}."
         )
-    raw = data.get("spec")
+
+    migrated = dict(data)
+    if version == 0:
+        raw = data.get("spec")
+        if raw is None:
+            known = {item.name for item in fields(FrameGridSpec)}
+            raw = {
+                str(key): value
+                for key, value in data.items()
+                if str(key) in known
+            }
+        if not isinstance(raw, dict):
+            raise ValueError(
+                "Legacy Frame Wizard preset does not contain a valid spec."
+            )
+        migrated["spec"] = dict(raw)
+
+    raw = migrated.get("spec")
     if not isinstance(raw, dict):
         raise ValueError("Frame Wizard preset does not contain a spec object.")
+
+    migrated["kind"] = FRAME_PRESET_KIND
+    migrated["schema_version"] = FRAME_PRESET_SCHEMA_VERSION
+    return migrated
+
+
+def frame_spec_from_preset(data: dict[str, Any]) -> FrameGridSpec:
+    migrated = migrate_frame_preset(data)
+    raw = migrated["spec"]
 
     known = {item.name for item in fields(FrameGridSpec)}
     values = {
