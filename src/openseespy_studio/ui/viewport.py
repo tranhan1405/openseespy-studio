@@ -42,6 +42,7 @@ from ..deformed_geometry import (
 )
 from ..model import (
     EMBEDDED_ELEMENT_TYPES,
+    MASONRY_PANEL_ELEMENT_TYPES,
     QUAD_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SOLID_ELEMENT_TYPES,
@@ -2257,6 +2258,9 @@ class ModelViewport(QWidget):
     def _element_material_tag(self, element) -> int | None:
         if element.element_type in TRUSS_ELEMENT_TYPES:
             return element.truss_material_tag
+        if element.element_type in MASONRY_PANEL_ELEMENT_TYPES:
+            value = element.special_parameters.get("mat_1")
+            return None if value is None else int(value)
         if element.section_tag is None:
             return None
         section = self._sections.get(int(element.section_tag))
@@ -2279,6 +2283,8 @@ class ModelViewport(QWidget):
         return "uniform", (
             "solid"
             if element.element_type in SOLID_ELEMENT_TYPES
+            else "masonry"
+            if element.element_type in MASONRY_PANEL_ELEMENT_TYPES
             else "shell"
             if element.element_type in QUAD_ELEMENT_TYPES
             else "column"
@@ -2300,6 +2306,8 @@ class ModelViewport(QWidget):
             )
         if value == "solid":
             return "Solid / Brick"
+        if value == "masonry":
+            return "Masonry / Infill"
         if value == "shell":
             return "Shell / Surface"
         return "Column" if value == "column" else "Beam / Truss"
@@ -2924,7 +2932,9 @@ class ModelViewport(QWidget):
         for tag in tags:
             element = model.elements.get(int(tag))
             if element is None or element.element_type in (
-                QUAD_ELEMENT_TYPES | SOLID_ELEMENT_TYPES
+                QUAD_ELEMENT_TYPES
+                | SOLID_ELEMENT_TYPES
+                | MASONRY_PANEL_ELEMENT_TYPES
             ):
                 continue
             node_i = model.nodes.get(element.i)
@@ -2943,6 +2953,59 @@ class ModelViewport(QWidget):
             deep=True,
         )
         mesh.cell_data["element_tag"] = np.asarray(cell_tags, dtype=np.int64)
+        return mesh
+
+    @staticmethod
+    def _batched_masonry_panel_mesh(
+        model: StructuralModel,
+        tags,
+    ) -> object | None:
+        """Draw MasonPan12 perimeter and its six-strut schematic."""
+        points: list[tuple[float, float, float]] = []
+        lines: list[int] = []
+        cell_tags: list[int] = []
+        strut_pairs = (
+            (0, 6), (1, 5), (11, 7),
+            (3, 9), (2, 10), (4, 8),
+        )
+        for tag in tags:
+            element = model.elements.get(int(tag))
+            if (
+                element is None
+                or element.element_type not in MASONRY_PANEL_ELEMENT_TYPES
+            ):
+                continue
+            node_tags = element.node_tags()
+            if len(node_tags) != 12:
+                continue
+            coords = [
+                model.nodes[node_tag].xyz
+                for node_tag in node_tags
+                if node_tag in model.nodes
+            ]
+            if len(coords) != 12:
+                continue
+            base = len(points)
+            points.extend(coords)
+            for index in range(12):
+                lines.extend(
+                    (2, base + index, base + ((index + 1) % 12))
+                )
+                cell_tags.append(int(tag))
+            for left, right in strut_pairs:
+                lines.extend((2, base + left, base + right))
+                cell_tags.append(int(tag))
+        if not points:
+            return None
+        mesh = pv.PolyData(
+            np.asarray(points, dtype=float),
+            lines=np.asarray(lines, dtype=np.int64),
+            deep=True,
+        )
+        mesh.cell_data["element_tag"] = np.asarray(
+            cell_tags,
+            dtype=np.int64,
+        )
         return mesh
 
     @staticmethod
@@ -3350,7 +3413,15 @@ class ModelViewport(QWidget):
             for tag in visible_tags
             if self._model.elements[tag].element_type in SOLID_ELEMENT_TYPES
         ]
-        surface_like_tags = set(shell_tags) | set(solid_tags)
+        masonry_tags = [
+            tag
+            for tag in visible_tags
+            if self._model.elements[tag].element_type
+            in MASONRY_PANEL_ELEMENT_TYPES
+        ]
+        surface_like_tags = (
+            set(shell_tags) | set(solid_tags) | set(masonry_tags)
+        )
         line_tags = [
             tag
             for tag in visible_tags
@@ -3391,6 +3462,10 @@ class ModelViewport(QWidget):
             self._model,
             solid_tags,
         )
+        masonry_mesh = self._batched_masonry_panel_mesh(
+            self._model,
+            masonry_tags,
+        )
 
         reinforcement_mesh = self._batched_reinforcement_mesh(
             self._model,
@@ -3413,6 +3488,8 @@ class ModelViewport(QWidget):
                 combined["shell"] = shell_mesh
             if solid_mesh is not None:
                 combined["solid"] = solid_mesh
+            if masonry_mesh is not None:
+                combined["masonry"] = masonry_mesh
             return combined
 
         if representation == "tube":
@@ -3439,6 +3516,8 @@ class ModelViewport(QWidget):
                 combined["shell"] = shell_mesh
             if solid_mesh is not None:
                 combined["solid"] = solid_mesh
+            if masonry_mesh is not None:
+                combined["masonry"] = masonry_mesh
             return combined
 
         # Actual-section view remains geometry-driven for frame members.
@@ -5151,6 +5230,8 @@ class ModelViewport(QWidget):
                     if group_name == "column"
                     else "#8fa3b5"
                     if group_name == "shell"
+                    else "#b08a5a"
+                    if group_name == "masonry"
                     else "#74889b"
                 ),
                 edge_color="#243b52",
@@ -5165,11 +5246,14 @@ class ModelViewport(QWidget):
                     5
                     if group_name == "reinforcement"
                     else 3
-                    if self._model_representation == "centerline"
+                    if (
+                        self._model_representation == "centerline"
+                        or group_name == "masonry"
+                    )
                     else 1
                 ),
                 render_lines_as_tubes=(
-                    group_name == "reinforcement"
+                    group_name in {"reinforcement", "masonry"}
                     or self._model_representation == "centerline"
                 ),
                 smooth_shading=False,
