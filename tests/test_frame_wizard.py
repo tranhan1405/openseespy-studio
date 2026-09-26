@@ -345,6 +345,7 @@ def test_frame_wizard_member_page_filters_sections_by_formulation():
             wizard.foundation_page_id,
             wizard.bracing_page_id,
             wizard.loads_page_id,
+            wizard.mass_page_id,
         ]
         assert wizard.column_section.findData(1) >= 0
         assert wizard.column_section.findData(2) < 0
@@ -2869,8 +2870,11 @@ def test_main_window_frame_wizard_reports_automatic_loads():
     assert '"self_weight_loads"' in source
     assert '"beam_udl_loads"' in source
     assert '"floor_area_loads"' in source
+    assert '"mass_sources"' in source
+    assert '"generated_nodal_mass"' in source
     assert "beam UDL(s)" in source
     assert "floor-area beam load(s)" in source
+    assert "seismic Mass Source" in source
 
 
 def test_frame_floor_area_load_distributes_by_tributary_width():
@@ -2979,6 +2983,162 @@ def test_frame_wizard_floor_area_load_maps_to_spec_and_clears_in_2d():
         _APP.processEvents()
         assert not wizard.load_floor_area.isChecked()
         assert not wizard.load_floor_area_group.isEnabled()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_mass_source_converts_generated_floor_gravity_to_nodal_mass():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.5,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        load_mode="Static",
+        load_floor_area=True,
+        load_floor_area_pressure=1000.0,
+        load_floor_area_direction="X",
+        load_storeys=(1,),
+        mass_source_mode="Source",
+        mass_include_self=False,
+        mass_include_static_loads=True,
+        mass_static_load_factor=1.0,
+        mass_gravity_axis=3,
+        mass_directions=(1, 2),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["load_patterns"] == 1
+    assert result["load_pattern_tag"] > 0
+    assert result["mass_sources"] == 1
+    assert result["mass_nodes"] == 4
+    expected_total = 5.0 * 4.0 * 1000.0 / 9.80665
+    assert result["generated_nodal_mass"] == pytest.approx(expected_total)
+
+    assert len(project.mass_sources) == 1
+    source = next(iter(project.mass_sources.values()))
+    assert source.include_self_mass is False
+    assert source.load_factors == {
+        int(result["load_pattern_tag"]): pytest.approx(1.0)
+    }
+    assert source.gravity_axis == 3
+    assert source.directions == (1, 2)
+
+    active = [
+        node
+        for node in project.model.nodes.values()
+        if node.mass[0] > 0.0
+    ]
+    assert len(active) == 4
+    assert all(node.mass[0] == pytest.approx(node.mass[1]) for node in active)
+    assert all(node.mass[2] == pytest.approx(0.0) for node in active)
+    assert sum(node.mass[0] for node in active) == pytest.approx(expected_total)
+
+
+def test_frame_mass_source_rejects_explicit_rigid_floor_mass_overwrite():
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        diaphragm_mode="Rigid",
+        diaphragm_floor_mass=10.0,
+        mass_source_mode="Source",
+        mass_include_self=True,
+        mass_include_static_loads=False,
+        mass_directions=(1, 2),
+    )
+    with pytest.raises(ValueError, match="replaces selected nodal mass"):
+        validate_frame_grid_spec(spec)
+
+
+def test_frame_mass_source_requires_static_pattern_when_selected():
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        mass_source_mode="Source",
+        mass_include_self=False,
+        mass_include_static_loads=True,
+        mass_static_load_factor=1.0,
+        mass_directions=(1, 2),
+    )
+    with pytest.raises(ValueError, match="static load generation is disabled"):
+        validate_frame_grid_spec(spec)
+
+
+def test_frame_wizard_mass_page_maps_source_settings():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.dimension.setCurrentIndex(
+            wizard.dimension.findData("3D")
+        )
+        wizard.load_mode.setCurrentIndex(
+            wizard.load_mode.findData("Static")
+        )
+        wizard.load_beam_udl.setChecked(True)
+        wizard.load_udl_z.setValue(-10.0)
+
+        wizard.mass_source_mode.setCurrentIndex(
+            wizard.mass_source_mode.findData("Source")
+        )
+        wizard.mass_include_self.setChecked(False)
+        wizard.mass_include_static.setChecked(True)
+        wizard.mass_static_factor.setValue(0.75)
+        wizard.mass_gravity_axis.setCurrentIndex(
+            wizard.mass_gravity_axis.findData(3)
+        )
+        wizard.mass_direction_x.setChecked(True)
+        wizard.mass_direction_y.setChecked(True)
+        wizard.mass_direction_z.setChecked(False)
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.mass_source_mode == "Source"
+        assert not spec.mass_include_self
+        assert spec.mass_include_static_loads
+        assert spec.mass_static_load_factor == pytest.approx(0.75)
+        assert spec.mass_gravity_axis == 3
+        assert spec.mass_directions == (1, 2)
+        assert "static gravity pattern" in wizard.mass_summary.text()
+        assert wizard.mass_scroll.widgetResizable()
+        assert "Mass definition ready" in wizard.mass_validation_status.text()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_mass_page_planar_keeps_horizontal_x_only():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.mass_source_mode.setCurrentIndex(
+            wizard.mass_source_mode.findData("Source")
+        )
+        wizard.mass_include_static.setChecked(False)
+        wizard.mass_include_self.setChecked(True)
+        wizard.mass_direction_y.setChecked(True)
+        wizard.mass_direction_z.setChecked(True)
+        wizard._sync_mass_controls()
+        _APP.processEvents()
+
+        assert wizard.dimension.currentData() == "2D"
+        assert wizard.mass_direction_x.isChecked()
+        assert not wizard.mass_direction_y.isChecked()
+        assert not wizard.mass_direction_z.isChecked()
+        assert wizard.spec().mass_directions == (1,)
     finally:
         wizard.close()
         wizard.deleteLater()
