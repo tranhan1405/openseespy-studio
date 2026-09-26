@@ -301,7 +301,7 @@ def test_krawinkler_panel_zone_generator_builds_expected_macro():
     assert script.count("ops.equalDOF(") == 4
     assert (
         "ops.element('zeroLength', 40, "
-        "_sare_pz_40_tlh, _sare_pz_40_tlv, '-mat', 1, '-dir', 3"
+        "_sare_pz_40_tlh, _sare_pz_40_tlv, '-mat', 1, '-dir', 6"
         in script
     )
     assert "ops.geomTransf('Linear', _sare_pz_40_tr)" in script
