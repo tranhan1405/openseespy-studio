@@ -87,6 +87,10 @@ class FrameGridSpec:
     joint_rigid_a: float = 0.0
     joint_rigid_e: float = 0.0
     joint_rigid_i: float = 0.0
+    diaphragm_mode: str = "None"
+    diaphragm_levels: tuple[int, ...] = ()
+    diaphragm_floor_mass: float = 0.0
+    diaphragm_rotational_inertia: float = 0.0
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -401,6 +405,42 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                 raise ValueError(
                     f"Krawinkler panel-zone requires positive {label}."
                 )
+
+    diaphragm_mode = str(spec.diaphragm_mode or "None")
+    if diaphragm_mode not in {"None", "Rigid"}:
+        raise ValueError(
+            f"Frame Wizard diaphragm mode {diaphragm_mode!r} is not supported."
+        )
+    if diaphragm_mode == "Rigid":
+        if spec.planar_2d:
+            raise ValueError(
+                "Rigid floor diaphragms require a 3D frame."
+            )
+        normalized_levels = tuple(
+            sorted({int(level) for level in spec.diaphragm_levels})
+        )
+        if normalized_levels and any(
+            level < 1 or level > int(spec.nz)
+            for level in normalized_levels
+        ):
+            raise ValueError(
+                "Diaphragm floor levels must be between 1 and the number "
+                "of storeys."
+            )
+        floor_mass = float(spec.diaphragm_floor_mass)
+        rotational_inertia = float(spec.diaphragm_rotational_inertia)
+        if not math.isfinite(floor_mass) or floor_mass < 0.0:
+            raise ValueError(
+                "Diaphragm floor mass must be finite and non-negative."
+            )
+        if (
+            not math.isfinite(rotational_inertia)
+            or rotational_inertia < 0.0
+        ):
+            raise ValueError(
+                "Diaphragm rotational inertia must be finite and "
+                "non-negative."
+            )
 
     frame_grid_coordinates(spec)
 
@@ -1043,6 +1083,94 @@ def generate_frame_macro_joint_project(
     }
 
 
+def frame_diaphragm_levels(spec: FrameGridSpec) -> tuple[int, ...]:
+    """Return normalized elevated floor levels selected for diaphragm action."""
+    if str(spec.diaphragm_mode or "None") != "Rigid":
+        return ()
+    levels = tuple(sorted({int(level) for level in spec.diaphragm_levels}))
+    if levels:
+        return levels
+    return tuple(range(1, int(spec.nz) + 1))
+
+
+def frame_diaphragm_count(spec: FrameGridSpec) -> int:
+    """Return the number of rigid floor diaphragms requested."""
+    return len(frame_diaphragm_levels(spec))
+
+
+def apply_frame_rigid_diaphragms(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Create one centroid retained node and rigidDiaphragm MPC per floor."""
+    validate_frame_grid_spec(spec)
+    if str(spec.diaphragm_mode or "None") != "Rigid":
+        return {
+            "diaphragm_constraints": 0,
+            "diaphragm_master_nodes": 0,
+        }
+
+    model = project.model
+    if (int(model.ndm), int(model.ndf)) != (3, 6):
+        raise ValueError(
+            "Rigid floor diaphragms require the standard 3D/6DOF frame backend."
+        )
+
+    x_coordinates, y_coordinates, z_coordinates = frame_grid_coordinates(spec)
+    next_node_tag = max(model.nodes, default=0) + 1
+    next_constraint_tag = max(project.constraints, default=0) + 1
+    floor_mass = float(spec.diaphragm_floor_mass)
+    rotational_inertia = float(spec.diaphragm_rotational_inertia)
+    levels = frame_diaphragm_levels(spec)
+
+    x_center = 0.5 * (x_coordinates[0] + x_coordinates[-1])
+    y_center = 0.5 * (y_coordinates[0] + y_coordinates[-1])
+
+    for level in levels:
+        master_tag = next_node_tag
+        next_node_tag += 1
+        master = model.add_node(
+            master_tag,
+            x_center,
+            y_center,
+            z_coordinates[level],
+            ndf=6,
+        )
+        # rigidDiaphragm with perpDirn=3 couples UX, UY and RZ. Restrain
+        # unused retained-node DOFs to avoid free zero-stiffness modes.
+        model.set_fixity(master_tag, (0, 0, 1, 1, 1, 0))
+        master.mass = (
+            floor_mass,
+            floor_mass,
+            0.0,
+            0.0,
+            0.0,
+            rotational_inertia,
+        )
+
+        floor_nodes = [
+            _frame_center_node_tag(spec, i, j, level)
+            for j in range(int(spec.ny) + 1)
+            for i in range(int(spec.nx) + 1)
+        ]
+        project.add_constraint(
+            ConstraintData(
+                tag=next_constraint_tag,
+                name=f"Frame floor {level} rigid diaphragm",
+                constraint_type="rigidDiaphragm",
+                retained_node=master_tag,
+                constrained_nodes=floor_nodes,
+                perp_dirn=3,
+            )
+        )
+        next_constraint_tag += 1
+
+    return {
+        "diaphragm_constraints": len(levels),
+        "diaphragm_master_nodes": len(levels),
+    }
+
+
 def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
     """Replace model-linked project data with one Frame Wizard model."""
     validate_frame_grid_spec(spec)
@@ -1059,15 +1187,21 @@ def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
     project.model.ndm = 3
     project.model.ndf = 6
     generate_frame_grid(project.model, spec)
+
     if joint_model == "ZeroLength":
-        return apply_frame_zero_length_joints(project, spec)
-    return {
-        "joint_nodes": 0,
-        "joint_connections": 0,
-        "duplicate_nodes": 0,
-        "joint_constraints": 0,
-        "panel_external_nodes": 0,
-    }
+        result = apply_frame_zero_length_joints(project, spec)
+    else:
+        result = {
+            "joint_nodes": 0,
+            "joint_connections": 0,
+            "duplicate_nodes": 0,
+            "joint_constraints": 0,
+            "panel_external_nodes": 0,
+        }
+
+    if str(spec.diaphragm_mode or "None") == "Rigid":
+        result.update(apply_frame_rigid_diaphragms(project, spec))
+    return result
 
 
 def material_source_comments(material: MaterialData) -> list[str]:
