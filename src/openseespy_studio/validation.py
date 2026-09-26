@@ -13,6 +13,7 @@ from .model import (
     EMBEDDED_ELEMENT_TYPES,
     FRAME_ELEMENT_TYPES,
     FRICTION_BEARING_ELEMENT_TYPES,
+    MASONRY_PANEL_ELEMENT_TYPES,
     SHELL_ELEMENT_TYPES,
     SUPPORTED_ELEMENT_TYPES,
     TRUSS_MATERIAL_ELEMENT_TYPES,
@@ -1641,6 +1642,7 @@ def _support_and_connectivity_checks(
                     connect(element.i, retained)
         elif (
             element.element_type in SHELL_ELEMENT_TYPES
+            or element.element_type in MASONRY_PANEL_ELEMENT_TYPES
             or element.element_type in {"MEFI", "MVLEM_3D"}
         ):
             for left, right in zip(
