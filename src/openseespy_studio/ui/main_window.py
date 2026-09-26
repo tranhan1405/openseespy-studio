@@ -108,6 +108,7 @@ from ..rc_wall import (
     build_rc_wall_macro_2d,
     build_rc_wall_macro_3d,
 )
+from ..masonry_wall import build_masonry_wall
 from ..result_catalog import (
     convergence_result_label,
     result_choices_for_analysis,
@@ -240,6 +241,7 @@ from .line_geometry_dialog import LineGeometryDialog, PointGeometryDialog
 from .transformation_dialog import TransformationDialog
 from .test_column_dialog import TestColumnWizard
 from .rc_wall_wizard import RCWallWizard
+from .masonry_wall_wizard import MasonryWallWizard
 from .rclms_section_dialog import RCLMSSectionDialog
 from .icons import create_visual_icon, studio_icon
 from .results_panel import ResultsPanel
@@ -2736,6 +2738,13 @@ class MainWindow(QMainWindow):
             "Build a planar reinforced-concrete wall with RCLMS and MEFI",
         )
         self._make_action(
+            "masonry_wall_wizard",
+            "Masonry Wall",
+            "wall-macro",
+            self._show_masonry_wall_wizard,
+            "Build a masonry/infill panel with equivalent struts or MasonPan12",
+        )
+        self._make_action(
             "frame_2d",
             "2D Frame",
             "frame-2d",
@@ -3158,6 +3167,7 @@ class MainWindow(QMainWindow):
         geometry_menu.addActions([
             self.actions["column_1d"],
             self.actions["rc_wall_wizard"],
+            self.actions["masonry_wall_wizard"],
             self.actions["frame_2d"],
             self.actions["grid"],
             self.actions["extrude"],
@@ -3742,6 +3752,7 @@ class MainWindow(QMainWindow):
                 "solid_brick",
                 "wall_macro_element",
                 "rc_wall_wizard",
+                "masonry_wall_wizard",
             ),
             widgets=(frame_button, truss_button),
         )
@@ -5291,6 +5302,144 @@ class MainWindow(QMainWindow):
 
         self._record_project_change(
             f"Create RC wall {spec.name} with MEFI/RCLMS",
+            before,
+        )
+
+    def _show_masonry_wall_wizard(
+        self,
+        checked: bool = False,
+    ) -> None:
+        dialog = MasonryWallWizard(self.project, parent=self)
+        if not dialog.exec():
+            return
+
+        try:
+            spec = dialog.data()
+        except (KeyError, TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Masonry Wall Wizard",
+                str(exc),
+            )
+            return
+
+        if spec.replace_geometry and (
+            self.model.nodes or self.model.elements
+        ):
+            answer = QMessageBox.question(
+                self,
+                "Replace Current FE Model",
+                (
+                    "Masonry Wall Wizard is set to Replace mode.\n\n"
+                    "Existing FE geometry and model-linked objects will be "
+                    "cleared. Material libraries are preserved.\n\n"
+                    "Continue and generate the masonry wall?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        before = self.project.to_dict()
+        existing_error_keys = {
+            (
+                issue.category,
+                issue.message,
+                issue.entity_kind,
+                issue.entity_tag,
+            )
+            for issue in validate_project(self.project)
+            if issue.severity == "ERROR"
+        }
+        try:
+            result = build_masonry_wall(self.project, spec)
+            generated_errors = [
+                issue
+                for issue in validate_project(self.project)
+                if (
+                    issue.severity == "ERROR"
+                    and (
+                        issue.category,
+                        issue.message,
+                        issue.entity_kind,
+                        issue.entity_tag,
+                    ) not in existing_error_keys
+                )
+            ]
+            if generated_errors:
+                preview = "\n".join(
+                    f"- {issue.message}"
+                    for issue in generated_errors[:6]
+                )
+                raise ValueError(
+                    "Generated masonry wall failed FEWIZ Model Check:\n"
+                    + preview
+                )
+
+            expected_nodes = (
+                12 if spec.formulation == "MasonPan12" else 4
+            )
+            expected_elements = (
+                1
+                if spec.formulation == "MasonPan12"
+                else (2 if spec.crossed_struts else 1)
+            )
+            if len(result.node_tags) != expected_nodes:
+                raise ValueError(
+                    "Masonry builder returned an unexpected node count: "
+                    f"{len(result.node_tags)} (expected {expected_nodes})."
+                )
+            if len(result.element_tags) != expected_elements:
+                raise ValueError(
+                    "Masonry builder returned an unexpected element count: "
+                    f"{len(result.element_tags)} "
+                    f"(expected {expected_elements})."
+                )
+        except (KeyError, TypeError, ValueError) as exc:
+            self.project = ProjectDatabase.from_dict(before)
+            self.model = self.project.model
+            QMessageBox.warning(
+                self,
+                "Masonry Wall Wizard",
+                str(exc),
+            )
+            self._refresh_all()
+            return
+
+        self.selection.clear()
+        self._reset_runtime_results()
+        self.model = self.project.model
+        if spec.replace_geometry:
+            self._reset_sketch_plane_context()
+        self._activate_select_tool()
+        self.viewport.set_display_domain("fe")
+
+        named = ", ".join(result.selection_set_names)
+        message = (
+            f"Created {spec.name} · {len(result.node_tags)} nodes · "
+            f"{len(result.element_tags)} masonry element(s) · "
+            f"named selections: {named}"
+        )
+        self._refresh_tree()
+        self.selection.set_selection(elements=set(result.element_tags))
+        try:
+            self._refresh_all(message)
+            self.viewport.set_view("xy", render=False)
+            self.viewport.fit_view()
+            self.viewport.plotter.render()
+        except Exception as exc:
+            self._refresh_tree()
+            self._log(
+                "Masonry wall generated, but viewport refresh failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            self.status_message.setText(
+                f"Created {spec.name} · viewport refresh failed"
+            )
+
+        self._record_project_change(
+            f"Create masonry wall {spec.name} ({spec.formulation})",
             before,
         )
 
