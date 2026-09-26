@@ -29,6 +29,7 @@ from ..generator import (
     frame_diaphragm_count,
     frame_diaphragm_levels,
     frame_floor_levels,
+    frame_foundation_count,
     frame_grid_coordinates,
     frame_slab_count,
     frame_joint_connection_count,
@@ -137,6 +138,7 @@ class FramePreview(QWidget):
         self.diaphragm_levels: tuple[int, ...] = ()
         self.slab_divisions_x = 1
         self.slab_divisions_y = 1
+        self.foundation_mode = "Direct"
         self.setMinimumHeight(285)
 
     def set_frame(
@@ -157,6 +159,7 @@ class FramePreview(QWidget):
         diaphragm_levels: tuple[int, ...] = (),
         slab_divisions_x: int = 1,
         slab_divisions_y: int = 1,
+        foundation_mode: str = "Direct",
     ) -> None:
         self.dimension = str(dimension)
         self.x_coordinates = list(x_coordinates)
@@ -175,6 +178,7 @@ class FramePreview(QWidget):
         )
         self.slab_divisions_x = max(1, int(slab_divisions_x))
         self.slab_divisions_y = max(1, int(slab_divisions_y))
+        self.foundation_mode = str(foundation_mode)
         self.update()
 
     @staticmethod
@@ -520,6 +524,51 @@ class FramePreview(QWidget):
                             ),
                         )
 
+        if self.foundation_mode == "Springs":
+            spring_pen = QPen(self.palette().highlight().color())
+            spring_pen.setWidthF(1.5)
+            painter.setPen(spring_pen)
+
+            base_points: list[QPointF] = []
+            if self.dimension == "2D":
+                base_points = [
+                    p(i, 0)
+                    for i in range(len(self.x_coordinates))
+                ]
+            else:
+                base_points = [
+                    p(i, j, 0)
+                    for j in range(len(self.y_coordinates))
+                    for i in range(len(self.x_coordinates))
+                ]
+
+            for point in base_points:
+                painter.drawEllipse(
+                    QRectF(
+                        point.x() - 3.0,
+                        point.y() - 3.0,
+                        6.0,
+                        6.0,
+                    )
+                )
+                painter.drawLine(
+                    QPointF(point.x(), point.y() + 3.0),
+                    QPointF(point.x(), point.y() + 7.0),
+                )
+                zig = [
+                    QPointF(point.x(), point.y() + 7.0),
+                    QPointF(point.x() - 4.0, point.y() + 10.0),
+                    QPointF(point.x() + 4.0, point.y() + 13.0),
+                    QPointF(point.x() - 4.0, point.y() + 16.0),
+                    QPointF(point.x(), point.y() + 19.0),
+                ]
+                for left, right in zip(zig[:-1], zig[1:]):
+                    painter.drawLine(left, right)
+                painter.drawLine(
+                    QPointF(point.x() - 6.0, point.y() + 19.0),
+                    QPointF(point.x() + 6.0, point.y() + 19.0),
+                )
+
         painter.setPen(self.palette().text().color())
 
         # X bay dimensions at the base.
@@ -599,15 +648,18 @@ class FrameWizard(QWizard):
         self._build_members_page()
         self._build_joints_page()
         self._build_floors_page()
+        self._build_foundation_page()
         self._sync_dimension()
         self._sync_spacing_mode()
         self._sync_member_controls()
         self._sync_joint_controls()
         self._sync_diaphragm_controls()
+        self._sync_foundation_controls()
         self._update_preview()
         self._update_member_summary()
         self._update_joint_summary()
         self._update_diaphragm_summary()
+        self._update_foundation_summary()
 
     @staticmethod
     def _spin(value: int, lo: int = 1, hi: int = 50) -> QSpinBox:
@@ -1896,6 +1948,260 @@ class FrameWizard(QWizard):
             if finish is not None and self.currentId() == self.floors_page_id:
                 finish.setEnabled(True)
 
+    def _build_foundation_page(self) -> None:
+        page = QWizardPage()
+        page.setTitle("Foundation & Base Springs")
+        page.setSubTitle(
+            "Keep direct fixed/pinned supports or connect every column base "
+            "to a coincident fixed ground node through zeroLength springs."
+        )
+
+        scroll = QScrollArea()
+        scroll.setObjectName("frame-wizard-foundation-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+
+        self.foundation_mode = QComboBox()
+        self.foundation_mode.addItem(
+            "Direct support · use Geometry page base restraint",
+            "Direct",
+        )
+        self.foundation_mode.addItem(
+            "Elastic foundation springs · zeroLength to fixed ground",
+            "Springs",
+        )
+
+        mode_group = QGroupBox("Foundation model")
+        mode_form = QFormLayout(mode_group)
+        mode_form.addRow("Base model:", self.foundation_mode)
+        layout.addWidget(mode_group)
+
+        spring_group = QGroupBox("Spring materials by global DOF")
+        spring_form = QFormLayout(spring_group)
+        self.foundation_dof_labels = (
+            "UX · global X translation",
+            "UY · global Y translation",
+            "UZ · global Z translation",
+            "RX · rotation about global X",
+            "RY · rotation about global Y",
+            "RZ · rotation about global Z",
+        )
+        self.foundation_materials: list[QComboBox] = []
+        for label in self.foundation_dof_labels:
+            combo = QComboBox()
+            self.foundation_materials.append(combo)
+            spring_form.addRow(label + ":", combo)
+
+        spring_hint = QLabel(
+            "Choose a uniaxial material to make that DOF flexible/nonlinear. "
+            "“Rigid transfer” means the structural base DOF is tied to the "
+            "fixed ground node with equalDOF. In the standard planar frame "
+            "only UX, UZ and RY are active; UY, RX and RZ remain restrained "
+            "out of plane."
+        )
+        spring_hint.setWordWrap(True)
+        spring_form.addRow(spring_hint)
+        layout.addWidget(spring_group)
+        self.foundation_spring_group = spring_group
+
+        note = QLabel(
+            "This first Foundation stage applies the same spring law to every "
+            "column base. FEWIZ creates one coincident fixed ground node per "
+            "base and one zeroLength connection. Native 2D macro-joint frames "
+            "retain direct fixed/pinned support in this stage. Individual "
+            "footings, pile/soil groups and per-column assignments are reserved "
+            "for the next Foundation stage."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("padding:8px;")
+        layout.addWidget(note)
+
+        self.foundation_summary = QLabel()
+        self.foundation_summary.setWordWrap(True)
+        self.foundation_summary.setStyleSheet("padding:8px;")
+        layout.addWidget(self.foundation_summary)
+
+        self.foundation_validation_status = QLabel()
+        self.foundation_validation_status.setWordWrap(True)
+        self.foundation_validation_status.setObjectName(
+            "frame-wizard-foundation-validation-status"
+        )
+        self.foundation_validation_status.setStyleSheet("padding:8px;")
+        layout.addWidget(self.foundation_validation_status)
+        layout.addStretch(1)
+
+        outer = QVBoxLayout(page)
+        outer.addWidget(scroll)
+        self.foundation_scroll = scroll
+        self.foundation_page_id = self.addPage(page)
+
+        self._populate_foundation_materials()
+        self.foundation_mode.currentIndexChanged.connect(
+            self._foundation_control_changed
+        )
+        for combo in self.foundation_materials:
+            combo.currentIndexChanged.connect(
+                self._foundation_control_changed
+            )
+        self.dimension.currentIndexChanged.connect(
+            self._foundation_control_changed
+        )
+        self.joint_model.currentIndexChanged.connect(
+            self._foundation_control_changed
+        )
+        self.create_columns.toggled.connect(
+            self._foundation_control_changed
+        )
+
+    def _populate_foundation_materials(self) -> None:
+        for combo in self.foundation_materials:
+            previous = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("Rigid transfer · no spring", 0)
+            for tag, material in sorted(self.project.materials.items()):
+                combo.addItem(
+                    f"{tag} · {material.name} [{material.material_type}]",
+                    int(tag),
+                )
+            if previous is not None:
+                index = combo.findData(previous)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+
+    def _foundation_active_dofs(self) -> tuple[int, ...]:
+        return (
+            (1, 3, 5)
+            if self.dimension.currentData() == "2D"
+            else (1, 2, 3, 4, 5, 6)
+        )
+
+    def _foundation_control_changed(self, *_args) -> None:
+        self._sync_foundation_controls()
+        self._update_foundation_summary()
+        self._update_preview()
+
+    def _sync_foundation_controls(self, *_args) -> None:
+        if not hasattr(self, "foundation_mode"):
+            return
+        spring_mode = self.foundation_mode.currentData() == "Springs"
+        active_dofs = set(self._foundation_active_dofs())
+        self.foundation_spring_group.setEnabled(spring_mode)
+        for dof, combo in enumerate(self.foundation_materials, start=1):
+            combo.setEnabled(spring_mode and dof in active_dofs)
+
+        # The direct restraint selector is irrelevant once the support is
+        # replaced by ground-node springs.
+        if spring_mode:
+            self.base_support.setEnabled(False)
+        else:
+            self.base_support.setEnabled(
+                self.dimension.currentData() == "2D"
+            )
+
+    def _foundation_material_tags(self) -> tuple[int, ...]:
+        return tuple(
+            int(combo.currentData() or 0)
+            for combo in self.foundation_materials
+        )
+
+    def _foundation_validation_error(self) -> str:
+        try:
+            validate_frame_grid_spec(self.spec())
+        except (TypeError, ValueError) as exc:
+            return str(exc)
+
+        if self.foundation_mode.currentData() != "Springs":
+            return ""
+
+        active = set(self._foundation_active_dofs())
+        missing = sorted({
+            tag
+            for dof, tag in enumerate(
+                self._foundation_material_tags(),
+                start=1,
+            )
+            if dof in active and tag > 0 and tag not in self.project.materials
+        })
+        if missing:
+            return (
+                "Foundation material tag(s) no longer exist: "
+                + ", ".join(map(str, missing))
+            )
+        return ""
+
+    def _update_foundation_summary(self, *_args) -> None:
+        if not hasattr(self, "foundation_summary"):
+            return
+        self._sync_foundation_controls()
+        try:
+            spec = self.spec()
+            count = frame_foundation_count(spec)
+            error = self._foundation_validation_error()
+        except (TypeError, ValueError) as exc:
+            spec = self.spec()
+            count = 0
+            error = str(exc)
+
+        if spec.foundation_mode == "Springs":
+            active = self._foundation_active_dofs()
+            names = ("UX", "UY", "UZ", "RX", "RY", "RZ")
+            flexible = [
+                names[dof - 1]
+                for dof in active
+                if int(spec.foundation_material_tags[dof - 1]) > 0
+            ]
+            rigid = [
+                names[dof - 1]
+                for dof in active
+                if int(spec.foundation_material_tags[dof - 1]) == 0
+            ]
+            self.foundation_summary.setText(
+                "<b>Foundation spring summary</b><br>"
+                f"Column bases: {count} · zeroLength connections: {count} · "
+                f"fixed ground nodes: {count}<br>"
+                f"Spring DOFs: {', '.join(flexible) or 'none'}<br>"
+                f"Rigid-transfer DOFs: {', '.join(rigid) or 'none'}"
+            )
+        else:
+            support = (
+                self.base_support.currentText()
+                if spec.planar_2d
+                else "Fixed"
+            )
+            self.foundation_summary.setText(
+                "<b>Foundation summary</b><br>"
+                f"Direct base support: {support}. No ground nodes, "
+                "foundation spring connections or foundation MPCs will be "
+                "generated."
+            )
+
+        finish = self.button(QWizard.FinishButton)
+        if error:
+            self.foundation_validation_status.setText(
+                "<b>Foundation definition needs attention</b><br>" + error
+            )
+            if (
+                finish is not None
+                and self.currentId() == self.foundation_page_id
+            ):
+                finish.setEnabled(False)
+        else:
+            self.foundation_validation_status.setText(
+                "<b>Foundation definition ready</b><br>"
+                "Base support topology and assigned uniaxial spring materials "
+                "are consistent with the frame definition."
+            )
+            if (
+                finish is not None
+                and self.currentId() == self.foundation_page_id
+            ):
+                finish.setEnabled(True)
+
     @staticmethod
     def _section_is_compatible(
         section_type: str,
@@ -2353,6 +2659,9 @@ class FrameWizard(QWizard):
         if hasattr(self, "diaphragm_mode"):
             self._sync_diaphragm_controls()
             self._update_diaphragm_summary()
+        if hasattr(self, "foundation_mode"):
+            self._sync_foundation_controls()
+            self._update_foundation_summary()
         self._update_preview()
         self._update_member_summary()
 
@@ -2566,6 +2875,10 @@ class FrameWizard(QWizard):
             slab_divisions_y=int(self.slab_divisions_y.value()),
             slab_corotational=bool(self.slab_corotational.isChecked()),
             slab_mass_per_area=float(self.slab_mass_per_area.value()),
+            foundation_mode=str(
+                self.foundation_mode.currentData() or "Direct"
+            ),
+            foundation_material_tags=self._foundation_material_tags(),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
                 self.base_support.currentData() or "Fixed"
@@ -2641,6 +2954,7 @@ class FrameWizard(QWizard):
             diaphragm_levels=spec.diaphragm_levels,
             slab_divisions_x=spec.slab_divisions_x,
             slab_divisions_y=spec.slab_divisions_y,
+            foundation_mode=spec.foundation_mode,
         )
 
         counts = self._object_counts(spec)
@@ -2722,6 +3036,13 @@ class FrameWizard(QWizard):
                     "<b>Floor definition needs attention</b><br>" + error
                 )
                 return False
+        if self.currentId() == self.foundation_page_id:
+            error = self._foundation_validation_error()
+            if error:
+                self.foundation_validation_status.setText(
+                    "<b>Foundation definition needs attention</b><br>" + error
+                )
+                return False
         return True
 
     def initializePage(self, page_id: int) -> None:  # noqa: N802
@@ -2739,3 +3060,7 @@ class FrameWizard(QWizard):
             self._refresh_diaphragm_levels()
             self._sync_diaphragm_controls()
             self._update_diaphragm_summary()
+        elif page_id == self.foundation_page_id:
+            self._populate_foundation_materials()
+            self._sync_foundation_controls()
+            self._update_foundation_summary()
