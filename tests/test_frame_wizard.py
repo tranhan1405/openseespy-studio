@@ -15,7 +15,9 @@ from openseespy_studio.generator import (
     FrameGridSpec,
     frame_diaphragm_count,
     frame_diaphragm_levels,
+    frame_floor_levels,
     frame_grid_coordinates,
+    frame_slab_count,
     frame_joint_connection_count,
     generate_frame_grid,
     generate_frame_project,
@@ -1407,3 +1409,249 @@ def test_frame_rigid_diaphragm_coexists_with_zero_length_joints():
         constraint.constraint_type == "rigidDiaphragm"
         for constraint in project.constraints.values()
     )
+
+
+def _slab_project() -> ProjectDatabase:
+    project = _member_project()
+    project.add_section(
+        SectionData(
+            95,
+            "Elastic Slab 200",
+            "ElasticMembranePlate",
+            parameters={
+                "E": 30.0e9,
+                "nu": 0.20,
+                "h": 0.20,
+                "rho": 0.0,
+                "EpModifier": 1.0,
+            },
+        )
+    )
+    return project
+
+
+def test_frame_wizard_task4_exposes_explicit_shell_slab_controls():
+    wizard = FrameWizard(_slab_project())
+    try:
+        wizard.dimension.setCurrentIndex(
+            wizard.dimension.findData("3D")
+        )
+        shell_index = wizard.diaphragm_mode.findData("Shell")
+        assert shell_index >= 0
+        wizard.diaphragm_mode.setCurrentIndex(shell_index)
+        _APP.processEvents()
+
+        assert wizard.slab_group.isVisible() or not wizard.slab_group.isHidden()
+        assert wizard.slab_section.findData(95) >= 0
+        assert wizard.slab_formulation.findData("ASDShellQ4") >= 0
+        assert wizard.slab_formulation.findData("ShellMITC4") >= 0
+
+        wizard.slab_section.setCurrentIndex(
+            wizard.slab_section.findData(95)
+        )
+        wizard.slab_formulation.setCurrentIndex(
+            wizard.slab_formulation.findData("ShellMITC4")
+        )
+        wizard.slab_divisions_x.setValue(2)
+        wizard.slab_divisions_y.setValue(3)
+        wizard.slab_mass_per_area.setValue(1.25)
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.diaphragm_mode == "Shell"
+        assert spec.slab_section_tag == 95
+        assert spec.slab_element_type == "ShellMITC4"
+        assert spec.slab_divisions_x == 2
+        assert spec.slab_divisions_y == 3
+        assert spec.slab_mass_per_area == pytest.approx(1.25)
+        assert frame_floor_levels(spec) == (1, 2, 3)
+        assert frame_slab_count(spec) == 3
+        assert "Semi-rigid slab summary" in wizard.diaphragm_summary.text()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_shell_slab_validation_rejects_2d_and_joint_bypass():
+    planar = FrameGridSpec(
+        planar_2d=True,
+        diaphragm_mode="Shell",
+        slab_section_tag=95,
+    )
+    with pytest.raises(ValueError, match="require a 3D frame"):
+        validate_frame_grid_spec(planar)
+
+    jointed = FrameGridSpec(
+        planar_2d=False,
+        joint_model="ZeroLength",
+        joint_material_tag=9,
+        diaphragm_mode="Shell",
+        slab_section_tag=95,
+    )
+    with pytest.raises(ValueError, match="rigid centerline"):
+        validate_frame_grid_spec(jointed)
+
+
+def test_frame_shell_refined_mesh_rejects_nonlinear_beam_splitting():
+    spec = FrameGridSpec(
+        planar_2d=False,
+        beam_element_type="forceBeamColumn",
+        diaphragm_mode="Shell",
+        slab_section_tag=95,
+        slab_divisions_x=2,
+        slab_divisions_y=1,
+    )
+    with pytest.raises(ValueError, match="elasticBeamColumn"):
+        validate_frame_grid_spec(spec)
+
+
+def test_generate_frame_shell_slab_one_element_per_bay_reuses_grid_nodes():
+    project = _slab_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        diaphragm_mode="Shell",
+        diaphragm_levels=(1,),
+        slab_section_tag=95,
+        slab_element_type="ASDShellQ4",
+        slab_divisions_x=1,
+        slab_divisions_y=1,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["slab_floors"] == 1
+    assert result["slab_elements"] == 1
+    assert result["slab_nodes_created"] == 0
+    assert result["slab_nodes_reused"] == 4
+    assert result["slab_beam_segments_added"] == 0
+
+    shells = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "slab:L1"
+    ]
+    assert len(shells) == 1
+    shell = shells[0]
+    assert shell.element_type == "ASDShellQ4"
+    assert shell.section_tag == 95
+    assert all(
+        project.model.nodes[tag].xyz[2] == pytest.approx(3.0)
+        for tag in shell.node_tags()
+    )
+
+
+def test_generate_refined_shell_slab_splits_elastic_beams_conformingly():
+    project = _slab_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        diaphragm_mode="Shell",
+        diaphragm_levels=(1,),
+        slab_section_tag=95,
+        slab_element_type="ShellMITC4",
+        slab_divisions_x=2,
+        slab_divisions_y=2,
+        slab_mass_per_area=2.0,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["slab_elements"] == 4
+    assert result["slab_nodes_created"] == 5
+    assert result["slab_nodes_reused"] == 4
+    assert result["slab_beam_segments_added"] == 4
+    assert result["slab_mass_nodes"] == 9
+
+    shells = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "slab:L1"
+    ]
+    beams = [
+        element
+        for element in project.model.elements.values()
+        if element.group in {"beam-x", "beam-y"}
+    ]
+    assert len(shells) == 4
+    assert len(beams) == 8
+
+    shell_nodes = {
+        tag
+        for element in shells
+        for tag in element.node_tags()
+    }
+    beam_nodes = {
+        tag
+        for element in beams
+        for tag in element.node_tags()
+    }
+    boundary_midpoints = {
+        tag
+        for tag in shell_nodes
+        if (
+            project.model.nodes[tag].xyz[2] == pytest.approx(3.0)
+            and (
+                project.model.nodes[tag].xyz[:2]
+                in {
+                    (2.5, 0.0),
+                    (2.5, 4.0),
+                    (0.0, 2.0),
+                    (5.0, 2.0),
+                }
+            )
+        )
+    }
+    assert len(boundary_midpoints) == 4
+    assert boundary_midpoints <= beam_nodes
+
+    total_ux_mass = sum(
+        project.model.nodes[tag].mass[0]
+        for tag in shell_nodes
+    )
+    assert total_ux_mass == pytest.approx(40.0)
+
+
+def test_frame_shell_slab_requires_shell_compatible_project_section():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        diaphragm_mode="Shell",
+        slab_section_tag=1,
+    )
+    prepare_frame_grid(project, spec)
+    with pytest.raises(ValueError, match="not shell-compatible"):
+        generate_frame_project(project, spec)
+
+
+def test_main_window_frame_wizard_reports_explicit_shell_slab_generation():
+    source = inspect.getsource(MainWindow._generate_frame_grid)
+    assert '"slab_floors"' in source
+    assert '"slab_elements"' in source
+    assert "shell slab floor(s)" in source
