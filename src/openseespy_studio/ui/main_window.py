@@ -5734,6 +5734,15 @@ class MainWindow(QMainWindow):
                 f" / generated nodal mass={generated_mass:.6g}"
             )
 
+        modal_analyses = int(joint_result.get("modal_analyses", 0))
+        if modal_analyses:
+            modal_tag = int(joint_result.get("modal_analysis_tag", 0))
+            modal_results = int(joint_result.get("modal_results", 0))
+            message += (
+                f" · Modal analysis {modal_tag}"
+                f" / {modal_results} modal result request(s)"
+            )
+
         self._refresh_all(message)
         self.frame_grid_panel.set_assignment_tags(
             column_section_tag=spec.column_section_tag,
