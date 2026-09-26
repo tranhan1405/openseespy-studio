@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 import inspect
 import math
 import os
@@ -12,7 +13,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QComboBox, QWizard
 
 from openseespy_studio.frame_setup import prepare_frame_grid
-from openseespy_studio.frame_presets import frame_spec_to_preset
+from openseespy_studio.frame_presets import (
+    frame_spec_from_preset,
+    frame_spec_to_preset,
+)
 from openseespy_studio.generator import (
     FrameGridSpec,
     frame_brace_element_count,
@@ -132,7 +136,8 @@ def test_main_window_exposes_frame_wizard_action_and_handler():
     actions = inspect.getsource(MainWindow)
     assert "FrameWizard(self.project" in handler
     assert "dialog.spec()" in handler
-    assert "self._generate_frame_grid(spec)" in handler
+    assert "self._generate_frame_grid(" in handler
+    assert "managed_by_frame_wizard=True" in handler
     assert "Replace Current FE Model" not in handler
     assert "QMessageBox.question" not in handler
     assert "Preview & Create owns replacement acknowledgement" in handler
@@ -3929,3 +3934,190 @@ def test_frame_wizard_recent_presets_keep_latest_five_unique_items():
         if previous_recent is not None:
             settings.setValue(recent_key, previous_recent)
         settings.sync()
+
+
+
+class _FrameWizardSelectionStub:
+    def __init__(self):
+        self.cleared = False
+
+    def clear(self):
+        self.cleared = True
+
+
+class _FrameWizardPanelStub:
+    def __init__(self):
+        self.assignments = None
+
+    def set_assignment_tags(self, **kwargs):
+        self.assignments = dict(kwargs)
+
+
+class _FrameWizardViewportStub:
+    def __init__(self):
+        self.views = []
+
+    def set_view(self, view):
+        self.views.append(str(view))
+
+
+class _FrameWizardMainWindowHarness:
+    def __init__(self, project):
+        self.project = project
+        self.model = project.model
+        self.selection = _FrameWizardSelectionStub()
+        self.frame_grid_panel = _FrameWizardPanelStub()
+        self.viewport = _FrameWizardViewportStub()
+        self.messages = []
+        self.history = []
+
+    def _refresh_all(self, message="", **_kwargs):
+        self.model = self.project.model
+        self.messages.append(str(message))
+
+    def _record_project_change(self, label, before):
+        self.history.append((str(label), before))
+
+    def _select_tree_payload(self, *_args, **_kwargs):
+        pass
+
+    def _show_analysis_properties(self, *_args, **_kwargs):
+        pass
+
+
+def test_frame_wizard_managed_generation_persists_recipe_and_reopens_exactly():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=2,
+        ny=2,
+        nz=2,
+        dx=4.5,
+        dy=5.5,
+        dz=3.2,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        load_mode="None",
+        mass_source_mode="None",
+        modal_mode="None",
+    )
+    harness = _FrameWizardMainWindowHarness(project)
+
+    MainWindow._generate_frame_grid(
+        harness,
+        spec,
+        managed_by_frame_wizard=True,
+        recipe_name="Reusable Managed Frame",
+    )
+
+    assert project.frame_wizard_recipe
+    assert project.frame_wizard_recipe["name"] == "Reusable Managed Frame"
+    saved_spec = frame_spec_from_preset(project.frame_wizard_recipe)
+    assert (saved_spec.nx, saved_spec.ny, saved_spec.nz) == (2, 2, 2)
+    assert saved_spec.column_section_tag == 1
+    assert saved_spec.beam_section_tag == 1
+    assert harness.history[-1][0] == "Frame Wizard · Generate 3D frame"
+
+    restored_project = ProjectDatabase.from_dict(project.to_dict())
+    assert restored_project.frame_wizard_recipe == project.frame_wizard_recipe
+
+    wizard = FrameWizard(
+        restored_project,
+        initial_preset=restored_project.frame_wizard_recipe,
+        managed_edit=True,
+    )
+    try:
+        _APP.processEvents()
+        assert wizard.windowTitle() == "Edit Frame Wizard Model"
+        assert wizard.managed_edit
+        assert wizard.active_preset_name == "Reusable Managed Frame"
+        assert asdict(wizard.spec()) == asdict(saved_spec)
+        assert "Editing managed Frame Wizard model" in wizard.preset_status.text()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_regeneration_updates_recipe_and_is_one_undo_step():
+    project = _member_project()
+    original = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+    )
+    harness = _FrameWizardMainWindowHarness(project)
+    MainWindow._generate_frame_grid(
+        harness,
+        original,
+        managed_by_frame_wizard=True,
+        recipe_name="Managed",
+    )
+    before_regenerate_recipe = dict(project.frame_wizard_recipe)
+
+    revised = frame_spec_from_preset(project.frame_wizard_recipe)
+    revised.nx = 3
+    MainWindow._generate_frame_grid(
+        harness,
+        revised,
+        managed_by_frame_wizard=True,
+        recipe_name="Managed",
+        regenerating=True,
+    )
+
+    assert project.frame_wizard_recipe != before_regenerate_recipe
+    assert frame_spec_from_preset(project.frame_wizard_recipe).nx == 3
+    assert harness.history[-1][0] == "Frame Wizard · Regenerate 3D frame"
+    assert harness.history[-1][1]["frame_wizard_recipe"] == (
+        before_regenerate_recipe
+    )
+
+
+def test_quick_frame_grid_replacement_clears_managed_frame_recipe():
+    project = _member_project()
+    project.frame_wizard_recipe = frame_spec_to_preset(
+        FrameGridSpec(
+            nx=1,
+            ny=1,
+            nz=1,
+            planar_2d=False,
+            column_section_tag=1,
+            beam_section_tag=1,
+        ),
+        name="Stale Managed Frame",
+    )
+    harness = _FrameWizardMainWindowHarness(project)
+    quick_spec = FrameGridSpec(
+        nx=2,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+    )
+
+    MainWindow._generate_frame_grid(harness, quick_spec)
+
+    assert project.frame_wizard_recipe == {}
+    assert harness.history[-1][0] == "Frame Wizard · Generate 3D frame"
+
+
+def test_frame_wizard_managed_tree_and_context_menu_hooks_are_exposed():
+    tree_source = inspect.getsource(MainWindow._refresh_tree)
+    menu_source = inspect.getsource(MainWindow._show_tree_context_menu)
+    edit_source = inspect.getsource(MainWindow._edit_frame_wizard)
+    generate_source = inspect.getsource(MainWindow._generate_frame_grid)
+
+    assert "FE Model · Frame Wizard Managed" in tree_source
+    assert "Edit in Frame Wizard..." in menu_source
+    assert "self.project.frame_wizard_recipe" in menu_source
+    assert "initial_preset=recipe" in edit_source
+    assert "managed_edit=True" in edit_source
+    assert "Frame Wizard · Regenerate 2D frame" in generate_source
+    assert "Frame Wizard · Regenerate 3D frame" in generate_source
