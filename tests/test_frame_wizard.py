@@ -1168,3 +1168,52 @@ def test_frame_macro_joint_panel_must_fit_grid_spacing():
     )
     with pytest.raises(ValueError, match="smaller than every X bay"):
         validate_frame_grid_spec(spec)
+
+
+def test_main_window_frame_wizard_dispatches_and_views_macro_joint_models():
+    source = inspect.getsource(MainWindow._generate_frame_grid)
+    assert "generate_frame_project(self.project, spec)" in source
+    assert '"Joint2D"' in source
+    assert '"BeamColumnJoint"' in source
+    assert '"KrawinklerPanelZone"' in source
+    assert 'self.viewport.set_view("xy")' in source
+    assert 'self.viewport.set_view("xz")' in source
+    assert "joint core(s)" in source
+
+
+def test_frame_project_restores_standard_backend_after_macro_generation():
+    project = _macro_joint_project()
+    macro = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        joint_model="Joint2D",
+        joint_material_tag=21,
+        joint_panel_width=0.40,
+        joint_panel_height=0.50,
+        joint_interface_material_tags=(0, 0, 0, 0),
+    )
+    generate_frame_project(project, macro)
+    assert (project.model.ndm, project.model.ndf) == (2, 3)
+    assert project.connections
+
+    standard = FrameGridSpec(
+        nx=1,
+        nz=1,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        joint_model="None",
+    )
+    generate_frame_project(project, standard)
+    assert (project.model.ndm, project.model.ndf) == (3, 6)
+    assert not project.connections
+    assert all(node.ndf == 6 for node in project.model.nodes.values())
