@@ -297,6 +297,7 @@ class FramePreview(QWidget):
                                 8.0,
                                 self.joint_panel_height * scale,
                             )
+                            painter.setBrush(self.palette().base())
                             painter.drawRect(
                                 QRectF(
                                     point.x() - 0.5 * panel_w,
@@ -305,6 +306,7 @@ class FramePreview(QWidget):
                                     panel_h,
                                 )
                             )
+                            painter.setBrush(Qt.NoBrush)
                             painter.drawLine(
                                 QPointF(
                                     point.x() - 0.5 * panel_w,
