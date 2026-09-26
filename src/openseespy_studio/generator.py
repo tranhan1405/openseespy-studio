@@ -9,6 +9,7 @@ from .beam_loads import (
     resolve_self_weight_local,
 )
 from .mass_source import apply_mass_source
+from .analysis_templates import build_modal_template
 from .units import UnitSystem
 from .model import (
     BEAM_CONTACT_ELEMENT_TYPES,
@@ -139,6 +140,9 @@ class FrameGridSpec:
     mass_static_load_factor: float = 1.0
     mass_gravity_axis: int = 3
     mass_directions: tuple[int, ...] = (1, 2)
+    modal_mode: str = "None"
+    modal_num_modes: int = 6
+    modal_eigen_solver: str = "-genBandArpack"
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -979,6 +983,44 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                 "be combined with additional slab nodal mass. Set slab mass "
                 "per area to zero and derive mass from gravity loads, or "
                 "disable the automatic Mass Source."
+            )
+
+    modal_mode = str(spec.modal_mode or "None")
+    if modal_mode not in {"None", "Modal"}:
+        raise ValueError(
+            f"Frame Wizard modal mode {modal_mode!r} is not supported."
+        )
+    modal_num_modes = int(spec.modal_num_modes)
+    if not 1 <= modal_num_modes <= 100:
+        raise ValueError(
+            "Frame Wizard modal analysis requires 1 to 100 modes."
+        )
+    modal_solver = str(spec.modal_eigen_solver or "-genBandArpack")
+    if modal_solver not in {
+        "-genBandArpack",
+        "-fullGenLapack",
+        "-symmBandLapack",
+    }:
+        raise ValueError(
+            "Frame Wizard modal eigen solver is not supported."
+        )
+    if modal_mode == "Modal":
+        if joint_model in macro_joint_models:
+            raise ValueError(
+                "Frame Wizard automatic Modal setup currently requires the "
+                "standard 3D/6DOF frame backend."
+            )
+        if (
+            mass_mode == "None"
+            and float(spec.column_mass_per_length) <= 0.0
+            and float(spec.beam_mass_per_length) <= 0.0
+            and float(spec.brace_mass_per_length) <= 0.0
+            and float(spec.diaphragm_floor_mass) <= 0.0
+            and float(spec.slab_mass_per_area) <= 0.0
+        ):
+            raise ValueError(
+                "Frame Wizard Modal setup needs a mass definition. Enable the "
+                "automatic Mass Source or assign member/floor/slab mass."
             )
 
     if load_mode == "Static":
@@ -2841,6 +2883,52 @@ def apply_frame_mass_source(
     }
 
 
+def apply_frame_modal_template(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Create FEWIZ's standard modal analysis and mode-shape result requests."""
+    validate_frame_grid_spec(spec)
+    if str(spec.modal_mode or "None") != "Modal":
+        return {
+            "modal_analyses": 0,
+            "modal_analysis_tag": 0,
+            "modal_results": 0,
+        }
+
+    has_nodal_mass = any(
+        any(abs(float(value)) > 1.0e-15 for value in node.mass[:3])
+        for node in project.model.nodes.values()
+    )
+    has_element_mass = any(
+        float(element.mass_per_length) > 1.0e-15
+        for element in project.model.elements.values()
+    )
+    if not has_nodal_mass and not has_element_mass:
+        raise ValueError(
+            "Frame Wizard Modal setup generated no usable translational mass. "
+            "Check the Mass Source, member mass, or floor/slab mass settings."
+        )
+
+    plan = build_modal_template(
+        project,
+        name="Frame Wizard Modal",
+        num_modes=int(spec.modal_num_modes),
+        eigen_solver=str(spec.modal_eigen_solver),
+        require_nodal_mass=False,
+    )
+    project.add_analysis(plan.analysis)
+    for result in plan.results:
+        project.add_solution_result(result)
+    project.set_active_analysis(plan.analysis.tag)
+
+    return {
+        "modal_analyses": 1,
+        "modal_analysis_tag": int(plan.analysis.tag),
+        "modal_results": len(plan.results),
+    }
+
+
 def frame_foundation_count(spec: FrameGridSpec) -> int:
     """Return the number of base foundation spring connections requested."""
     if str(spec.foundation_mode or "Direct") != "Springs":
@@ -3086,6 +3174,9 @@ def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int | floa
                 static_pattern_tag=static_pattern_tag,
             )
         )
+
+    if str(spec.modal_mode or "None") == "Modal":
+        result.update(apply_frame_modal_template(project, spec))
     return result
 
 
