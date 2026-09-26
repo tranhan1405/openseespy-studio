@@ -1059,12 +1059,24 @@ class FramePreview(QWidget):
 class FrameWizard(QWizard):
     """Task 1: geometry/grid definition for FEWIZ's frame workflow."""
 
-    def __init__(self, project: ProjectDatabase, parent=None):
+    def __init__(
+        self,
+        project: ProjectDatabase,
+        parent=None,
+        *,
+        initial_preset: dict | None = None,
+        managed_edit: bool = False,
+    ):
         super().__init__(parent)
         self.project = project
         self.units = UnitSystem.from_mapping(project.units)
+        self.managed_edit = bool(managed_edit)
 
-        self.setWindowTitle("Frame Wizard")
+        self.setWindowTitle(
+            "Edit Frame Wizard Model"
+            if self.managed_edit
+            else "Frame Wizard"
+        )
         self.setMinimumSize(780, 680)
         self.setWizardStyle(QWizard.ModernStyle)
 
@@ -1098,6 +1110,24 @@ class FrameWizard(QWizard):
         self._update_load_summary()
         self._update_mass_summary()
         self._update_review_page()
+
+        if initial_preset is not None:
+            recipe_name = str(
+                initial_preset.get(
+                    "name",
+                    "Frame Wizard Managed Model",
+                )
+            )
+            self._load_preset_data(
+                initial_preset,
+                name=recipe_name,
+            )
+            if self.managed_edit:
+                self.preset_status.setText(
+                    f"Editing managed Frame Wizard model · "
+                    f"<b>{recipe_name}</b>."
+                )
+                self._update_review_page()
 
     @staticmethod
     def _spin(value: int, lo: int = 1, hi: int = 50) -> QSpinBox:
