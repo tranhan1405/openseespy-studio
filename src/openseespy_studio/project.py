@@ -5416,6 +5416,7 @@ class ProjectDatabase:
         default_factory=dict
     )
     active_analysis_tag: int | None = None
+    frame_wizard_recipe: dict[str, Any] = field(default_factory=dict)
 
     units: dict[str, str] = field(
         default_factory=lambda: dict(DEFAULT_PROJECT_UNITS)
@@ -11661,6 +11662,7 @@ class ProjectDatabase:
                 for tag in sorted(self.solution_results)
             ],
             "active_analysis_tag": self.active_analysis_tag,
+            "frame_wizard_recipe": deepcopy(self.frame_wizard_recipe),
         }
 
     @staticmethod
@@ -12248,6 +12250,9 @@ class ProjectDatabase:
                 )
                 if data.get("active_analysis_tag") is not None
                 else None
+            ),
+            frame_wizard_recipe=deepcopy(
+                dict(data.get("frame_wizard_recipe", {}))
             ),
             units=normalize_project_units(
                 {
