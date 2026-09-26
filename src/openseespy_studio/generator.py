@@ -60,6 +60,20 @@ class FrameGridSpec:
     beam_integration_type: str = "Lobatto"
     column_integration_points: int = 5
     beam_integration_points: int = 5
+    column_hinge_i_section_tag: int | None = None
+    column_hinge_j_section_tag: int | None = None
+    column_interior_section_tag: int | None = None
+    beam_hinge_i_section_tag: int | None = None
+    beam_hinge_j_section_tag: int | None = None
+    beam_interior_section_tag: int | None = None
+    column_hinge_i_length: float = 0.0
+    column_hinge_j_length: float = 0.0
+    beam_hinge_i_length: float = 0.0
+    beam_hinge_j_length: float = 0.0
+    column_mass_per_length: float = 0.0
+    beam_mass_per_length: float = 0.0
+    column_consistent_mass: bool = False
+    beam_consistent_mass: bool = False
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -146,13 +160,38 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
         "dispBeamColumn",
     }
     distributed_integrations = {"Lobatto", "Legendre", "Radau"}
-    for role, enabled, element_type, integration_type, points in (
+    hinge_integrations = {
+        "HingeRadau",
+        "HingeRadauTwo",
+        "HingeMidpoint",
+        "HingeEndpoint",
+        "ConcentratedPlasticity",
+    }
+    for (
+        role,
+        enabled,
+        element_type,
+        integration_type,
+        points,
+        hinge_i_section,
+        hinge_j_section,
+        interior_section,
+        hinge_i_length,
+        hinge_j_length,
+        mass_per_length,
+    ) in (
         (
             "Column",
             bool(spec.create_columns),
             str(spec.column_element_type),
             str(spec.column_integration_type),
             int(spec.column_integration_points),
+            spec.column_hinge_i_section_tag,
+            spec.column_hinge_j_section_tag,
+            spec.column_interior_section_tag,
+            float(spec.column_hinge_i_length),
+            float(spec.column_hinge_j_length),
+            float(spec.column_mass_per_length),
         ),
         (
             "Beam",
@@ -161,6 +200,12 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
             str(spec.beam_element_type),
             str(spec.beam_integration_type),
             int(spec.beam_integration_points),
+            spec.beam_hinge_i_section_tag,
+            spec.beam_hinge_j_section_tag,
+            spec.beam_interior_section_tag,
+            float(spec.beam_hinge_i_length),
+            float(spec.beam_hinge_j_length),
+            float(spec.beam_mass_per_length),
         ),
     ):
         if not enabled:
@@ -170,15 +215,48 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                 f"{role} formulation {element_type!r} is not supported by "
                 "Frame Wizard."
             )
+        if not math.isfinite(mass_per_length) or mass_per_length < 0.0:
+            raise ValueError(
+                f"{role} mass per length must be finite and non-negative."
+            )
         if element_type in {"forceBeamColumn", "dispBeamColumn"}:
-            if integration_type not in distributed_integrations:
+            if integration_type in distributed_integrations:
+                if points < 2 or points > 20:
+                    raise ValueError(
+                        f"{role} integration points must be between 2 and 20."
+                    )
+            elif integration_type in hinge_integrations:
+                if (
+                    hinge_i_section is None
+                    or hinge_j_section is None
+                    or interior_section is None
+                ):
+                    raise ValueError(
+                        f"{role} {integration_type} requires I-end, J-end, "
+                        "and interior section assignments."
+                    )
+                if (
+                    not math.isfinite(hinge_i_length)
+                    or not math.isfinite(hinge_j_length)
+                    or hinge_i_length < 0.0
+                    or hinge_j_length < 0.0
+                ):
+                    raise ValueError(
+                        f"{role} plastic hinge lengths must be finite and "
+                        "non-negative."
+                    )
+                if (
+                    integration_type != "ConcentratedPlasticity"
+                    and (hinge_i_length <= 0.0 or hinge_j_length <= 0.0)
+                ):
+                    raise ValueError(
+                        f"{role} {integration_type} requires positive I/J "
+                        "plastic hinge lengths."
+                    )
+            else:
                 raise ValueError(
-                    f"{role} distributed integration {integration_type!r} "
-                    "is not supported in this Frame Wizard phase."
-                )
-            if points < 2 or points > 20:
-                raise ValueError(
-                    f"{role} integration points must be between 2 and 20."
+                    f"{role} beam integration {integration_type!r} is not "
+                    "supported by Frame Wizard."
                 )
     frame_grid_coordinates(spec)
 
@@ -229,6 +307,13 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         group="column-2d",
                         integration_type=spec.column_integration_type,
                         integration_points=spec.column_integration_points,
+                        mass_per_length=spec.column_mass_per_length,
+                        consistent_mass=spec.column_consistent_mass,
+                        hinge_i_section_tag=spec.column_hinge_i_section_tag,
+                        hinge_j_section_tag=spec.column_hinge_j_section_tag,
+                        interior_section_tag=spec.column_interior_section_tag,
+                        hinge_i_length=spec.column_hinge_i_length,
+                        hinge_j_length=spec.column_hinge_j_length,
                     )
                     ele_tag += 1
 
@@ -245,6 +330,13 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         group="beam-2d",
                         integration_type=spec.beam_integration_type,
                         integration_points=spec.beam_integration_points,
+                        mass_per_length=spec.beam_mass_per_length,
+                        consistent_mass=spec.beam_consistent_mass,
+                        hinge_i_section_tag=spec.beam_hinge_i_section_tag,
+                        hinge_j_section_tag=spec.beam_hinge_j_section_tag,
+                        interior_section_tag=spec.beam_interior_section_tag,
+                        hinge_i_length=spec.beam_hinge_i_length,
+                        hinge_j_length=spec.beam_hinge_j_length,
                     )
                     ele_tag += 1
 
@@ -287,6 +379,13 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         group="column",
                         integration_type=spec.column_integration_type,
                         integration_points=spec.column_integration_points,
+                        mass_per_length=spec.column_mass_per_length,
+                        consistent_mass=spec.column_consistent_mass,
+                        hinge_i_section_tag=spec.column_hinge_i_section_tag,
+                        hinge_j_section_tag=spec.column_hinge_j_section_tag,
+                        interior_section_tag=spec.column_interior_section_tag,
+                        hinge_i_length=spec.column_hinge_i_length,
+                        hinge_j_length=spec.column_hinge_j_length,
                     )
                     ele_tag += 1
 
@@ -304,6 +403,13 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         group="beam-x",
                         integration_type=spec.beam_integration_type,
                         integration_points=spec.beam_integration_points,
+                        mass_per_length=spec.beam_mass_per_length,
+                        consistent_mass=spec.beam_consistent_mass,
+                        hinge_i_section_tag=spec.beam_hinge_i_section_tag,
+                        hinge_j_section_tag=spec.beam_hinge_j_section_tag,
+                        interior_section_tag=spec.beam_interior_section_tag,
+                        hinge_i_length=spec.beam_hinge_i_length,
+                        hinge_j_length=spec.beam_hinge_j_length,
                     )
                     ele_tag += 1
 
@@ -321,6 +427,13 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         group="beam-y",
                         integration_type=spec.beam_integration_type,
                         integration_points=spec.beam_integration_points,
+                        mass_per_length=spec.beam_mass_per_length,
+                        consistent_mass=spec.beam_consistent_mass,
+                        hinge_i_section_tag=spec.beam_hinge_i_section_tag,
+                        hinge_j_section_tag=spec.beam_hinge_j_section_tag,
+                        interior_section_tag=spec.beam_interior_section_tag,
+                        hinge_i_length=spec.beam_hinge_i_length,
+                        hinge_j_length=spec.beam_hinge_j_length,
                     )
                     ele_tag += 1
 
