@@ -985,6 +985,15 @@ def generate_frame_macro_joint_project(
             core["right"],
             core["bottom"],
         ]
+        if joint_model == "BeamColumnJoint":
+            # OpenSees BeamColumnJoint uses opposite 1↔3 nodes along the
+            # vertical chord and 2↔4 along the horizontal chord.
+            external_nodes = [
+                core["top"],
+                core["right"],
+                core["bottom"],
+                core["left"],
+            ]
         parameters: dict[str, object] = {
             "external_nodes": external_nodes,
         }
