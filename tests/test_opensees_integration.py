@@ -12,7 +12,13 @@ from openseespy_studio.crack_results import (
     mefi_crack_panel_states,
     mefi_crack_summary,
 )
-from openseespy_studio.generator import material_to_openseespy, to_openseespy
+from openseespy_studio.frame_setup import prepare_frame_grid
+from openseespy_studio.generator import (
+    FrameGridSpec,
+    generate_frame_grid,
+    material_to_openseespy,
+    to_openseespy,
+)
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import StructuralModel
 from openseespy_studio.masonry_wall import (
@@ -3337,4 +3343,99 @@ print('WALL_MACRO_RUNTIME_OK', '{formulation}', ops.nodeDisp({top_node}, 1))
 
     assert completed.returncode == 0, completed.stderr
     assert f"WALL_MACRO_RUNTIME_OK {formulation}" in completed.stdout
+
+def test_frame_wizard_mixed_member_formulations_run_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            901,
+            "Frame Elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=901,
+        beam_section_tag=901,
+        column_element_type="forceBeamColumn",
+        beam_element_type="dispBeamColumn",
+        column_integration_type="Radau",
+        beam_integration_type="Legendre",
+        column_integration_points=4,
+        beam_integration_points=5,
+    )
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert "ops.element('forceBeamColumn'" in source
+    assert "ops.element('dispBeamColumn'" in source
+
+    top_right = max(
+        project.model.nodes,
+        key=lambda tag: (
+            project.model.nodes[tag].xyz[2],
+            project.model.nodes[tag].xyz[0],
+        ),
+    )
+    run_block = f"""
+ops.timeSeries('Linear', 990)
+ops.pattern('Plain', 990, 990)
+ops.load({top_right}, 1000.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Plain')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_frame_ok = ops.analyze(1)
+if _frame_ok != 0:
+    raise RuntimeError(f'Frame Wizard mixed formulation failed: {{_frame_ok}}')
+print('FRAME_WIZARD_MEMBER_OK', ops.nodeDisp({top_right}, 1))
+"""
+    script_path = tmp_path / "frame-wizard-member-smoke.py"
+    script_path.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_WIZARD_MEMBER_OK" in completed.stdout
 
