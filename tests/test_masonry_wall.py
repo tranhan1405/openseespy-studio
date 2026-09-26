@@ -360,3 +360,71 @@ def test_masonry_wizard_locks_normalized_custom_material_controls():
         wizard.close()
         wizard.deleteLater()
 
+def test_masonpan12_rejects_incomplete_or_duplicate_topology():
+    project = ProjectDatabase()
+    project.model.ndm = 2
+    project.model.ndf = 3
+    for tag in range(1, 13):
+        project.model.add_node(tag, float(tag), 0.0, 0.0)
+
+    parameters = {
+        "mat_1": 1,
+        "mat_2": 2,
+        "thick": 0.15,
+        "w_tot": 0.25,
+        "w_1": 0.50,
+    }
+    with pytest.raises(ValueError, match="twelve node tags"):
+        project.model.add_element(
+            1,
+            1,
+            2,
+            element_type="MasonPan12",
+            special_parameters=parameters,
+            additional_node_tags=tuple(range(3, 12)),
+        )
+
+    with pytest.raises(ValueError, match="twelve distinct node tags"):
+        project.model.add_element(
+            2,
+            1,
+            2,
+            element_type="MasonPan12",
+            special_parameters=parameters,
+            additional_node_tags=(3, 4, 5, 6, 7, 8, 9, 10, 11, 2),
+        )
+
+
+def test_masonpan12_material_retag_updates_element_and_delete_is_guarded():
+    project = ProjectDatabase()
+    result = build_masonry_wall(
+        project,
+        MasonryWallSpec(
+            formulation="MasonPan12",
+            replace_geometry=True,
+            name="Dependency Panel",
+        ),
+    )
+    element = project.model.elements[result.element_tags[0]]
+    central_tag, lateral_tag = result.material_tags
+
+    with pytest.raises(ValueError, match="masonry panel elements"):
+        project.remove_material(central_tag)
+
+    original = project.materials[central_tag]
+    replacement_tag = max(project.materials) + 10
+    project.update_material(
+        central_tag,
+        MaterialData(
+            replacement_tag,
+            "Retagged Masonry Central Strut",
+            "Masonry",
+            parameters=dict(original.parameters),
+            source=dict(original.source),
+        ),
+    )
+
+    assert element.special_parameters["mat_1"] == replacement_tag
+    assert element.special_parameters["mat_2"] == lateral_tag
+    project.validate_element_state(element.tag)
+
