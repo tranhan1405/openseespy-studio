@@ -2099,6 +2099,7 @@ def analysis_to_openseespy(
     frame_history_tags: list[int] | None = None,
     shell_force_history_tags: list[int] | None = None,
     shell_deformation_history_tags: list[int] | None = None,
+    masonry_history_tags: list[int] | None = None,
     mefi_crack_specs: dict[int, dict[str, object]] | None = None,
     support_node_tags: list[int] | None = None,
     plain_pattern_tags: list[int] | None = None,
@@ -2129,6 +2130,9 @@ def analysis_to_openseespy(
     })
     shell_deformation_history_tags = sorted({
         int(tag) for tag in (shell_deformation_history_tags or [])
+    })
+    masonry_history_tags = sorted({
+        int(tag) for tag in (masonry_history_tags or [])
     })
     mefi_crack_specs = {
         int(tag): dict(spec)
@@ -2199,6 +2203,14 @@ def analysis_to_openseespy(
     }
     shell_deformation_history = {
         str(tag): [] for tag in shell_deformation_history_tags
+    }
+    masonry_history = {
+        str(tag): {
+            "shear": [],
+            "strut_forces": [],
+            "strut_strains": [],
+        }
+        for tag in masonry_history_tags
     }
     system_command = (
         "ops.system('SparseGeneral', '-piv')"
@@ -2296,7 +2308,7 @@ def analysis_to_openseespy(
         "    return _iterations, _norm, _norms",
         "",
         "_studio_results = {",
-        "    'schema_version': 13,",
+        "    'schema_version': 14,",
         "    'analysis': {",
         f"        'tag': {settings.tag},",
         f"        'name': {settings.name!r},",
@@ -2354,6 +2366,7 @@ def analysis_to_openseespy(
             str(tag): dict(spec)
             for tag, spec in sorted(mefi_crack_specs.items())
         }) + ",",
+        "    'masonry_elements': " + repr(masonry_history_tags) + ",",
         "    'final': {},",
         "    'convergence': {",
         f"        'test': {settings.test!r},",
@@ -2375,6 +2388,7 @@ def analysis_to_openseespy(
         "'element_local_forces': " + repr(frame_force_history) + ", "
         "'shell_section_forces': " + repr(shell_force_history) + ", "
         "'shell_section_deformations': " + repr(shell_deformation_history) + ", "
+        "'masonry': " + repr(masonry_history) + ", "
         "'moment_curvature': {'force': [], 'deformation': []}, "
         "'section_responses': " + repr(section_response_history) + ", "
         "'mefi_panel_strains': " + repr(mefi_panel_history) + ", "
@@ -2400,6 +2414,7 @@ def analysis_to_openseespy(
         f"_studio_frame_history_tags = {frame_history_tags!r}",
         f"_studio_shell_force_history_tags = {shell_force_history_tags!r}",
         f"_studio_shell_deformation_history_tags = {shell_deformation_history_tags!r}",
+        f"_studio_masonry_history_tags = {masonry_history_tags!r}",
         f"_studio_mefi_crack_specs = {mefi_crack_specs!r}",
         f"_studio_support_node_tags = {support_node_tags!r}",
         f"_studio_plain_pattern_tags = {plain_pattern_tags!r}",
@@ -3603,6 +3618,55 @@ def analysis_to_openseespy(
         "        _studio_results['history']['shell_section_deformations']"
         "[str(_studio_element)].append(_studio_average)"
     )
+    lines.append("    for _studio_element in _studio_masonry_history_tags:")
+    lines.append("        _studio_key = str(_studio_element)")
+    lines.append(
+        "        _studio_masonry = "
+        "_studio_results['history']['masonry'][_studio_key]"
+    )
+    lines.append("        try:")
+    lines.append(
+        "            _studio_shear = ops.eleResponse("
+        "_studio_element, 'Shear') or []"
+    )
+    lines.append(
+        "            _studio_shear = [float(v) for v in _studio_shear[:2]]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_shear = []")
+    lines.append("        try:")
+    lines.append(
+        "            _studio_strut_forces = ops.eleResponse("
+        "_studio_element, 'localForce') or []"
+    )
+    lines.append(
+        "            _studio_strut_forces = "
+        "[float(v) for v in _studio_strut_forces[:6]]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_strut_forces = []")
+    lines.append("        try:")
+    lines.append(
+        "            _studio_strut_strains = ops.eleResponse("
+        "_studio_element, 'deformation') or []"
+    )
+    lines.append(
+        "            _studio_strut_strains = "
+        "[float(v) for v in _studio_strut_strains[:6]]"
+    )
+    lines.append("        except Exception:")
+    lines.append("            _studio_strut_strains = []")
+    lines.append(
+        "        _studio_masonry['shear'].append(_studio_shear)"
+    )
+    lines.append(
+        "        _studio_masonry['strut_forces'].append("
+        "_studio_strut_forces)"
+    )
+    lines.append(
+        "        _studio_masonry['strut_strains'].append("
+        "_studio_strut_strains)"
+    )
     lines.append(
         "    for _studio_mefi_tag, _studio_mefi_spec in "
         "_studio_mefi_crack_specs.items():"
@@ -4153,6 +4217,37 @@ def analysis_to_openseespy(
         "        'section_tag': _studio_section_tag,",
         "        'sections': _studio_sections,",
         "    }",
+        "_studio_masonry_responses = {}",
+        "for _studio_element in _studio_masonry_history_tags:",
+        "    _studio_key = str(_studio_element)",
+        "    try:",
+        "        _studio_shear = ops.eleResponse(_studio_element, 'Shear') or []",
+        "        _studio_shear = [float(v) for v in _studio_shear[:2]]",
+        "    except Exception:",
+        "        _studio_shear = []",
+        "    try:",
+        "        _studio_strut_forces = ops.eleResponse(",
+        "            _studio_element, 'localForce'",
+        "        ) or []",
+        "        _studio_strut_forces = [",
+        "            float(v) for v in _studio_strut_forces[:6]",
+        "        ]",
+        "    except Exception:",
+        "        _studio_strut_forces = []",
+        "    try:",
+        "        _studio_strut_strains = ops.eleResponse(",
+        "            _studio_element, 'deformation'",
+        "        ) or []",
+        "        _studio_strut_strains = [",
+        "            float(v) for v in _studio_strut_strains[:6]",
+        "        ]",
+        "    except Exception:",
+        "        _studio_strut_strains = []",
+        "    _studio_masonry_responses[_studio_key] = {",
+        "        'shear': _studio_shear,",
+        "        'strut_forces': _studio_strut_forces,",
+        "        'strut_strains': _studio_strut_strains,",
+        "    }",
         "_studio_load_factors = {}",
         "for _studio_pattern in _studio_plain_pattern_tags:",
         "    try:",
@@ -4170,6 +4265,7 @@ def analysis_to_openseespy(
         "    'shell_section_forces': _studio_shell_section_forces,",
         "    'shell_section_deformations': _studio_shell_section_deformations,",
         "    'mefi_panel_strains': _studio_mefi_panel_strains,",
+        "    'masonry': _studio_masonry_responses,",
         "    'element_fiber_responses': _studio_element_fiber_responses,",
         "    'load_factors': _studio_load_factors,",
         "}",
@@ -6830,6 +6926,12 @@ def to_openseespy(
         frame_history_tags: set[int] = set()
         shell_force_history_tags: set[int] = set()
         shell_deformation_history_tags: set[int] = set()
+        masonry_history_tags: set[int] = set()
+        masonry_tags = {
+            int(tag)
+            for tag, element in model.elements.items()
+            if element.element_type == "MasonPan12"
+        }
         for result_request in (solution_results or {}).values():
             if int(getattr(result_request, "analysis_tag", -1)) != int(active.tag):
                 continue
@@ -6856,6 +6958,14 @@ def to_openseespy(
                 candidates = set(shell_tags)
                 shell_deformation_history_tags.update(
                     (scope & candidates) if scope else candidates
+                )
+            elif result_type in {
+                "MasonryPanelShear",
+                "MasonryStrutForce",
+                "MasonryStrutStrain",
+            }:
+                masonry_history_tags.update(
+                    (scope & masonry_tags) if scope else masonry_tags
                 )
 
         response_spectrum_components = _response_spectrum_sources(
@@ -6885,6 +6995,7 @@ def to_openseespy(
                 shell_deformation_history_tags=sorted(
                     shell_deformation_history_tags
                 ),
+                masonry_history_tags=sorted(masonry_history_tags),
                 mefi_crack_specs=mefi_crack_specs,
                 support_node_tags=support_node_tags,
                 plain_pattern_tags=sorted(
