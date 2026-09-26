@@ -121,7 +121,7 @@ MATERIAL_PARAMETER_ORDER: dict[str, tuple[str, ...]] = {
     ),
     "Masonry": (
         "Fm", "Ft", "Um", "Uult", "Ucl", "Emo", "L",
-        "a1", "a2", "D1", "D2", "Ach", "Are", "Ba", "Bch",
+        "A1", "A2", "D1", "D2", "Ach", "Are", "Ba", "Bch",
         "Gun", "Gplu", "Gplr", "Exp1", "Exp2", "IENV",
     ),
     "HystereticSmooth": ("ka", "kb", "fbar", "beta"),
@@ -346,8 +346,8 @@ MATERIAL_DEFAULTS: dict[str, dict[str, float]] = {
         "Ucl": 0.0005,
         "Emo": 2.5e9,
         "L": 1.0,
-        "a1": 1.0,
-        "a2": 0.20,
+        "A1": 1.0,
+        "A2": 0.20,
         "D1": -0.002,
         "D2": -0.006,
         "Ach": 0.40,
@@ -420,9 +420,18 @@ class MaterialData:
             raise ValueError(f"Unsupported material type: {self.material_type}")
 
         defaults = MATERIAL_DEFAULTS[self.material_type]
+        raw_parameters = dict(self.parameters)
+        if self.material_type == "Masonry":
+            # Backward-compatible aliases from the first FEWIZ masonry
+            # implementation. OpenSees calls these Area1 / Area2; retain old
+            # project files that stored them as a1 / a2.
+            if "A1" not in raw_parameters and "a1" in raw_parameters:
+                raw_parameters["A1"] = raw_parameters["a1"]
+            if "A2" not in raw_parameters and "a2" in raw_parameters:
+                raw_parameters["A2"] = raw_parameters["a2"]
         normalized: dict[str, float] = {}
         for key in MATERIAL_PARAMETER_ORDER[self.material_type]:
-            normalized[key] = float(self.parameters.get(key, defaults[key]))
+            normalized[key] = float(raw_parameters.get(key, defaults[key]))
         self.parameters = normalized
 
         raw_base_material_tag = self.base_material_tag
