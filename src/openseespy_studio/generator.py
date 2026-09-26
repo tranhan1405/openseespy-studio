@@ -473,6 +473,24 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
             raise ValueError(
                 "Slab mesh divisions per bay must be between 1 and 50."
             )
+        selected_floor_count = (
+            len(normalized_levels)
+            if normalized_levels
+            else int(spec.nz)
+        )
+        shell_count = (
+            int(spec.nx)
+            * int(spec.ny)
+            * nx_mesh
+            * ny_mesh
+            * selected_floor_count
+        )
+        if shell_count > 50000:
+            raise ValueError(
+                "Frame Wizard explicit slab mesh would create "
+                f"{shell_count} Shell elements. Reduce X/Y mesh divisions, "
+                "bay count, or selected floors; the Wizard limit is 50,000."
+            )
         if (
             (nx_mesh > 1 or ny_mesh > 1)
             and str(spec.beam_element_type) != "elasticBeamColumn"
