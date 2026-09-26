@@ -27,7 +27,11 @@ from ..generator import (
     frame_grid_coordinates,
     validate_frame_grid_spec,
 )
-from ..project import ProjectDatabase
+from ..project import (
+    MEMBRANE_SECTION_TYPES,
+    SHELL_SECTION_TYPES,
+    ProjectDatabase,
+)
 from ..units import UnitSystem
 
 
@@ -320,9 +324,12 @@ class FrameWizard(QWizard):
         self.setWizardStyle(QWizard.ModernStyle)
 
         self._build_geometry_page()
+        self._build_members_page()
         self._sync_dimension()
         self._sync_spacing_mode()
+        self._sync_member_controls()
         self._update_preview()
+        self._update_member_summary()
 
     @staticmethod
     def _spin(value: int, lo: int = 1, hi: int = 50) -> QSpinBox:
@@ -499,7 +506,7 @@ class FrameWizard(QWizard):
         outer = QVBoxLayout(page)
         outer.addWidget(scroll)
         self.geometry_scroll = scroll
-        self.addPage(page)
+        self.geometry_page_id = self.addPage(page)
 
         self.dimension.currentIndexChanged.connect(self._sync_dimension)
         self.spacing_mode.currentIndexChanged.connect(
@@ -555,7 +562,377 @@ class FrameWizard(QWizard):
             self.create_beams_y,
         ):
             widget.toggled.connect(self._update_preview)
+            widget.toggled.connect(self._update_member_summary)
         self.base_support.currentIndexChanged.connect(self._update_preview)
+
+    def _build_members_page(self) -> None:
+        page = QWizardPage()
+        page.setTitle("Members & Sections")
+        page.setSubTitle(
+            "Assign column and beam formulations, sections and geometric "
+            "transformations. This phase supports elasticBeamColumn and "
+            "distributed force/displacement-based beam-column elements."
+        )
+
+        scroll = QScrollArea()
+        scroll.setObjectName("frame-wizard-members-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+
+        self.column_formulation = QComboBox()
+        self.beam_formulation = QComboBox()
+        for combo in (self.column_formulation, self.beam_formulation):
+            combo.addItem("Elastic Beam-Column", "elasticBeamColumn")
+            combo.addItem("Force-Based Beam-Column", "forceBeamColumn")
+            combo.addItem(
+                "Displacement-Based Beam-Column",
+                "dispBeamColumn",
+            )
+
+        self.column_section = QComboBox()
+        self.beam_section = QComboBox()
+        self.column_transformation = QComboBox()
+        self.beam_transformation = QComboBox()
+
+        self.column_integration = QComboBox()
+        self.beam_integration = QComboBox()
+        for combo in (self.column_integration, self.beam_integration):
+            combo.addItem("Lobatto", "Lobatto")
+            combo.addItem("Legendre", "Legendre")
+            combo.addItem("Radau", "Radau")
+
+        self.column_integration_points = self._spin(5, 2, 20)
+        self.beam_integration_points = self._spin(5, 2, 20)
+
+        column_box = QGroupBox("Columns")
+        column_form = QFormLayout(column_box)
+        column_form.addRow("Formulation:", self.column_formulation)
+        column_form.addRow("Section:", self.column_section)
+        column_form.addRow(
+            "Geometric transformation:",
+            self.column_transformation,
+        )
+        column_form.addRow(
+            "Beam integration:",
+            self.column_integration,
+        )
+        column_form.addRow(
+            "Integration points:",
+            self.column_integration_points,
+        )
+        layout.addWidget(column_box)
+
+        beam_box = QGroupBox("Beams")
+        beam_form = QFormLayout(beam_box)
+        beam_form.addRow("Formulation:", self.beam_formulation)
+        beam_form.addRow("Section:", self.beam_section)
+        beam_form.addRow(
+            "Geometric transformation:",
+            self.beam_transformation,
+        )
+        beam_form.addRow("Beam integration:", self.beam_integration)
+        beam_form.addRow(
+            "Integration points:",
+            self.beam_integration_points,
+        )
+        layout.addWidget(beam_box)
+
+        note = QLabel(
+            "Auto geomTransf keeps FEWIZ's safe defaults: PDelta for "
+            "columns and Linear for beams. Existing transformations can "
+            "override Auto. Advanced hinge integrations are reserved for "
+            "the second half of Task 2."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("padding:8px;")
+        layout.addWidget(note)
+
+        self.member_summary = QLabel()
+        self.member_summary.setWordWrap(True)
+        self.member_summary.setStyleSheet("padding:8px;")
+        layout.addWidget(self.member_summary)
+
+        self.member_validation_status = QLabel()
+        self.member_validation_status.setWordWrap(True)
+        self.member_validation_status.setObjectName(
+            "frame-wizard-member-validation-status"
+        )
+        self.member_validation_status.setStyleSheet("padding:8px;")
+        layout.addWidget(self.member_validation_status)
+        layout.addStretch(1)
+
+        outer = QVBoxLayout(page)
+        outer.addWidget(scroll)
+        self.members_scroll = scroll
+        self.members_page_id = self.addPage(page)
+
+        self._populate_member_dependencies()
+
+        for combo in (
+            self.column_formulation,
+            self.beam_formulation,
+        ):
+            combo.currentIndexChanged.connect(
+                self._member_formulation_changed
+            )
+        for combo in (
+            self.column_section,
+            self.beam_section,
+            self.column_transformation,
+            self.beam_transformation,
+            self.column_integration,
+            self.beam_integration,
+        ):
+            combo.currentIndexChanged.connect(
+                self._update_member_summary
+            )
+        for spin in (
+            self.column_integration_points,
+            self.beam_integration_points,
+        ):
+            spin.valueChanged.connect(self._update_member_summary)
+
+    @staticmethod
+    def _section_is_compatible(
+        section_type: str,
+        element_type: str,
+    ) -> bool:
+        section_type = str(section_type)
+        if section_type in SHELL_SECTION_TYPES | MEMBRANE_SECTION_TYPES:
+            return False
+        if element_type == "elasticBeamColumn":
+            return section_type == "Elastic"
+        return section_type in {"Elastic", "Fiber"}
+
+    def _populate_section_combo(
+        self,
+        combo: QComboBox,
+        element_type: str,
+    ) -> None:
+        previous = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("Select section…", None)
+        for tag in sorted(self.project.sections):
+            section = self.project.sections[tag]
+            if not self._section_is_compatible(
+                section.section_type,
+                element_type,
+            ):
+                continue
+            combo.addItem(
+                f"{tag} · {section.name} ({section.section_type})",
+                int(tag),
+            )
+        index = combo.findData(previous)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        elif combo.count() == 2:
+            combo.setCurrentIndex(1)
+        combo.blockSignals(False)
+
+    def _populate_member_dependencies(self) -> None:
+        self._populate_section_combo(
+            self.column_section,
+            str(
+                self.column_formulation.currentData()
+                or "elasticBeamColumn"
+            ),
+        )
+        self._populate_section_combo(
+            self.beam_section,
+            str(
+                self.beam_formulation.currentData()
+                or "elasticBeamColumn"
+            ),
+        )
+
+        for combo, auto_text in (
+            (
+                self.column_transformation,
+                "Auto · PDelta column transformation",
+            ),
+            (
+                self.beam_transformation,
+                "Auto · Linear beam transformation",
+            ),
+        ):
+            previous = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem(auto_text, None)
+            for tag in sorted(self.project.transformations):
+                transformation = self.project.transformations[tag]
+                combo.addItem(
+                    f"{tag} · {transformation.name} "
+                    f"({transformation.transformation_type})",
+                    int(tag),
+                )
+            index = combo.findData(previous)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+            combo.blockSignals(False)
+
+    def _member_formulation_changed(self, *_args) -> None:
+        self._populate_section_combo(
+            self.column_section,
+            str(
+                self.column_formulation.currentData()
+                or "elasticBeamColumn"
+            ),
+        )
+        self._populate_section_combo(
+            self.beam_section,
+            str(
+                self.beam_formulation.currentData()
+                or "elasticBeamColumn"
+            ),
+        )
+        self._sync_member_controls()
+        self._update_member_summary()
+
+    def _sync_member_controls(self) -> None:
+        columns_on = bool(self.create_columns.isChecked())
+        beams_on = bool(
+            self.create_beams_x.isChecked()
+            or (
+                self.dimension.currentData() == "3D"
+                and self.create_beams_y.isChecked()
+            )
+        )
+        for widget in (
+            self.column_formulation,
+            self.column_section,
+            self.column_transformation,
+        ):
+            widget.setEnabled(columns_on)
+        for widget in (
+            self.beam_formulation,
+            self.beam_section,
+            self.beam_transformation,
+        ):
+            widget.setEnabled(beams_on)
+
+        column_nonlinear = (
+            self.column_formulation.currentData()
+            in {"forceBeamColumn", "dispBeamColumn"}
+        )
+        beam_nonlinear = (
+            self.beam_formulation.currentData()
+            in {"forceBeamColumn", "dispBeamColumn"}
+        )
+        self.column_integration.setEnabled(
+            columns_on and column_nonlinear
+        )
+        self.column_integration_points.setEnabled(
+            columns_on and column_nonlinear
+        )
+        self.beam_integration.setEnabled(beams_on and beam_nonlinear)
+        self.beam_integration_points.setEnabled(
+            beams_on and beam_nonlinear
+        )
+
+    def _member_validation_error(self) -> str:
+        columns_on = bool(self.create_columns.isChecked())
+        beams_on = bool(
+            self.create_beams_x.isChecked()
+            or (
+                self.dimension.currentData() == "3D"
+                and self.create_beams_y.isChecked()
+            )
+        )
+        for role, enabled, formulation, section_combo in (
+            (
+                "Column",
+                columns_on,
+                str(self.column_formulation.currentData()),
+                self.column_section,
+            ),
+            (
+                "Beam",
+                beams_on,
+                str(self.beam_formulation.currentData()),
+                self.beam_section,
+            ),
+        ):
+            if not enabled:
+                continue
+            section_tag = section_combo.currentData()
+            if section_tag is None:
+                return (
+                    f"{role} members require a compatible section. "
+                    "Create/assign one in the Section library first."
+                )
+            section = self.project.sections.get(int(section_tag))
+            if section is None:
+                return f"{role} section {section_tag} no longer exists."
+            if not self._section_is_compatible(
+                section.section_type,
+                formulation,
+            ):
+                return (
+                    f"{role} formulation {formulation} is not compatible "
+                    f"with section type {section.section_type}."
+                )
+        return ""
+
+    def _update_member_summary(self, *_args) -> None:
+        if not hasattr(self, "member_summary"):
+            return
+        self._sync_member_controls()
+
+        column_type = str(
+            self.column_formulation.currentData()
+            or "elasticBeamColumn"
+        )
+        beam_type = str(
+            self.beam_formulation.currentData()
+            or "elasticBeamColumn"
+        )
+        column_section = self.column_section.currentText()
+        beam_section = self.beam_section.currentText()
+        column_transf = self.column_transformation.currentText()
+        beam_transf = self.beam_transformation.currentText()
+
+        column_extra = ""
+        if column_type in {"forceBeamColumn", "dispBeamColumn"}:
+            column_extra = (
+                f" · {self.column_integration.currentData()} / "
+                f"{self.column_integration_points.value()} pts"
+            )
+        beam_extra = ""
+        if beam_type in {"forceBeamColumn", "dispBeamColumn"}:
+            beam_extra = (
+                f" · {self.beam_integration.currentData()} / "
+                f"{self.beam_integration_points.value()} pts"
+            )
+
+        self.member_summary.setText(
+            "<b>Member assignment summary</b><br>"
+            f"Columns: {column_type} · {column_section} · "
+            f"{column_transf}{column_extra}<br>"
+            f"Beams: {beam_type} · {beam_section} · "
+            f"{beam_transf}{beam_extra}"
+        )
+
+        error = self._member_validation_error()
+        finish = self.button(QWizard.FinishButton)
+        if error:
+            self.member_validation_status.setText(
+                "<b>Member definition needs attention</b><br>" + error
+            )
+            if finish is not None and self.currentId() == self.members_page_id:
+                finish.setEnabled(False)
+        else:
+            self.member_validation_status.setText(
+                "<b>Member definition ready</b><br>"
+                "Selected formulations, sections and transformations are "
+                "compatible with this Task 2 phase."
+            )
+            if finish is not None and self.currentId() == self.members_page_id:
+                finish.setEnabled(True)
 
     def _resize_spacing_editor(
         self,
@@ -592,7 +969,9 @@ class FrameWizard(QWizard):
         elif not self.create_beams_y.isChecked():
             self.create_beams_y.setChecked(True)
         self.base_support.setEnabled(not is_3d)
+        self._sync_member_controls()
         self._update_preview()
+        self._update_member_summary()
 
     def _sync_spacing_mode(self, *_args) -> None:
         individual = self.spacing_mode.currentData() == "Individual"
@@ -650,6 +1029,46 @@ class FrameWizard(QWizard):
                 bool(self.create_beams_y.isChecked())
                 if dimension == "3D"
                 else False
+            ),
+            column_section_tag=(
+                int(self.column_section.currentData())
+                if self.column_section.currentData() is not None
+                else None
+            ),
+            beam_section_tag=(
+                int(self.beam_section.currentData())
+                if self.beam_section.currentData() is not None
+                else None
+            ),
+            column_transf_tag=(
+                int(self.column_transformation.currentData())
+                if self.column_transformation.currentData() is not None
+                else None
+            ),
+            beam_transf_tag=(
+                int(self.beam_transformation.currentData())
+                if self.beam_transformation.currentData() is not None
+                else None
+            ),
+            column_element_type=str(
+                self.column_formulation.currentData()
+                or "elasticBeamColumn"
+            ),
+            beam_element_type=str(
+                self.beam_formulation.currentData()
+                or "elasticBeamColumn"
+            ),
+            column_integration_type=str(
+                self.column_integration.currentData() or "Lobatto"
+            ),
+            beam_integration_type=str(
+                self.beam_integration.currentData() or "Lobatto"
+            ),
+            column_integration_points=int(
+                self.column_integration_points.value()
+            ),
+            beam_integration_points=int(
+                self.beam_integration_points.value()
             ),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
@@ -760,18 +1179,44 @@ class FrameWizard(QWizard):
         else:
             self.validation_status.setText(
                 "<b>Geometry ready</b><br>"
-                "Grid coordinates and topology are valid. Finish creates "
-                "the frame using the existing Frame Grid backend."
+                "Grid coordinates and topology are valid. Continue to "
+                "Members & Sections."
             )
             if finish is not None:
                 finish.setEnabled(True)
 
     def validateCurrentPage(self) -> bool:  # noqa: N802
-        try:
-            validate_frame_grid_spec(self.spec())
-        except (TypeError, ValueError) as exc:
-            self.validation_status.setText(
-                "<b>Geometry needs attention</b><br>" + str(exc)
-            )
-            return False
+        if self.currentId() == self.geometry_page_id:
+            try:
+                validate_frame_grid_spec(self.spec())
+            except (TypeError, ValueError) as exc:
+                self.validation_status.setText(
+                    "<b>Geometry needs attention</b><br>" + str(exc)
+                )
+                return False
+            return True
+
+        if self.currentId() == self.members_page_id:
+            error = self._member_validation_error()
+            if error:
+                self.member_validation_status.setText(
+                    "<b>Member definition needs attention</b><br>" + error
+                )
+                return False
+            try:
+                validate_frame_grid_spec(self.spec())
+            except (TypeError, ValueError) as exc:
+                self.member_validation_status.setText(
+                    "<b>Member definition needs attention</b><br>"
+                    + str(exc)
+                )
+                return False
+            return True
         return True
+
+    def initializePage(self, page_id: int) -> None:  # noqa: N802
+        super().initializePage(page_id)
+        if page_id == self.members_page_id:
+            self._populate_member_dependencies()
+            self._sync_member_controls()
+            self._update_member_summary()
