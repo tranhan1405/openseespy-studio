@@ -2875,10 +2875,16 @@ class FrameWizard(QWizard):
             slab_divisions_y=int(self.slab_divisions_y.value()),
             slab_corotational=bool(self.slab_corotational.isChecked()),
             slab_mass_per_area=float(self.slab_mass_per_area.value()),
-            foundation_mode=str(
-                self.foundation_mode.currentData() or "Direct"
+            foundation_mode=(
+                str(self.foundation_mode.currentData() or "Direct")
+                if hasattr(self, "foundation_mode")
+                else "Direct"
             ),
-            foundation_material_tags=self._foundation_material_tags(),
+            foundation_material_tags=(
+                self._foundation_material_tags()
+                if hasattr(self, "foundation_materials")
+                else (0, 0, 0, 0, 0, 0)
+            ),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
                 self.base_support.currentData() or "Fixed"
