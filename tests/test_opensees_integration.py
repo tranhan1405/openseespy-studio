@@ -15,6 +15,10 @@ from openseespy_studio.crack_results import (
 from openseespy_studio.generator import material_to_openseespy, to_openseespy
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.model import StructuralModel
+from openseespy_studio.masonry_wall import (
+    MasonryWallSpec,
+    build_masonry_wall,
+)
 from openseespy_studio.moment_curvature import (
     MomentCurvatureSpec,
     build_moment_curvature_project,
@@ -3185,4 +3189,53 @@ def test_generated_3d_friction_bearings_construct_in_real_opensees(
 
     assert completed.returncode == 0, completed.stderr
     assert "FRICTION_BEARINGS_3D_OK" in completed.stdout
+
+def test_generated_masonpan12_constructs_in_real_opensees(tmp_path):
+    project = ProjectDatabase()
+    result = build_masonry_wall(
+        project,
+        MasonryWallSpec(
+            width=3.0,
+            height=2.8,
+            thickness=0.15,
+            formulation="MasonPan12",
+            masonpan_w_tot=0.25,
+            masonpan_w1=0.5,
+            name="Runtime Masonry",
+        ),
+    )
+    assert len(result.node_tags) == 12
+    assert len(result.element_tags) == 1
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        nd_materials=project.nd_materials,
+        friction_models=project.friction_models,
+        units=project.units,
+    )
+    assert "# ERROR:" not in script
+    assert "ops.uniaxialMaterial('Masonry'" in script
+    assert "ops.element('MasonPan12'" in script
+
+    script_path = tmp_path / "masonpan12-smoke.py"
+    script_path.write_text(
+        script + "\nprint('MASONPAN12_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "MASONPAN12_OK" in completed.stdout
 
