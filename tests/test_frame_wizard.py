@@ -1118,7 +1118,7 @@ def test_generate_beamcolumnjoint_uses_thirteen_component_materials():
     )
 
 
-def test_generate_krawinkler_native_2d_uses_rotational_dof_three():
+def test_generate_krawinkler_native_2d_uses_rz_direction_six():
     project = _macro_joint_project()
     spec = FrameGridSpec(
         nx=1,
@@ -1151,7 +1151,7 @@ def test_generate_krawinkler_native_2d_uses_rotational_dof_three():
     )
     assert "ops.model('basic', '-ndm', 2, '-ndf', 3)" in source
     assert "Krawinkler panel-zone macro" in source
-    assert "'-dir', 3" in source
+    assert "'-dir', 6" in source
 
 
 def test_frame_macro_joint_panel_must_fit_grid_spacing():
