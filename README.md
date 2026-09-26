@@ -32,6 +32,9 @@ and inspectable result workflows.
 - Quick planar 2-D frame generation using the FEWIZ 3-D/6-DOF backend with
   automatic out-of-plane restraints.
 - Quick 1-D column / experimental specimen workflow.
+- RC Wall Wizard for MEFI/RCLMS, MVLEM, SFI_MVLEM and MVLEM_3D.
+- Masonry Wall Wizard with equivalent diagonal-strut and native 12-node
+  MasonPan12 formulations, engineering preview and project-material reuse.
 - Node and frame-element creation plus copy, move, rotate, mirror and delete.
 - Fixed, pinned and custom restraints; equalDOF, rigidLink and rigidDiaphragm.
 - Geometric transformations and elastic/nonlinear beam-column formulations.
@@ -45,6 +48,7 @@ Supported uniaxial material families include:
 - Steel01 / Steel02
 - ReinforcingSteel
 - Concrete01 / Concrete02 / Concrete04
+- Masonry (Crisafulli/Torrisi OpenSees model)
 - Hysteretic / Pinching4
 - Bond_SP01
 - ElasticPPGap
@@ -71,7 +75,9 @@ FEWIZ includes a provenance-first **Material Library** inspired by Engineering
 Data workflows. The official library accepts a constitutive parameter set only
 when it can be traced to a specific source and parameter-evidence location.
 Journal references require a DOI. Unsupported or merely "commonly used"
-values are not silently promoted to verified presets.
+values are not silently promoted to verified presets. The Masonry Wall Wizard
+therefore labels its built-in starting values as **custom/unverified** and
+supports reusing calibrated Masonry materials already stored in the project.
 
 The library currently contains **192 verified parameter records**:
 
