@@ -4092,9 +4092,6 @@ class MainWindow(QMainWindow):
             large=("ai_assistant",),
             small=("measure_distance", "clear_measurements"),
         )
-        tools_page.finish()
-        self.ribbon_tabs.addTab(tools_page, "Tools")
-
         self.model_representation_combo = QComboBox()
         self.model_representation_combo.setFixedWidth(132)
         self.model_representation_combo.addItem("Tube", "tube")
@@ -4245,31 +4242,11 @@ class MainWindow(QMainWindow):
         self.background_button.setMenu(background_menu)
         self._sync_background_menu(apply=True)
 
-        display_page = RibbonPage()
         add_group(
-            display_page,
-            "Views",
-            large=("iso",),
-            small=("xy", "xz", "yz"),
-        )
-        add_group(
-            display_page,
-            "Section View",
-            small=("show_section_axes",),
-            widgets=(
-                self.model_representation_combo,
-                self.model_color_combo,
-            ),
-        )
-        add_group(
-            display_page,
-            "Appearance",
-            widgets=(self.background_button,),
-        )
-        add_group(
-            display_page,
-            "Annotations",
+            tools_page,
+            "Display",
             small=(
+                "show_section_axes",
                 "show_node_numbers",
                 "show_element_numbers",
                 "show_nodal_loads",
@@ -4278,54 +4255,52 @@ class MainWindow(QMainWindow):
                 "show_masses",
                 "show_load_values",
             ),
+            widgets=(
+                self.model_representation_combo,
+                self.model_color_combo,
+                self.background_button,
+            ),
         )
-
-        measure_menu_button = QToolButton()
-        measure_menu_button.setObjectName("RibbonLargeButton")
-        measure_menu_button.setDefaultAction(self.actions["measure_distance"])
-        measure_menu_button.setText("Measure")
-        measure_menu_button.setIcon(self.actions["measure_distance"].icon())
-        measure_menu_button.setIconSize(QSize(28, 28))
-        measure_menu_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        measure_menu_button.setPopupMode(QToolButton.MenuButtonPopup)
-        measure_menu_button.setAutoRaise(True)
-        measure_popup = QMenu(measure_menu_button)
-        measure_popup.addAction(self.actions["measure_distance"])
-        measure_popup.addAction(self.actions["clear_measurements"])
-        measure_menu_button.setMenu(measure_popup)
-
-        add_group(
-            display_page,
-            "Inspect",
-            widgets=(measure_menu_button,),
-        )
-        display_page.finish()
-        self.ribbon_tabs.addTab(display_page, "Display")
+        tools_page.finish()
+        self.ribbon_tabs.addTab(tools_page, "Tools")
 
         self.selection_filter_combo = QComboBox()
         self.selection_filter_combo.addItems(["All", "Node", "Element"])
-        self.selection_filter_combo.setFixedWidth(98)
-        self.selection_filter_combo.setToolTip("Selection filter")
+        self.selection_filter_combo.setFixedWidth(92)
+        self.selection_filter_combo.setToolTip("Viewport selection filter")
         self.selection_filter_combo.currentTextChanged.connect(
             self._set_selection_filter
         )
-        selection_page = RibbonPage()
-        add_group(
-            selection_page,
-            "Select",
-            large=("select",),
-            small=("box", "polygon"),
-        )
-        add_group(
-            selection_page,
-            "Query",
-            small=("byid", "bytype"),
-            widgets=(self.selection_filter_combo,),
-        )
-        selection_page.finish()
-        self.ribbon_tabs.addTab(selection_page, "Selection")
 
-        self._ribbon_tab_indices = {
+        self.viewport_toolbar = QToolBar("Viewport", self)
+        self.viewport_toolbar.setObjectName("ViewportToolbar")
+        self.viewport_toolbar.setMovable(False)
+        self.viewport_toolbar.setFloatable(False)
+        self.viewport_toolbar.setIconSize(QSize(18, 18))
+        self.viewport_toolbar.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.addToolBarBreak(Qt.TopToolBarArea)
+        self.addToolBar(Qt.TopToolBarArea, self.viewport_toolbar)
+
+        self.viewport_toolbar.addAction(self.actions["select"])
+        self.viewport_toolbar.addAction(self.actions["box"])
+        self.viewport_toolbar.addAction(self.actions["clear_selection"])
+        self.viewport_toolbar.addWidget(self.selection_filter_combo)
+        self.viewport_toolbar.addSeparator()
+        self.viewport_toolbar.addAction(self.actions["iso"])
+        self.viewport_toolbar.addAction(self.actions["xy"])
+        self.viewport_toolbar.addAction(self.actions["xz"])
+        self.viewport_toolbar.addAction(self.actions["yz"])
+        self.viewport_toolbar.addAction(self.actions["fit_view"])
+        self.viewport_toolbar.addAction(self.actions["zoom_selection"])
+        self.viewport_toolbar.addSeparator()
+        self.viewport_toolbar.addAction(self.actions["hide_selection"])
+        self.viewport_toolbar.addAction(self.actions["isolate_selection"])
+        self.viewport_toolbar.addAction(self.actions["show_all"])
+        self.viewport_toolbar.addSeparator()
+        self.viewport_toolbar.addAction(self.actions["measure_distance"])
+        self.viewport_toolbar.addAction(self.actions["clear_measurements"])
+
+        self._ribbon_tab_indices = {        self._ribbon_tab_indices = {
             self.ribbon_tabs.tabText(index): index
             for index in range(self.ribbon_tabs.count())
         }
@@ -4904,9 +4879,35 @@ class MainWindow(QMainWindow):
             "recorders_root",
             "recorder",
         }
+        load_kinds = {
+            "boundary_root",
+            "boundary_group",
+            "loads_bc_root",
+            "loading_root",
+            "time_series_root",
+            "time_series",
+            "load_patterns_root",
+            "load_pattern",
+            "nodal_load",
+            "prescribed_displacement",
+            "element_load",
+            "ground_motions_root",
+            "ground_motion",
+            "mass_root",
+            "masses_root",
+            "nodal_mass",
+            "element_masses_root",
+            "element_mass",
+            "mass_sources_root",
+            "mass_source",
+        }
         selection_kinds = {
             "named_sets_root",
             "set",
+        }
+        recipe_kinds = {
+            "recipes_root",
+            "frame_recipe",
         }
 
         # Geometry is the only branch that owns the CAD/topology display.
@@ -4915,11 +4916,15 @@ class MainWindow(QMainWindow):
         if kinds and kinds <= geometry_kinds:
             return "geometry", "Geometry"
         if kinds & result_kinds:
-            return "fe", "Result"
+            return "fe", "Results"
         if kinds & analysis_kinds:
             return "fe", "Analysis"
+        if kinds & load_kinds:
+            return "fe", "Loads"
         if kinds & selection_kinds:
-            return "fe", "Selection"
+            return "fe", "Model"
+        if kinds & recipe_kinds:
+            return "fe", "Model"
         if kinds:
             return "fe", "Model"
         return "fe", None
@@ -6228,6 +6233,30 @@ class MainWindow(QMainWindow):
         fe_model.setData(0, Qt.UserRole, ("fe_model_root", None))
         fe_model.setExpanded(True)
         root.addChild(fe_model)
+
+        recipe_count = 1 if self.project.frame_wizard_recipe else 0
+        recipes_root = QTreeWidgetItem([f"Recipes ({recipe_count})"])
+        recipes_root.setIcon(0, studio_icon("frame-grid"))
+        recipes_root.setData(0, Qt.UserRole, ("recipes_root", None))
+        recipes_root.setExpanded(True)
+        root.addChild(recipes_root)
+        if self.project.frame_wizard_recipe:
+            recipe_name = str(
+                self.project.frame_wizard_recipe.get(
+                    "name",
+                    "Frame Wizard Managed Model",
+                )
+            )
+            frame_recipe_item = QTreeWidgetItem([
+                f"Frame Wizard · {recipe_name}"
+            ])
+            frame_recipe_item.setIcon(0, studio_icon("frame-grid"))
+            frame_recipe_item.setData(
+                0,
+                Qt.UserRole,
+                ("frame_recipe", None),
+            )
+            recipes_root.addChild(frame_recipe_item)
 
         nodes = QTreeWidgetItem([f"Nodes ({len(self.model.nodes)})"])
         nodes.setIcon(0, studio_icon("node-root"))
@@ -7790,7 +7819,7 @@ class MainWindow(QMainWindow):
         elif show_jobs_root:
             self._show_jobs_summary()
             self.status_message.setText(
-                "Results / Jobs overview · current result display preserved"
+                "Solution / Jobs overview · current result display preserved"
             )
         elif len(selected_payload_kinds) == 1:
             root_kind = next(iter(selected_payload_kinds))
@@ -7845,7 +7874,7 @@ class MainWindow(QMainWindow):
                     )
                 elif root_kind == "fe_model_root":
                     self.status_message.setText(
-                        "FE Model overview · base FE display"
+                        "Model overview · base FE display"
                     )
                 elif root_kind == "reinforcement_root":
                     self.status_message.setText(
