@@ -1060,6 +1060,8 @@ class FrameWizard(QWizard):
         self._build_bracing_page()
         self._build_loads_page()
         self._build_mass_page()
+        self._build_review_page()
+        self.setButtonText(QWizard.FinishButton, "Generate Model")
         self._sync_dimension()
         self._sync_spacing_mode()
         self._sync_member_controls()
@@ -1077,6 +1079,7 @@ class FrameWizard(QWizard):
         self._update_brace_summary()
         self._update_load_summary()
         self._update_mass_summary()
+        self._update_review_page()
 
     @staticmethod
     def _spin(value: int, lo: int = 1, hi: int = 50) -> QSpinBox:
@@ -4313,6 +4316,245 @@ class FrameWizard(QWizard):
             if finish is not None and self.currentId() == self.mass_page_id:
                 finish.setEnabled(True)
 
+    def _build_review_page(self) -> None:
+        page = QWizardPage()
+        page.setTitle("Preview & Create")
+        page.setSubTitle(
+            "Review the complete FE model definition before FEWIZ replaces "
+            "the active FE domain and generates the frame."
+        )
+
+        scroll = QScrollArea()
+        scroll.setObjectName("frame-wizard-review-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+
+        self.review_preview = FramePreview()
+        self.review_preview.setObjectName("frame-wizard-final-preview")
+        self.review_preview.setMinimumHeight(330)
+        layout.addWidget(self.review_preview)
+
+        self.review_geometry = QLabel()
+        self.review_geometry.setWordWrap(True)
+        geometry_group = QGroupBox("Geometry & topology")
+        geometry_layout = QVBoxLayout(geometry_group)
+        geometry_layout.addWidget(self.review_geometry)
+        layout.addWidget(geometry_group)
+
+        self.review_modeling = QLabel()
+        self.review_modeling.setWordWrap(True)
+        modeling_group = QGroupBox("Structural modeling")
+        modeling_layout = QVBoxLayout(modeling_group)
+        modeling_layout.addWidget(self.review_modeling)
+        layout.addWidget(modeling_group)
+
+        self.review_loading = QLabel()
+        self.review_loading.setWordWrap(True)
+        loading_group = QGroupBox("Loads, mass & analysis")
+        loading_layout = QVBoxLayout(loading_group)
+        loading_layout.addWidget(self.review_loading)
+        layout.addWidget(loading_group)
+
+        self.review_impact = QLabel()
+        self.review_impact.setWordWrap(True)
+        self.review_impact.setObjectName("frame-wizard-review-impact")
+        self.review_impact.setStyleSheet("padding:8px;")
+        layout.addWidget(self.review_impact)
+
+        self.review_validation_status = QLabel()
+        self.review_validation_status.setWordWrap(True)
+        self.review_validation_status.setObjectName(
+            "frame-wizard-review-validation-status"
+        )
+        self.review_validation_status.setStyleSheet("padding:8px;")
+        layout.addWidget(self.review_validation_status)
+        layout.addStretch(1)
+
+        outer = QVBoxLayout(page)
+        outer.addWidget(scroll)
+        self.review_scroll = scroll
+        self.review_page_id = self.addPage(page)
+
+    def _review_validation_errors(self) -> list[str]:
+        errors: list[str] = []
+        checks = (
+            self._member_validation_error,
+            self._joint_validation_error,
+            self._diaphragm_validation_error,
+            self._foundation_validation_error,
+            self._brace_validation_error,
+            self._load_validation_error,
+            self._mass_validation_error,
+        )
+        try:
+            validate_frame_grid_spec(self.spec())
+        except (TypeError, ValueError) as exc:
+            errors.append(str(exc))
+        for check in checks:
+            try:
+                error = str(check() or "").strip()
+            except (TypeError, ValueError) as exc:
+                error = str(exc).strip()
+            if error and error not in errors:
+                errors.append(error)
+        return errors
+
+    @staticmethod
+    def _review_enabled_text(enabled: bool, detail: str = "") -> str:
+        if not enabled:
+            return "None"
+        return detail or "Enabled"
+
+    def _update_review_page(self, *_args) -> None:
+        if not hasattr(self, "review_geometry"):
+            return
+
+        spec = self.spec()
+        self._update_preview()
+        try:
+            x_coords, y_coords, z_coords = frame_grid_coordinates(spec)
+        except (TypeError, ValueError):
+            x_coords = [0.0, 1.0]
+            y_coords = [0.0] if spec.planar_2d else [0.0, 1.0]
+            z_coords = [0.0, 1.0]
+
+        counts = self._object_counts(spec)
+        overall_x = x_coords[-1] - x_coords[0]
+        overall_y = (
+            y_coords[-1] - y_coords[0]
+            if len(y_coords) > 1
+            else 0.0
+        )
+        overall_z = z_coords[-1] - z_coords[0]
+
+        geometry_text = (
+            f"<b>{'2D X-Z' if spec.planar_2d else '3D'} frame</b> · "
+            f"{spec.nx} X bay(s)"
+            + (f" × {spec.ny} Y bay(s)" if not spec.planar_2d else "")
+            + f" · {spec.nz} storey(s)<br>"
+            f"Envelope: {overall_x:g} × "
+            + (
+                f"{overall_y:g} × "
+                if not spec.planar_2d
+                else ""
+            )
+            + f"{overall_z:g} {self.units.length}<br>"
+            f"Base topology: {counts['nodes']} node(s) · "
+            f"{counts['columns']} column(s) · "
+            f"{counts['beams_x']} X beam(s) · "
+            f"{counts['beams_y']} Y beam(s)"
+        )
+        self.review_geometry.setText(geometry_text)
+
+        joint_count = frame_joint_connection_count(spec)
+        floor_levels = frame_floor_levels(spec)
+        foundation_count = frame_foundation_count(spec)
+        brace_panels = frame_brace_panel_count(spec)
+        brace_elements = frame_brace_element_count(spec)
+
+        floor_detail = "None"
+        if spec.diaphragm_mode == "Rigid":
+            floor_detail = (
+                f"Rigid diaphragm · {len(frame_diaphragm_levels(spec))} floor(s)"
+            )
+        elif spec.diaphragm_mode == "Shell":
+            floor_detail = (
+                f"Shell slab · {len(floor_levels)} floor(s) · "
+                f"{frame_slab_count(spec)} slab panel(s)"
+            )
+
+        modeling_text = (
+            f"<b>Members:</b> {spec.column_element_type} columns · "
+            f"{spec.beam_element_type} beams<br>"
+            f"<b>Joints:</b> {spec.joint_model} · "
+            f"{joint_count} generated connection(s)<br>"
+            f"<b>Floors:</b> {floor_detail}<br>"
+            f"<b>Foundation:</b> {spec.foundation_mode}"
+            + (
+                f" · {foundation_count} spring connection(s)"
+                if spec.foundation_mode == "Springs"
+                else ""
+            )
+            + "<br>"
+            f"<b>Bracing:</b> "
+            + (
+                f"{brace_panels} panel(s) · {brace_elements} element(s) · "
+                f"{spec.brace_response_preset}"
+                if spec.brace_mode == "Truss"
+                else "None"
+            )
+        )
+        self.review_modeling.setText(modeling_text)
+
+        load_items: list[str] = []
+        if spec.load_mode == "Static":
+            if spec.load_self_weight:
+                load_items.append("self-weight")
+            if spec.load_beam_udl:
+                load_items.append("beam UDL")
+            if spec.load_floor_area:
+                load_items.append(
+                    f"floor area → {spec.load_floor_area_direction} beams"
+                )
+        load_text = ", ".join(load_items) if load_items else "None"
+
+        mass_text = (
+            "Automatic Mass Source"
+            if spec.mass_source_mode == "Source"
+            else "existing member/nodal mass"
+        )
+        modal_text = (
+            f"{spec.modal_num_modes} modes · {spec.modal_eigen_solver}"
+            if spec.modal_mode == "Modal"
+            else "None"
+        )
+        self.review_loading.setText(
+            f"<b>Static loads:</b> {load_text}<br>"
+            f"<b>Mass:</b> {mass_text}<br>"
+            f"<b>Modal preset:</b> {modal_text}"
+        )
+
+        existing_nodes = len(self.project.model.nodes)
+        existing_elements = len(self.project.model.elements)
+        if existing_nodes or existing_elements:
+            self.review_impact.setText(
+                "<b>Replacement mode</b><br>"
+                f"The current FE domain contains {existing_nodes} node(s) and "
+                f"{existing_elements} element(s). Generate Model will replace "
+                "model-linked FE objects. Material and section libraries are "
+                "preserved."
+            )
+        else:
+            self.review_impact.setText(
+                "<b>New model</b><br>"
+                "The active FE domain is empty. Generate Model will create "
+                "this frame as the new FE model."
+            )
+
+        errors = self._review_validation_errors()
+        finish = self.button(QWizard.FinishButton)
+        if errors:
+            self.review_validation_status.setText(
+                "<b>Model definition needs attention</b><br>"
+                + "<br>".join(
+                    f"• {error}"
+                    for error in errors[:6]
+                )
+            )
+            if finish is not None and self.currentId() == self.review_page_id:
+                finish.setEnabled(False)
+        else:
+            self.review_validation_status.setText(
+                "<b>Ready to generate</b><br>"
+                "All Frame Wizard definitions pass the current validation "
+                "checks. Review the preview, then choose Generate Model."
+            )
+            if finish is not None and self.currentId() == self.review_page_id:
+                finish.setEnabled(True)
+
     @staticmethod
     def _section_is_compatible(
         section_type: str,
@@ -5270,41 +5512,45 @@ class FrameWizard(QWizard):
             y_coords = [0.0] if spec.planar_2d else [0.0, 1.0]
             z_coords = [0.0, 1.0]
 
-        self.preview.set_frame(
-            dimension="2D" if spec.planar_2d else "3D",
-            x_coordinates=x_coords,
-            y_coordinates=y_coords,
-            z_coordinates=z_coords,
-            create_columns=spec.create_columns,
-            create_beams_x=spec.create_beams_x,
-            create_beams_y=spec.create_beams_y,
-            joint_model=spec.joint_model,
-            joint_scope=spec.joint_scope,
-            joint_panel_width=spec.joint_panel_width,
-            joint_panel_height=spec.joint_panel_height,
-            diaphragm_mode=spec.diaphragm_mode,
-            diaphragm_levels=spec.diaphragm_levels,
-            slab_divisions_x=spec.slab_divisions_x,
-            slab_divisions_y=spec.slab_divisions_y,
-            foundation_mode=spec.foundation_mode,
-            foundation_base_profiles=(
-                frame_foundation_profile_assignments(spec)
-            ),
-            brace_mode=spec.brace_mode,
-            brace_pattern=spec.brace_pattern,
-            brace_x_bays=spec.brace_x_bays,
-            brace_y_bays=spec.brace_y_bays,
-            brace_storeys=spec.brace_storeys,
-            brace_plane_mode=spec.brace_plane_mode,
-            brace_y_plane_scope=spec.brace_y_plane_scope,
-            brace_x_plane_scope=spec.brace_x_plane_scope,
-            brace_panel_patterns=spec.brace_panel_patterns,
-            load_mode=spec.load_mode,
-            load_beam_udl=spec.load_beam_udl,
-            load_beam_scope=spec.load_beam_scope,
-            load_storeys=spec.load_storeys,
-            load_floor_area=spec.load_floor_area,
-            load_floor_area_direction=spec.load_floor_area_direction,
+        preview_widgets = [self.preview]
+        if hasattr(self, "review_preview"):
+            preview_widgets.append(self.review_preview)
+        for preview_widget in preview_widgets:
+            preview_widget.set_frame(
+                dimension="2D" if spec.planar_2d else "3D",
+                x_coordinates=x_coords,
+                y_coordinates=y_coords,
+                z_coordinates=z_coords,
+                create_columns=spec.create_columns,
+                create_beams_x=spec.create_beams_x,
+                create_beams_y=spec.create_beams_y,
+                joint_model=spec.joint_model,
+                joint_scope=spec.joint_scope,
+                joint_panel_width=spec.joint_panel_width,
+                joint_panel_height=spec.joint_panel_height,
+                diaphragm_mode=spec.diaphragm_mode,
+                diaphragm_levels=spec.diaphragm_levels,
+                slab_divisions_x=spec.slab_divisions_x,
+                slab_divisions_y=spec.slab_divisions_y,
+                foundation_mode=spec.foundation_mode,
+                foundation_base_profiles=(
+                    frame_foundation_profile_assignments(spec)
+                ),
+                brace_mode=spec.brace_mode,
+                brace_pattern=spec.brace_pattern,
+                brace_x_bays=spec.brace_x_bays,
+                brace_y_bays=spec.brace_y_bays,
+                brace_storeys=spec.brace_storeys,
+                brace_plane_mode=spec.brace_plane_mode,
+                brace_y_plane_scope=spec.brace_y_plane_scope,
+                brace_x_plane_scope=spec.brace_x_plane_scope,
+                brace_panel_patterns=spec.brace_panel_patterns,
+                load_mode=spec.load_mode,
+                load_beam_udl=spec.load_beam_udl,
+                load_beam_scope=spec.load_beam_scope,
+                load_storeys=spec.load_storeys,
+                load_floor_area=spec.load_floor_area,
+                load_floor_area_direction=spec.load_floor_area_direction,
         )
 
         counts = self._object_counts(spec)
@@ -5414,6 +5660,17 @@ class FrameWizard(QWizard):
                     "<b>Mass definition needs attention</b><br>" + error
                 )
                 return False
+        if self.currentId() == self.review_page_id:
+            errors = self._review_validation_errors()
+            if errors:
+                self.review_validation_status.setText(
+                    "<b>Model definition needs attention</b><br>"
+                    + "<br>".join(
+                        f"• {error}"
+                        for error in errors[:6]
+                    )
+                )
+                return False
         return True
 
     def initializePage(self, page_id: int) -> None:  # noqa: N802
@@ -5449,3 +5706,5 @@ class FrameWizard(QWizard):
         elif page_id == self.mass_page_id:
             self._sync_mass_controls()
             self._update_mass_summary()
+        elif page_id == self.review_page_id:
+            self._update_review_page()
