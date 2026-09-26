@@ -2872,9 +2872,12 @@ def test_main_window_frame_wizard_reports_automatic_loads():
     assert '"floor_area_loads"' in source
     assert '"mass_sources"' in source
     assert '"generated_nodal_mass"' in source
+    assert '"modal_analyses"' in source
+    assert '"modal_results"' in source
     assert "beam UDL(s)" in source
     assert "floor-area beam load(s)" in source
     assert "seismic Mass Source" in source
+    assert "Modal analysis" in source
 
 
 def test_frame_floor_area_load_distributes_by_tributary_width():
@@ -3139,6 +3142,165 @@ def test_frame_wizard_mass_page_planar_keeps_horizontal_x_only():
         assert not wizard.mass_direction_y.isChecked()
         assert not wizard.mass_direction_z.isChecked()
         assert wizard.spec().mass_directions == (1,)
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_modal_preset_uses_generated_seismic_mass():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=2,
+        dx=5.0,
+        dy=4.0,
+        dz=3.5,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        load_mode="Static",
+        load_floor_area=True,
+        load_floor_area_pressure=1000.0,
+        load_floor_area_direction="X",
+        load_storeys=(1, 2),
+        mass_source_mode="Source",
+        mass_include_self=False,
+        mass_include_static_loads=True,
+        mass_static_load_factor=1.0,
+        mass_gravity_axis=3,
+        mass_directions=(1, 2),
+        modal_mode="Modal",
+        modal_num_modes=4,
+        modal_eigen_solver="-genBandArpack",
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["mass_sources"] == 1
+    assert result["generated_nodal_mass"] > 0.0
+    assert result["modal_analyses"] == 1
+    assert result["modal_analysis_tag"] > 0
+    assert result["modal_results"] == 5
+
+    assert len(project.analyses) == 1
+    analysis = project.analyses[int(result["modal_analysis_tag"])]
+    assert analysis.analysis_type == "Modal"
+    assert analysis.num_modes == 4
+    assert analysis.eigen_solver == "-genBandArpack"
+    assert project.active_analysis_tag == analysis.tag
+
+    results = project.solution_results_for_analysis(analysis.tag)
+    assert len(results) == 5
+    assert sum(item.result_type == "ModeShape" for item in results) == 4
+    assert sum(item.result_type == "Motion" for item in results) == 1
+
+
+def test_frame_modal_preset_accepts_member_element_mass_without_mass_source():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.5,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        column_mass_per_length=2.0,
+        beam_mass_per_length=1.0,
+        mass_source_mode="None",
+        modal_mode="Modal",
+        modal_num_modes=3,
+        modal_eigen_solver="-fullGenLapack",
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result.get("mass_sources", 0) == 0
+    assert result["modal_analyses"] == 1
+    analysis = project.analyses[int(result["modal_analysis_tag"])]
+    assert analysis.num_modes == 3
+    assert analysis.eigen_solver == "-fullGenLapack"
+    assert any(
+        element.mass_per_length > 0.0
+        for element in project.model.elements.values()
+    )
+
+
+def test_frame_modal_validation_requires_mass_definition():
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        modal_mode="Modal",
+        modal_num_modes=3,
+    )
+    with pytest.raises(ValueError, match="needs a mass definition"):
+        validate_frame_grid_spec(spec)
+
+
+def test_frame_modal_validation_rejects_invalid_mode_count_and_solver():
+    bad_count = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        column_mass_per_length=1.0,
+        modal_mode="Modal",
+        modal_num_modes=0,
+    )
+    with pytest.raises(ValueError, match="1 to 100 modes"):
+        validate_frame_grid_spec(bad_count)
+
+    bad_solver = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        column_mass_per_length=1.0,
+        modal_mode="Modal",
+        modal_num_modes=3,
+        modal_eigen_solver="-notARealSolver",
+    )
+    with pytest.raises(ValueError, match="eigen solver"):
+        validate_frame_grid_spec(bad_solver)
+
+
+def test_frame_wizard_modal_controls_map_to_spec_and_summary():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.dimension.setCurrentIndex(
+            wizard.dimension.findData("3D")
+        )
+        wizard.column_mass_per_length.setValue(2.0)
+        wizard.modal_mode.setCurrentIndex(
+            wizard.modal_mode.findData("Modal")
+        )
+        wizard.modal_num_modes.setValue(8)
+        wizard.modal_eigen_solver.setCurrentIndex(
+            wizard.modal_eigen_solver.findData("-fullGenLapack")
+        )
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.modal_mode == "Modal"
+        assert spec.modal_num_modes == 8
+        assert spec.modal_eigen_solver == "-fullGenLapack"
+        assert wizard.modal_num_modes.isEnabled()
+        assert wizard.modal_eigen_solver.isEnabled()
+        assert "8 mode(s)" in wizard.mass_summary.text()
+        assert "Modal analysis" in wizard.mass_summary.text()
+        assert "Mass definition ready" in wizard.mass_validation_status.text()
     finally:
         wizard.close()
         wizard.deleteLater()
