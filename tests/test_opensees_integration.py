@@ -4588,3 +4588,100 @@ def test_frame_wizard_mixed_bracing_builds_in_real_opensees(tmp_path: Path):
     )
     assert completed.returncode == 0, completed.stderr
     assert "FRAME_MIXED_BRACING_OK" in completed.stdout
+
+
+def test_frame_wizard_static_loads_run_in_real_opensees(tmp_path: Path):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            990,
+            "Loaded frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=990,
+        beam_section_tag=990,
+        load_mode="Static",
+        load_self_weight=True,
+        load_self_weight_density=7850.0,
+        load_beam_udl=True,
+        load_beam_scope="X",
+        load_storeys=(1,),
+        load_beam_udl_coordinate_system="global",
+        load_beam_udl_vector=(0.0, 0.0, -5000.0),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["load_patterns"] == 1
+    assert result["self_weight_loads"] == 3
+    assert result["beam_udl_loads"] == 1
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        time_series=project.time_series,
+        load_patterns=project.load_patterns,
+        nodal_loads=project.nodal_loads,
+        prescribed_displacements=project.prescribed_displacements,
+        element_loads=project.element_loads,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert "ops.timeSeries('Linear'" in source
+    assert "ops.pattern('Plain'" in source
+    assert source.count("'-beamUniform'") >= 4
+
+    top_right = 4
+    run_block = f"""
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Transformation')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_ok = ops.analyze(1)
+if _ok != 0:
+    raise RuntimeError(f'Loaded frame analysis failed: {{_ok}}')
+print('FRAME_STATIC_LOADS_OK', ops.nodeDisp({top_right}, 3))
+"""
+    target = tmp_path / "frame-wizard-static-loads.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_STATIC_LOADS_OK" in completed.stdout
