@@ -93,7 +93,24 @@ def validate_masonry_wall_spec(spec: MasonryWallSpec) -> None:
     if float(spec.L) <= 0.0:
         raise ValueError("Masonry material L must be positive.")
     if float(spec.a1) <= 0.0 or float(spec.a2) < 0.0:
-        raise ValueError("Masonry Area1/Area2 factors must be non-negative, with Area1 > 0.")
+        raise ValueError(
+            "Masonry Area1/Area2 factors must be non-negative, "
+            "with Area1 > 0."
+        )
+    if str(spec.material_strategy) == "CreateCustom":
+        if not math.isclose(float(spec.L), 1.0, rel_tol=0.0, abs_tol=1.0e-12):
+            raise ValueError(
+                "FEWIZ masonry wall custom materials use normalized L=1. "
+                "Use an existing calibrated Masonry material for other L."
+            )
+        if not math.isclose(float(spec.a1), 1.0, rel_tol=0.0, abs_tol=1.0e-12):
+            raise ValueError(
+                "FEWIZ masonry wall custom materials use normalized Area1=1."
+            )
+        if float(spec.a2) > 1.0:
+            raise ValueError(
+                "Normalized Masonry Area2 must satisfy 0 <= Area2 <= 1."
+            )
     if float(spec.D1) >= 0.0 or float(spec.D2) >= 0.0:
         raise ValueError("Masonry degradation strains D1/D2 must be negative.")
     if int(spec.IENV) not in {0, 1}:
@@ -156,6 +173,14 @@ def _material_source() -> dict[str, object]:
         "library": "FEWIZ Masonry Wall Wizard",
         "status": "user_defined",
         "model": "Masonry",
+        "reference": {
+            "type": "OpenSees source code",
+            "title": "Masonry.cpp · Crisafulli/Torrisi Masonry material",
+            "url": (
+                "https://github.com/OpenSees/OpenSees/blob/master/"
+                "SRC/material/uniaxial/Masonry.cpp"
+            ),
+        },
         "note": (
             "Generic starting values only. Calibrate Masonry parameters "
             "against project-specific masonry/infill test data."
