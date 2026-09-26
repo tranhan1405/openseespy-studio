@@ -4,15 +4,26 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QScrollArea
 
-from openseespy_studio.generator import material_to_openseespy, to_openseespy
+from openseespy_studio.generator import (
+    analysis_to_openseespy,
+    material_to_openseespy,
+    to_openseespy,
+)
 from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.masonry_wall import (
     MasonryWallSpec,
     build_masonry_wall,
     validate_masonry_wall_spec,
 )
-from openseespy_studio.project import MaterialData, ProjectDatabase
+from openseespy_studio.project import (
+    AnalysisSettingsData,
+    MaterialData,
+    ProjectDatabase,
+    SolutionResultData,
+)
+from openseespy_studio.result_catalog import result_choices_for_analysis
 from openseespy_studio.ui.masonry_wall_wizard import MasonryWallWizard
+from openseespy_studio.ui.results_panel import ResultsPanel
 from openseespy_studio.validation import validate_project
 
 
@@ -501,4 +512,120 @@ def test_masonry_wall_wizard_all_pages_scroll_and_geometry_preview_is_live():
     finally:
         wizard.close()
         wizard.deleteLater()
+
+def test_masonry_result_catalog_exposes_native_masonpan12_requests():
+    choices = result_choices_for_analysis("Static")
+    masonry = {
+        choice.result_type: choice
+        for choice in choices
+        if choice.category == "Masonry Results"
+    }
+    assert set(masonry) == {
+        "MasonryPanelShear",
+        "MasonryStrutForce",
+        "MasonryStrutStrain",
+    }
+    assert masonry["MasonryStrutForce"].settings["component"] == "P1"
+    assert masonry["MasonryStrutStrain"].settings["component"] == "E1"
+
+    for result_type in masonry:
+        result = SolutionResultData(
+            1,
+            1,
+            result_type,
+            result_type,
+            element_scope=[7],
+        )
+        assert result.result_type == result_type
+
+
+def test_masonry_result_generator_captures_native_responses():
+    settings = AnalysisSettingsData(
+        1,
+        "Masonry response capture",
+        steps=1,
+        recovery=False,
+        adaptive_step=False,
+        live_convergence=False,
+    )
+    script = "\n".join(
+        analysis_to_openseespy(
+            settings,
+            node_tags=[1],
+            element_tags=[7],
+            masonry_history_tags=[7],
+            support_node_tags=[],
+            monitor_node=1,
+        )
+    )
+
+    compile(script, "<masonry-result-generator>", "exec")
+    assert "_studio_masonry_history_tags = [7]" in script
+    assert "ops.eleResponse(_studio_element, 'Shear')" in script
+    assert "ops.eleResponse(_studio_element, 'localForce')" in script
+    assert "ops.eleResponse(_studio_element, 'deformation')" in script
+    assert "'masonry': _studio_masonry_responses" in script
+
+
+def test_masonry_results_panel_plots_shear_force_and_strut_history():
+    panel = ResultsPanel()
+    try:
+        result = {
+            "analysis": {"type": "Static"},
+            "history": {
+                "time": [0.1, 0.2],
+                "nodes": {},
+                "masonry": {
+                    "7": {
+                        "shear": [
+                            [0.001, 10.0],
+                            [0.002, 20.0],
+                        ],
+                        "strut_forces": [
+                            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                            [2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+                        ],
+                        "strut_strains": [
+                            [0.01, 0.02, 0.03, 0.04, 0.05, 0.06],
+                            [0.02, 0.03, 0.04, 0.05, 0.06, 0.07],
+                        ],
+                    }
+                },
+            },
+            "final": {
+                "node_displacements": {},
+                "node_reactions": {},
+            },
+            "modes": {},
+        }
+        panel.set_result(result)
+
+        panel.show_solution_result(
+            "MasonryPanelShear",
+            {"_element_scope": [7]},
+        )
+        assert panel.tabs.tabText(panel.tabs.currentIndex()) == (
+            "Masonry Results"
+        )
+        assert panel.masonry_element.currentData() == 7
+        assert panel.masonry_plot._x == pytest.approx([0.001, 0.002])
+        assert panel.masonry_plot._y == pytest.approx([10.0, 20.0])
+
+        panel.show_solution_result(
+            "MasonryStrutForce",
+            {"component": "P3", "_element_scope": [7]},
+        )
+        assert panel.masonry_component.currentData() == 2
+        assert panel.masonry_plot._x == pytest.approx([0.1, 0.2])
+        assert panel.masonry_plot._y == pytest.approx([3.0, 4.0])
+
+        panel.show_solution_result(
+            "MasonryStrutStrain",
+            {"component": "E6", "_element_scope": [7]},
+        )
+        assert panel.masonry_component.currentData() == 5
+        assert panel.masonry_plot._y == pytest.approx([0.06, 0.07])
+    finally:
+        panel.close()
+        panel.deleteLater()
 
