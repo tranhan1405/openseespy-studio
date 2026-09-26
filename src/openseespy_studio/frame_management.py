@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import json
 from typing import Any
@@ -141,7 +142,7 @@ def build_frame_candidate(
 ) -> tuple[ProjectDatabase, dict[str, int | float], int]:
     candidate = ProjectDatabase.from_dict(project.to_dict())
     candidate.frame_wizard_recipe = {}
-    candidate_spec = FrameGridSpec(**vars(spec))
+    candidate_spec = replace(spec)
     created_transformations = prepare_frame_grid(
         candidate,
         candidate_spec,
