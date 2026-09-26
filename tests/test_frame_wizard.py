@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QComboBox, QWizard
 
 from openseespy_studio.frame_setup import prepare_frame_grid
+from openseespy_studio.frame_presets import frame_spec_to_preset
 from openseespy_studio.generator import (
     FrameGridSpec,
     frame_brace_element_count,
@@ -3523,3 +3524,185 @@ def test_main_window_frame_wizard_generation_is_single_undoable_workflow():
     assert '"modal_analysis_tag"' in source
     assert 'self._select_tree_payload("analysis", modal_tag)' in source
     assert "self._record_project_change(" in source
+
+
+def test_frame_wizard_load_preset_populates_controls_and_review_name():
+    wizard = FrameWizard(_member_project())
+    try:
+        spec = FrameGridSpec(
+            nx=2,
+            ny=2,
+            nz=2,
+            dx=4.0,
+            dy=5.0,
+            dz=3.2,
+            planar_2d=False,
+            create_columns=True,
+            create_beams_x=True,
+            create_beams_y=True,
+            column_section_tag=1,
+            beam_section_tag=1,
+            column_mass_per_length=2.0,
+            beam_mass_per_length=1.0,
+            diaphragm_mode="Rigid",
+            diaphragm_levels=(1, 2),
+            load_mode="Static",
+            load_beam_udl=True,
+            load_beam_udl_coordinate_system="global",
+            load_beam_udl_vector=(0.0, 0.0, -8.0),
+            load_beam_scope="Both",
+            load_storeys=(1, 2),
+            mass_source_mode="Source",
+            mass_include_self=True,
+            mass_include_static_loads=True,
+            mass_static_load_factor=1.0,
+            mass_gravity_axis=3,
+            mass_directions=(1, 2),
+            modal_mode="Modal",
+            modal_num_modes=5,
+            modal_eigen_solver="-genBandArpack",
+        )
+        preset = frame_spec_to_preset(spec, name="Office Frame")
+        issues = wizard._load_preset_data(
+            preset,
+            name="Office Frame",
+        )
+        _APP.processEvents()
+
+        loaded = wizard.spec()
+        assert issues == []
+        assert not loaded.planar_2d
+        assert (loaded.nx, loaded.ny, loaded.nz) == (2, 2, 2)
+        assert loaded.column_section_tag == 1
+        assert loaded.beam_section_tag == 1
+        assert loaded.diaphragm_mode == "Rigid"
+        assert loaded.diaphragm_levels == (1, 2)
+        assert loaded.load_beam_udl
+        assert loaded.load_beam_udl_vector == pytest.approx(
+            (0.0, 0.0, -8.0)
+        )
+        assert loaded.load_storeys == (1, 2)
+        assert loaded.mass_source_mode == "Source"
+        assert loaded.modal_mode == "Modal"
+        assert loaded.modal_num_modes == 5
+        assert wizard.active_preset_name == "Office Frame"
+        assert "Preset:</b> Office Frame" in wizard.review_geometry.text()
+        assert "dependencies resolved" in wizard.preset_status.text()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_builtin_preset_loads_and_surfaces_dependencies():
+    wizard = FrameWizard(_member_project())
+    try:
+        index = wizard.preset_combo.findData(
+            "builtin:3D Braced Frame"
+        )
+        assert index >= 0
+        wizard.preset_combo.setCurrentIndex(index)
+        wizard._load_selected_preset()
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert wizard.active_preset_name == "3D Braced Frame"
+        assert not spec.planar_2d
+        assert spec.brace_mode == "Truss"
+        assert spec.brace_pattern == "X"
+        assert "Brace material is not assigned" in (
+            wizard.preset_status.text()
+        )
+        assert "Column section is not assigned" in (
+            wizard.preset_status.text()
+        )
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_user_preset_persists_in_qsettings_and_reloads():
+    settings = FrameWizard._preset_settings()
+    key = "frame_wizard/presets_json"
+    previous = settings.value(key, None)
+    settings.remove(key)
+    settings.sync()
+
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
+        wizard.x_bays.setValue(4)
+        wizard.storeys.setValue(2)
+        wizard._store_user_preset("My Reusable Frame", wizard.spec())
+        settings.sync()
+
+        assert wizard.preset_combo.findData(
+            "user:My Reusable Frame"
+        ) >= 0
+        assert "My Reusable Frame" in wizard.review_geometry.text()
+
+        second = FrameWizard(_member_project())
+        try:
+            index = second.preset_combo.findData(
+                "user:My Reusable Frame"
+            )
+            assert index >= 0
+            second.preset_combo.setCurrentIndex(index)
+            second._load_selected_preset()
+            _APP.processEvents()
+
+            assert second.x_bays.value() == 4
+            assert second.storeys.value() == 2
+            assert second.spec().column_section_tag == 1
+            assert second.spec().beam_section_tag == 1
+            assert second.active_preset_name == "My Reusable Frame"
+        finally:
+            second.close()
+            second.deleteLater()
+            _APP.processEvents()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+        settings.remove(key)
+        if previous is not None:
+            settings.setValue(key, previous)
+        settings.sync()
+
+
+def test_frame_wizard_preset_dependency_warning_for_missing_section():
+    wizard = FrameWizard(_member_project())
+    try:
+        spec = FrameGridSpec(
+            nx=1,
+            nz=1,
+            planar_2d=True,
+            create_columns=True,
+            create_beams_x=True,
+            create_beams_y=False,
+            column_section_tag=999,
+            beam_section_tag=1,
+        )
+        preset = frame_spec_to_preset(
+            spec,
+            name="Missing Dependency",
+        )
+        issues = wizard._load_preset_data(
+            preset,
+            name="Missing Dependency",
+        )
+        _APP.processEvents()
+
+        assert any("Column section 999" in item for item in issues)
+        assert "Column section" in wizard.preset_status.text()
+        assert wizard.active_preset_name == "Missing Dependency"
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
