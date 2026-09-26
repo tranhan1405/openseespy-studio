@@ -5,6 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from .solver_backend import load_openseespy_runtime
+
 
 _WORKER_SWITCHES = {
     "openseespy_studio.solver_worker": "--solver-worker",
@@ -116,7 +118,9 @@ def probe_opensees_runtime(
     else:
         command = (
             "import importlib.metadata as m, sys\n"
-            "import openseespy.opensees as ops\n"
+            "from openseespy_studio.solver_backend import "
+            "load_openseespy_runtime\n"
+            "ops = load_openseespy_runtime()\n"
             "print('openseespy=' + m.version('openseespy'))\n"
             "if sys.platform == 'win32':\n"
             "    print('openseespywin=' + m.version('openseespywin'))\n"
@@ -162,7 +166,7 @@ def check_opensees_material_in_process(material_type: str) -> None:
             f"No OpenSees runtime material probe is registered for {kind}."
         ) from exc
 
-    import openseespy.opensees as ops
+    ops = load_openseespy_runtime()
 
     ops.wipe()
     try:
