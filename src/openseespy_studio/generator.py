@@ -97,6 +97,8 @@ class FrameGridSpec:
     slab_divisions_y: int = 1
     slab_corotational: bool = False
     slab_mass_per_area: float = 0.0
+    foundation_mode: str = "Direct"
+    foundation_material_tags: tuple[int, ...] = (0, 0, 0, 0, 0, 0)
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -504,6 +506,37 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
         if not math.isfinite(mass_per_area) or mass_per_area < 0.0:
             raise ValueError(
                 "Additional slab mass per area must be finite and non-negative."
+            )
+
+    foundation_mode = str(spec.foundation_mode or "Direct")
+    if foundation_mode not in {"Direct", "Springs"}:
+        raise ValueError(
+            f"Frame Wizard foundation mode {foundation_mode!r} is not supported."
+        )
+    foundation_tags = tuple(
+        int(tag) for tag in spec.foundation_material_tags
+    )
+    if len(foundation_tags) != 6 or any(tag < 0 for tag in foundation_tags):
+        raise ValueError(
+            "Foundation definition requires six material slots; "
+            "zero means rigid transfer."
+        )
+    if foundation_mode == "Springs":
+        if joint_model in macro_joint_models:
+            raise ValueError(
+                "Foundation springs currently require the standard 3D/6DOF "
+                "Frame Wizard backend; use rigid/pinned support with native "
+                "2D macro joints."
+            )
+        if not bool(spec.create_columns):
+            raise ValueError(
+                "Foundation springs require columns and base-column nodes."
+            )
+        active_dofs = (1, 3, 5) if spec.planar_2d else (1, 2, 3, 4, 5, 6)
+        if not any(foundation_tags[dof - 1] > 0 for dof in active_dofs):
+            raise ValueError(
+                "Foundation spring mode requires at least one active "
+                "uniaxial spring material."
             )
 
     frame_grid_coordinates(spec)
@@ -1543,6 +1576,143 @@ def apply_frame_shell_slabs(
     }
 
 
+def frame_foundation_count(spec: FrameGridSpec) -> int:
+    """Return the number of base foundation spring connections requested."""
+    if str(spec.foundation_mode or "Direct") != "Springs":
+        return 0
+    if not bool(spec.create_columns):
+        return 0
+    if spec.planar_2d:
+        return int(spec.nx) + 1
+    return (int(spec.nx) + 1) * (int(spec.ny) + 1)
+
+
+def apply_frame_foundation_springs(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Attach each frame base node to a coincident fixed ground node.
+
+    Positive material tags create zeroLength springs in those DOFs. Remaining
+    active frame DOFs are tied rigidly to the fixed ground node with equalDOF.
+    In planar 2D standard mode, out-of-plane DOFs remain restrained directly.
+    """
+    validate_frame_grid_spec(spec)
+    if str(spec.foundation_mode or "Direct") != "Springs":
+        return {
+            "foundation_connections": 0,
+            "foundation_ground_nodes": 0,
+            "foundation_constraints": 0,
+        }
+
+    model = project.model
+    if (int(model.ndm), int(model.ndf)) != (3, 6):
+        raise ValueError(
+            "Foundation springs require the standard 3D/6DOF frame backend."
+        )
+
+    material_tags = tuple(
+        int(tag) for tag in spec.foundation_material_tags
+    )
+    active_dofs = (1, 3, 5) if spec.planar_2d else (1, 2, 3, 4, 5, 6)
+    spring_materials = {
+        dof: material_tags[dof - 1]
+        for dof in active_dofs
+        if material_tags[dof - 1] > 0
+    }
+    missing = sorted({
+        int(tag)
+        for tag in spring_materials.values()
+        if int(tag) not in project.materials
+    })
+    if missing:
+        raise ValueError(
+            "Foundation spring material tag(s) do not exist: "
+            + ", ".join(map(str, missing))
+        )
+
+    if spec.planar_2d:
+        base_nodes = [
+            _frame_center_node_tag(spec, i, 0, 0)
+            for i in range(int(spec.nx) + 1)
+        ]
+    else:
+        base_nodes = [
+            _frame_center_node_tag(spec, i, j, 0)
+            for j in range(int(spec.ny) + 1)
+            for i in range(int(spec.nx) + 1)
+        ]
+
+    next_node_tag = max(model.nodes, default=0) + 1
+    next_connection_tag = max(
+        max(model.elements, default=0),
+        max(project.connections, default=0),
+    ) + 1
+    next_constraint_tag = max(project.constraints, default=0) + 1
+    connection_count = 0
+    constraint_count = 0
+
+    for base_tag in base_nodes:
+        base = model.nodes.get(int(base_tag))
+        if base is None:
+            continue
+
+        if spec.planar_2d:
+            model.set_fixity(base_tag, (0, 1, 0, 1, 0, 1))
+        else:
+            model.set_fixity(base_tag, (0, 0, 0, 0, 0, 0))
+
+        ground_tag = next_node_tag
+        next_node_tag += 1
+        model.add_node(
+            ground_tag,
+            float(base.xyz[0]),
+            float(base.xyz[1]),
+            float(base.xyz[2]),
+            ndf=6,
+        )
+        model.set_fixity(ground_tag, (1, 1, 1, 1, 1, 1))
+
+        rigid_dofs = tuple(
+            dof for dof in active_dofs
+            if dof not in spring_materials
+        )
+        generated_constraint_tag = None
+        if rigid_dofs:
+            constraint = ConstraintData(
+                tag=next_constraint_tag,
+                name=f"Foundation rigid transfer N{base_tag}",
+                constraint_type="equalDOF",
+                retained_node=ground_tag,
+                constrained_nodes=[base_tag],
+                dofs=rigid_dofs,
+            )
+            project.add_constraint(constraint)
+            generated_constraint_tag = int(constraint.tag)
+            next_constraint_tag += 1
+            constraint_count += 1
+
+        connection = ConnectionData(
+            tag=next_connection_tag,
+            name=f"Foundation spring N{base_tag}",
+            connection_type="zeroLength",
+            node_i=ground_tag,
+            node_j=base_tag,
+            materials_by_dof=dict(spring_materials),
+            generated_ground_node=ground_tag,
+            generated_constraint_tag=generated_constraint_tag,
+        )
+        project.add_connection(connection)
+        next_connection_tag += 1
+        connection_count += 1
+
+    return {
+        "foundation_connections": connection_count,
+        "foundation_ground_nodes": connection_count,
+        "foundation_constraints": constraint_count,
+    }
+
+
 def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
     """Replace model-linked project data with one Frame Wizard model."""
     validate_frame_grid_spec(spec)
@@ -1576,6 +1746,9 @@ def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
         result.update(apply_frame_rigid_diaphragms(project, spec))
     elif floor_mode == "Shell":
         result.update(apply_frame_shell_slabs(project, spec))
+
+    if str(spec.foundation_mode or "Direct") == "Springs":
+        result.update(apply_frame_foundation_springs(project, spec))
     return result
 
 
