@@ -132,6 +132,9 @@ def test_main_window_exposes_frame_wizard_action_and_handler():
     assert "FrameWizard(self.project" in handler
     assert "dialog.spec()" in handler
     assert "self._generate_frame_grid(spec)" in handler
+    assert "Replace Current FE Model" not in handler
+    assert "QMessageBox.question" not in handler
+    assert "Preview & Create owns replacement acknowledgement" in handler
     assert '"frame_wizard"' in actions
     assert '"Frame Wizard"' in actions
 
@@ -3329,6 +3332,10 @@ def test_frame_wizard_final_review_page_is_live_and_ready_for_valid_model():
         assert "Members:" in wizard.review_modeling.text()
         assert "Static loads:" in wizard.review_loading.text()
         assert "New model" in wizard.review_impact.text()
+        assert "Dry-run passed" in wizard.review_build.text()
+        assert "node(s)" in wizard.review_build.text()
+        assert "FE element(s)" in wizard.review_build.text()
+        assert not wizard.review_replace_ack.isVisible()
         assert "Ready to generate" in wizard.review_validation_status.text()
         assert wizard.button(QWizard.FinishButton).text() == "Generate Model"
         assert wizard.validateCurrentPage()
@@ -3338,7 +3345,7 @@ def test_frame_wizard_final_review_page_is_live_and_ready_for_valid_model():
         _APP.processEvents()
 
 
-def test_frame_wizard_final_review_warns_before_replacing_existing_fe_domain():
+def test_frame_wizard_final_review_warns_and_requires_replacement_ack():
     project = _member_project()
     project.model.add_node(100, 0.0, 0.0, 0.0)
     project.model.add_node(101, 1.0, 0.0, 0.0)
@@ -3350,6 +3357,12 @@ def test_frame_wizard_final_review_warns_before_replacing_existing_fe_domain():
     )
     wizard = FrameWizard(project)
     try:
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
         wizard.show()
         _APP.processEvents()
         wizard.setCurrentId(wizard.review_page_id)
@@ -3359,7 +3372,17 @@ def test_frame_wizard_final_review_warns_before_replacing_existing_fe_domain():
         assert "Replacement mode" in impact
         assert "2 node(s)" in impact
         assert "1 element(s)" in impact
-        assert "Material and section libraries are preserved" in impact
+        assert "Material, nDMaterial and section libraries are preserved" in impact
+        assert wizard.review_replace_ack.isVisible()
+        assert not wizard.review_replace_ack.isChecked()
+        assert "Confirm replacement" in wizard.review_validation_status.text()
+        assert not wizard.validateCurrentPage()
+
+        wizard.review_replace_ack.setChecked(True)
+        _APP.processEvents()
+        assert "Dry-run passed" in wizard.review_build.text()
+        assert "Ready to generate" in wizard.review_validation_status.text()
+        assert wizard.validateCurrentPage()
     finally:
         wizard.close()
         wizard.deleteLater()
@@ -3419,3 +3442,84 @@ def test_frame_wizard_final_review_updates_3d_system_summary():
         wizard.close()
         wizard.deleteLater()
         _APP.processEvents()
+
+
+def test_frame_wizard_dry_run_does_not_mutate_live_project():
+    project = _member_project()
+    project.model.add_node(100, 0.0, 0.0, 0.0)
+    project.model.add_node(101, 1.0, 0.0, 0.0)
+    project.model.add_element(100, 100, 101, section_tag=1)
+    before = project.to_dict()
+
+    wizard = FrameWizard(project)
+    try:
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
+        wizard._update_review_page()
+        _APP.processEvents()
+
+        assert "Dry-run passed" in wizard.review_build.text()
+        assert project.to_dict() == before
+        assert len(project.model.nodes) == 2
+        assert len(project.model.elements) == 1
+        assert not project.transformations
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_dry_run_reports_full_generated_pipeline():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
+        wizard.dimension.setCurrentIndex(
+            wizard.dimension.findData("3D")
+        )
+        wizard.load_mode.setCurrentIndex(
+            wizard.load_mode.findData("Static")
+        )
+        wizard.load_floor_area.setChecked(True)
+        wizard.load_floor_area_pressure.setValue(5.0)
+        wizard.mass_source_mode.setCurrentIndex(
+            wizard.mass_source_mode.findData("Source")
+        )
+        wizard.mass_include_self.setChecked(False)
+        wizard.mass_include_static.setChecked(True)
+        wizard.modal_mode.setCurrentIndex(
+            wizard.modal_mode.findData("Modal")
+        )
+        wizard.modal_num_modes.setValue(3)
+        wizard._update_review_page()
+        _APP.processEvents()
+
+        text = wizard.review_build.text()
+        assert "Dry-run passed" in text
+        assert "load pattern(s)" in text
+        assert "element load(s)" in text
+        assert "mass source(s)" in text
+        assert "analysis object(s)" in text
+        assert "result request(s)" in text
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_main_window_frame_wizard_generation_is_single_undoable_workflow():
+    source = inspect.getsource(MainWindow._generate_frame_grid)
+    assert "Frame Wizard · Generate 2D frame" in source
+    assert "Frame Wizard · Generate 3D frame" in source
+    assert 'self.viewport.set_view("iso")' in source
+    assert '"modal_analysis_tag"' in source
+    assert 'self._select_tree_payload("analysis", modal_tag)' in source
+    assert "self._record_project_change(" in source
