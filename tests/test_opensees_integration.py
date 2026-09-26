@@ -3224,6 +3224,7 @@ def test_generated_masonpan12_constructs_in_real_opensees(tmp_path):
     assert "ops.element('MasonPan12'" in script
 
     top_right = result.node_tags[6]
+    panel_tag = result.element_tags[0]
     run_block = f"""
 ops.timeSeries('Linear', 901)
 ops.pattern('Plain', 901, 901)
@@ -3238,6 +3239,10 @@ ops.analysis('Static')
 _masonry_ok = ops.analyze(1)
 if _masonry_ok != 0:
     raise RuntimeError(f'MasonPan12 smoke analysis failed: {{_masonry_ok}}')
+_shear = ops.eleResponse({panel_tag}, 'Shear') or []
+_force = ops.eleResponse({panel_tag}, 'localForce') or []
+_strain = ops.eleResponse({panel_tag}, 'deformation') or []
+print('MASONPAN12_RESPONSES_OK', len(_shear), len(_force), len(_strain))
 print('MASONPAN12_ANALYSIS_OK', ops.nodeDisp({top_right}, 1))
 """
     script_path = tmp_path / "masonpan12-smoke.py"
@@ -3256,4 +3261,5 @@ print('MASONPAN12_ANALYSIS_OK', ops.nodeDisp({top_right}, 1))
 
     assert completed.returncode == 0, completed.stderr
     assert "MASONPAN12_ANALYSIS_OK" in completed.stdout
+    assert "MASONPAN12_RESPONSES_OK 2 6 6" in completed.stdout
 
