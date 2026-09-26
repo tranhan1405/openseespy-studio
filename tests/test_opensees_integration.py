@@ -4069,3 +4069,119 @@ print('FRAME_FOUNDATION_OK', ops.nodeDisp({top_right}, 1))
     )
     assert completed.returncode == 0, completed.stderr
     assert "FRAME_FOUNDATION_OK" in completed.stdout
+
+
+def test_frame_wizard_per_base_foundation_profiles_run_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+
+    for tag, stiffness, name in (
+        (970, 1.0e8, "Footing UX"),
+        (971, 3.0e8, "Footing UZ"),
+        (972, 4.0e7, "Footing RY"),
+        (973, 4.0e8, "Pile-group UX"),
+        (974, 6.0e8, "Pile-group UZ"),
+        (975, 1.2e8, "Pile-group RY"),
+    ):
+        project.add_material(
+            MaterialData(
+                tag,
+                name,
+                "Elastic",
+                parameters={"E": stiffness},
+                source={
+                    "response_quantity": "force_deformation",
+                    "parameter_dimensions": {"E": "stiffness"},
+                },
+            )
+        )
+
+    project.add_section(
+        SectionData(
+            976,
+            "Per-base foundation frame",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dz=3.5,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=976,
+        beam_section_tag=976,
+        foundation_mode="Springs",
+        foundation_assignment_mode="PerBase",
+        foundation_profile_material_tags=(
+            (970, 0, 971, 0, 972, 0),
+            (973, 0, 974, 0, 975, 0),
+        ),
+        foundation_base_profile_indices=(0, 1),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["foundation_connections"] == 2
+    assert result["foundation_profiles_used"] == 2
+
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert "970, 971, 972" in source
+    assert "973, 974, 975" in source
+
+    top_right = 4
+    run_block = f"""
+ops.timeSeries('Linear', 997)
+ops.pattern('Plain', 997, 997)
+ops.load({top_right}, 1000.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Transformation')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_ok = ops.analyze(1)
+if _ok != 0:
+    raise RuntimeError(f'Per-base foundation analysis failed: {{_ok}}')
+print('FRAME_PER_BASE_FOUNDATION_OK', ops.nodeDisp({top_right}, 1))
+"""
+    target = tmp_path / "frame-wizard-per-base-foundation.py"
+    target.write_text(source + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_PER_BASE_FOUNDATION_OK" in completed.stdout
