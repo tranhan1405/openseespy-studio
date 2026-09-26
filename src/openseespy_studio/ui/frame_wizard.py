@@ -1059,6 +1059,7 @@ class FrameWizard(QWizard):
         self._build_foundation_page()
         self._build_bracing_page()
         self._build_loads_page()
+        self._build_mass_page()
         self._sync_dimension()
         self._sync_spacing_mode()
         self._sync_member_controls()
@@ -1067,6 +1068,7 @@ class FrameWizard(QWizard):
         self._sync_foundation_controls()
         self._sync_brace_controls()
         self._sync_load_controls()
+        self._sync_mass_controls()
         self._update_preview()
         self._update_member_summary()
         self._update_joint_summary()
@@ -1074,6 +1076,7 @@ class FrameWizard(QWizard):
         self._update_foundation_summary()
         self._update_brace_summary()
         self._update_load_summary()
+        self._update_mass_summary()
 
     @staticmethod
     def _spin(value: int, lo: int = 1, hi: int = 50) -> QSpinBox:
@@ -3807,6 +3810,9 @@ class FrameWizard(QWizard):
     def _load_control_changed(self, *_args) -> None:
         self._sync_load_controls()
         self._update_load_summary()
+        if hasattr(self, "mass_source_mode"):
+            self._sync_mass_controls()
+            self._update_mass_summary()
         self._update_preview()
 
     def _sync_load_controls(self, *_args) -> None:
@@ -3985,6 +3991,260 @@ class FrameWizard(QWizard):
                 "topology."
             )
             if finish is not None and self.currentId() == self.loads_page_id:
+                finish.setEnabled(True)
+
+
+    def _build_mass_page(self) -> None:
+        page = QWizardPage()
+        page.setTitle("Mass & Dynamic")
+        page.setSubTitle(
+            "Create a reproducible seismic Mass Source from structural self "
+            "mass and/or the gravity load pattern. This first-stage dynamic "
+            "setup prepares the model for modal and earthquake analyses."
+        )
+
+        scroll = QScrollArea()
+        scroll.setObjectName("frame-wizard-mass-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+
+        self.mass_source_mode = QComboBox()
+        self.mass_source_mode.addItem(
+            "None · keep existing element / nodal mass only",
+            "None",
+        )
+        self.mass_source_mode.addItem(
+            "Create and apply seismic Mass Source",
+            "Source",
+        )
+
+        mode_group = QGroupBox("Automatic seismic mass")
+        mode_form = QFormLayout(mode_group)
+        mode_form.addRow("Mass generation:", self.mass_source_mode)
+        layout.addWidget(mode_group)
+
+        self.mass_include_self = QCheckBox(
+            "Include structural self mass from section/material density"
+        )
+        self.mass_include_self.setChecked(True)
+        self.mass_include_static = QCheckBox(
+            "Convert the Frame Wizard static gravity pattern to mass"
+        )
+        self.mass_include_static.setChecked(True)
+        self.mass_static_factor = self._nonnegative(1.0)
+        self.mass_static_factor.setDecimals(4)
+
+        source_group = QGroupBox("Mass source components")
+        source_form = QFormLayout(source_group)
+        source_form.addRow("", self.mass_include_self)
+        source_form.addRow("", self.mass_include_static)
+        source_form.addRow(
+            "Static-pattern participation factor:",
+            self.mass_static_factor,
+        )
+        source_hint = QLabel(
+            "SelfWeight element loads are not counted twice when structural "
+            "self mass is enabled. Direct beam UDL and floor-area gravity in "
+            "the generated static pattern are converted using |W|/g."
+        )
+        source_hint.setWordWrap(True)
+        source_form.addRow(source_hint)
+        layout.addWidget(source_group)
+        self.mass_source_group = source_group
+
+        self.mass_gravity_axis = QComboBox()
+        self.mass_gravity_axis.addItem("Global X", 1)
+        self.mass_gravity_axis.addItem("Global Y", 2)
+        self.mass_gravity_axis.addItem("Global Z · typical gravity", 3)
+        self.mass_gravity_axis.setCurrentIndex(
+            self.mass_gravity_axis.findData(3)
+        )
+
+        self.mass_direction_x = QCheckBox("UX")
+        self.mass_direction_y = QCheckBox("UY")
+        self.mass_direction_z = QCheckBox("UZ")
+        self.mass_direction_x.setChecked(True)
+        self.mass_direction_y.setChecked(True)
+
+        direction_host = QWidget()
+        direction_layout = QHBoxLayout(direction_host)
+        direction_layout.setContentsMargins(0, 0, 0, 0)
+        direction_layout.addWidget(self.mass_direction_x)
+        direction_layout.addWidget(self.mass_direction_y)
+        direction_layout.addWidget(self.mass_direction_z)
+        direction_layout.addStretch(1)
+
+        direction_group = QGroupBox("Mass directions")
+        direction_form = QFormLayout(direction_group)
+        direction_form.addRow("Gravity force axis:", self.mass_gravity_axis)
+        direction_form.addRow("Assign mass to:", direction_host)
+        direction_hint = QLabel(
+            "For a 3D building, UX + UY is the normal lateral seismic "
+            "choice. For a planar X-Z frame FEWIZ automatically keeps UX "
+            "only when switching dimensions."
+        )
+        direction_hint.setWordWrap(True)
+        direction_form.addRow(direction_hint)
+        layout.addWidget(direction_group)
+        self.mass_direction_group = direction_group
+
+        compatibility_note = QLabel(
+            "Safety rule: automatic Mass Source replaces selected nodal mass. "
+            "Therefore FEWIZ blocks it when a nonzero rigid-diaphragm floor "
+            "mass or additional slab nodal mass is already defined. Use the "
+            "gravity-pattern route instead to avoid silent double/overwritten "
+            "mass."
+        )
+        compatibility_note.setWordWrap(True)
+        compatibility_note.setStyleSheet("padding:8px;")
+        layout.addWidget(compatibility_note)
+
+        self.mass_summary = QLabel()
+        self.mass_summary.setWordWrap(True)
+        self.mass_summary.setStyleSheet("padding:8px;")
+        layout.addWidget(self.mass_summary)
+
+        self.mass_validation_status = QLabel()
+        self.mass_validation_status.setWordWrap(True)
+        self.mass_validation_status.setObjectName(
+            "frame-wizard-mass-validation-status"
+        )
+        self.mass_validation_status.setStyleSheet("padding:8px;")
+        layout.addWidget(self.mass_validation_status)
+        layout.addStretch(1)
+
+        outer = QVBoxLayout(page)
+        outer.addWidget(scroll)
+        self.mass_scroll = scroll
+        self.mass_page_id = self.addPage(page)
+
+        self.mass_source_mode.currentIndexChanged.connect(
+            self._mass_control_changed
+        )
+        self.mass_include_self.toggled.connect(self._mass_control_changed)
+        self.mass_include_static.toggled.connect(self._mass_control_changed)
+        self.mass_static_factor.valueChanged.connect(
+            self._mass_control_changed
+        )
+        self.mass_gravity_axis.currentIndexChanged.connect(
+            self._mass_control_changed
+        )
+        for check in (
+            self.mass_direction_x,
+            self.mass_direction_y,
+            self.mass_direction_z,
+        ):
+            check.toggled.connect(self._mass_control_changed)
+
+    def _selected_mass_directions(self) -> tuple[int, ...]:
+        if not hasattr(self, "mass_direction_x"):
+            return ()
+        values = []
+        for dof, check in (
+            (1, self.mass_direction_x),
+            (2, self.mass_direction_y),
+            (3, self.mass_direction_z),
+        ):
+            if check.isChecked():
+                values.append(dof)
+        return tuple(values)
+
+    def _mass_control_changed(self, *_args) -> None:
+        self._sync_mass_controls()
+        self._update_mass_summary()
+
+    def _sync_mass_controls(self, *_args) -> None:
+        if not hasattr(self, "mass_source_mode"):
+            return
+        active = self.mass_source_mode.currentData() == "Source"
+        self.mass_source_group.setEnabled(active)
+        self.mass_direction_group.setEnabled(active)
+        self.mass_static_factor.setEnabled(
+            active and self.mass_include_static.isChecked()
+        )
+
+        if self.dimension.currentData() == "2D":
+            self.mass_direction_y.blockSignals(True)
+            self.mass_direction_z.blockSignals(True)
+            self.mass_direction_y.setChecked(False)
+            self.mass_direction_z.setChecked(False)
+            self.mass_direction_y.blockSignals(False)
+            self.mass_direction_z.blockSignals(False)
+            if active and not self.mass_direction_x.isChecked():
+                self.mass_direction_x.blockSignals(True)
+                self.mass_direction_x.setChecked(True)
+                self.mass_direction_x.blockSignals(False)
+
+    def _mass_validation_error(self) -> str:
+        try:
+            spec = self.spec()
+            validate_frame_grid_spec(spec)
+        except (TypeError, ValueError) as exc:
+            return str(exc)
+        return ""
+
+    def _update_mass_summary(self, *_args) -> None:
+        if not hasattr(self, "mass_summary"):
+            return
+        self._sync_mass_controls()
+        try:
+            spec = self.spec()
+            error = self._mass_validation_error()
+        except (TypeError, ValueError) as exc:
+            spec = self.spec()
+            error = str(exc)
+
+        if spec.mass_source_mode == "Source":
+            components = []
+            if spec.mass_include_self:
+                components.append("structural self mass")
+            if spec.mass_include_static_loads:
+                components.append(
+                    "static gravity pattern "
+                    f"× {spec.mass_static_load_factor:g}"
+                )
+            direction_names = {
+                1: "UX",
+                2: "UY",
+                3: "UZ",
+            }
+            self.mass_summary.setText(
+                "<b>Seismic mass summary</b><br>"
+                "Create + apply one Mass Source<br>"
+                "Components: "
+                + " + ".join(components)
+                + "<br>Gravity axis: "
+                + direction_names.get(spec.mass_gravity_axis, "?")
+                + " · assigned directions: "
+                + ", ".join(
+                    direction_names[value]
+                    for value in spec.mass_directions
+                )
+            )
+        else:
+            self.mass_summary.setText(
+                "<b>Seismic mass summary</b><br>"
+                "No automatic Mass Source will be created. Existing element "
+                "mass and nodal mass are left unchanged."
+            )
+
+        finish = self.button(QWizard.FinishButton)
+        if error:
+            self.mass_validation_status.setText(
+                "<b>Mass definition needs attention</b><br>" + error
+            )
+            if finish is not None and self.currentId() == self.mass_page_id:
+                finish.setEnabled(False)
+        else:
+            self.mass_validation_status.setText(
+                "<b>Mass definition ready</b><br>"
+                "Mass Source settings are consistent with the current frame, "
+                "floor and gravity-load definitions."
+            )
+            if finish is not None and self.currentId() == self.mass_page_id:
                 finish.setEnabled(True)
 
     @staticmethod
@@ -4453,6 +4713,9 @@ class FrameWizard(QWizard):
         if hasattr(self, "load_mode"):
             self._sync_load_controls()
             self._update_load_summary()
+        if hasattr(self, "mass_source_mode"):
+            self._sync_mass_controls()
+            self._update_mass_summary()
         self._update_preview()
         self._update_member_summary()
 
@@ -4834,6 +5097,36 @@ class FrameWizard(QWizard):
                 if hasattr(self, "load_floor_area_direction")
                 else "X"
             ),
+            mass_source_mode=(
+                str(self.mass_source_mode.currentData() or "None")
+                if hasattr(self, "mass_source_mode")
+                else "None"
+            ),
+            mass_include_self=(
+                bool(self.mass_include_self.isChecked())
+                if hasattr(self, "mass_include_self")
+                else True
+            ),
+            mass_include_static_loads=(
+                bool(self.mass_include_static.isChecked())
+                if hasattr(self, "mass_include_static")
+                else True
+            ),
+            mass_static_load_factor=(
+                float(self.mass_static_factor.value())
+                if hasattr(self, "mass_static_factor")
+                else 1.0
+            ),
+            mass_gravity_axis=(
+                int(self.mass_gravity_axis.currentData() or 3)
+                if hasattr(self, "mass_gravity_axis")
+                else 3
+            ),
+            mass_directions=(
+                self._selected_mass_directions()
+                if hasattr(self, "mass_direction_x")
+                else ((1,) if dimension == "2D" else (1, 2))
+            ),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
                 self.base_support.currentData() or "Fixed"
@@ -5030,6 +5323,13 @@ class FrameWizard(QWizard):
                     "<b>Load definition needs attention</b><br>" + error
                 )
                 return False
+        if self.currentId() == self.mass_page_id:
+            error = self._mass_validation_error()
+            if error:
+                self.mass_validation_status.setText(
+                    "<b>Mass definition needs attention</b><br>" + error
+                )
+                return False
         return True
 
     def initializePage(self, page_id: int) -> None:  # noqa: N802
@@ -5062,3 +5362,6 @@ class FrameWizard(QWizard):
             self._refresh_load_storeys()
             self._sync_load_controls()
             self._update_load_summary()
+        elif page_id == self.mass_page_id:
+            self._sync_mass_controls()
+            self._update_mass_summary()
