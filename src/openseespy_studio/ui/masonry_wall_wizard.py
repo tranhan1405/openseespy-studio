@@ -293,8 +293,8 @@ class MasonryWallWizard(QWizard):
         form.addRow("Uult:", self.Uult)
         form.addRow("Ucl:", self.Ucl)
         form.addRow("L:", self.L)
-        form.addRow("a1:", self.a1)
-        form.addRow("a2:", self.a2)
+        form.addRow("Area1 factor A1:", self.a1)
+        form.addRow("Area2 factor A2:", self.a2)
         form.addRow("D1:", self.D1)
         form.addRow("D2:", self.D2)
         form.addRow("Ach:", self.Ach)
@@ -310,8 +310,9 @@ class MasonryWallWizard(QWizard):
 
         warning = QLabel(
             "⚠ These are generic starting values, not a verified material "
-            "preset. Calibrate them using masonry unit/mortar/infill test data "
-            "for the actual project."
+            "preset. L=1 and Area1=1 are normalized values used by this wall "
+            "workflow; calibrate the constitutive parameters against actual "
+            "masonry/infill tests."
         )
         warning.setWordWrap(True)
         warning.setStyleSheet(
