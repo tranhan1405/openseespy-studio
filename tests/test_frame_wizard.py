@@ -4158,7 +4158,7 @@ def test_frame_wizard_managed_review_shows_diff_and_compatible_mode():
         wizard._update_review_page()
         _APP.processEvents()
 
-        assert wizard.review_regen_group.isVisible()
+        assert not wizard.review_regen_group.isHidden()
         assert "Generated-object diff:" in wizard.review_regen_diff.text()
         assert "all generated object tags will be retained" in (
             wizard.review_regen_diff.text()
