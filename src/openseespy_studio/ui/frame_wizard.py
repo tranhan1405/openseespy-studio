@@ -4402,12 +4402,6 @@ class FrameWizard(QWizard):
                 errors.append(error)
         return errors
 
-    @staticmethod
-    def _review_enabled_text(enabled: bool, detail: str = "") -> str:
-        if not enabled:
-            return "None"
-        return detail or "Enabled"
-
     def _update_review_page(self, *_args) -> None:
         if not hasattr(self, "review_geometry"):
             return
@@ -4461,9 +4455,16 @@ class FrameWizard(QWizard):
                 f"Rigid diaphragm · {len(frame_diaphragm_levels(spec))} floor(s)"
             )
         elif spec.diaphragm_mode == "Shell":
+            shell_count = (
+                len(floor_levels)
+                * int(spec.nx)
+                * int(spec.ny)
+                * int(spec.slab_divisions_x)
+                * int(spec.slab_divisions_y)
+            )
             floor_detail = (
                 f"Shell slab · {len(floor_levels)} floor(s) · "
-                f"{frame_slab_count(spec)} slab panel(s)"
+                f"{shell_count} shell element(s)"
             )
 
         modeling_text = (
@@ -5551,7 +5552,7 @@ class FrameWizard(QWizard):
                 load_storeys=spec.load_storeys,
                 load_floor_area=spec.load_floor_area,
                 load_floor_area_direction=spec.load_floor_area_direction,
-        )
+            )
 
         counts = self._object_counts(spec)
         total_x = x_coords[-1] - x_coords[0]
