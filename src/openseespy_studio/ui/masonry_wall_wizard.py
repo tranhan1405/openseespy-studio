@@ -443,11 +443,48 @@ class MasonryWallWizard(QWizard):
         self.crossed_struts.setChecked(True)
         self.masonpan_w_tot = _double(0.25, 1.0e-6, 10.0, 6)
         self.masonpan_w1 = _double(0.50, 1.0e-6, 1.0, 6)
+        self.boundary_E = _double(
+            self.units.engineering_stress_from_pa(30.0e9),
+            1.0e-9,
+        )
+        self.boundary_width = _double(
+            self.units.length_from_m(0.30),
+            1.0e-9,
+        )
+        self.boundary_depth = _double(
+            self.units.length_from_m(0.30),
+            1.0e-9,
+        )
 
         form.addRow("Equivalent strut width / diagonal:", self.strut_width_ratio)
         form.addRow("", self.crossed_struts)
         form.addRow("MasonPan12 w_tot:", self.masonpan_w_tot)
         form.addRow("MasonPan12 w1:", self.masonpan_w1)
+
+        boundary_title = QLabel("<b>Surrounding boundary frame</b>")
+        form.addRow(boundary_title)
+        form.addRow(
+            f"Frame E [{self.units.engineering_stress_label}]:",
+            self.boundary_E,
+        )
+        form.addRow(
+            f"Frame width [{self.units.length}]:",
+            self.boundary_width,
+        )
+        form.addRow(
+            f"Frame depth [{self.units.length}]:",
+            self.boundary_depth,
+        )
+        boundary_note = QLabel(
+            "Required for a stable standalone infill model. MasonPan12 is a "
+            "six-strut panel intended to interact with surrounding beam/column "
+            "members; FEWIZ creates an elastic perimeter frame automatically."
+        )
+        boundary_note.setWordWrap(True)
+        boundary_note.setStyleSheet(
+            "padding:8px;background:#fff7e8;color:#7a5418;"
+        )
+        form.addRow(boundary_note)
 
         self.formulation_note = QLabel()
         self.formulation_note.setWordWrap(True)
@@ -460,6 +497,9 @@ class MasonryWallWizard(QWizard):
         self.crossed_struts.toggled.connect(self._update_review)
         self.masonpan_w_tot.valueChanged.connect(self._update_review)
         self.masonpan_w1.valueChanged.connect(self._update_review)
+        self.boundary_E.valueChanged.connect(self._update_review)
+        self.boundary_width.valueChanged.connect(self._update_review)
+        self.boundary_depth.valueChanged.connect(self._update_review)
         self.addPage(page)
 
     def _build_review_page(self) -> None:
@@ -556,6 +596,9 @@ class MasonryWallWizard(QWizard):
             crossed_struts=bool(self.crossed_struts.isChecked()),
             masonpan_w_tot=float(self.masonpan_w_tot.value()),
             masonpan_w1=float(self.masonpan_w1.value()),
+            boundary_E=stress_to_pa(float(self.boundary_E.value())),
+            boundary_width=float(self.boundary_width.value()),
+            boundary_depth=float(self.boundary_depth.value()),
             material_strategy=str(self.material_strategy.currentData()),
             existing_material_tag=(
                 None
@@ -686,6 +729,10 @@ class MasonryWallWizard(QWizard):
             f"{self.height.value():g} × {self.thickness.value():g} "
             f"{self.units.length}<br>"
             f"{topology}<br>{objects}<br>"
+            f"Boundary frame: E={self.boundary_E.value():g} "
+            f"{self.units.engineering_stress_label}, "
+            f"{self.boundary_width.value():g} × "
+            f"{self.boundary_depth.value():g} {self.units.length}<br>"
             f"Mode: {mode}"
         )
         if self.material_strategy.currentData() == "UseExisting":
