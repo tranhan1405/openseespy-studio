@@ -4300,7 +4300,7 @@ class MainWindow(QMainWindow):
         self.viewport_toolbar.addAction(self.actions["measure_distance"])
         self.viewport_toolbar.addAction(self.actions["clear_measurements"])
 
-        self._ribbon_tab_indices = {        self._ribbon_tab_indices = {
+        self._ribbon_tab_indices = {
             self.ribbon_tabs.tabText(index): index
             for index in range(self.ribbon_tabs.count())
         }
