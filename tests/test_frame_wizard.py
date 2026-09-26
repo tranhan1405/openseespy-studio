@@ -3388,6 +3388,8 @@ def test_frame_wizard_final_review_blocks_generate_for_invalid_definition():
 def test_frame_wizard_final_review_updates_3d_system_summary():
     wizard = FrameWizard(_member_project())
     try:
+        wizard.show()
+        _APP.processEvents()
         wizard.column_section.setCurrentIndex(
             wizard.column_section.findData(1)
         )
@@ -3406,7 +3408,6 @@ def test_frame_wizard_final_review_updates_3d_system_summary():
         wizard._refresh_brace_scope_tables()
         _APP.processEvents()
 
-        wizard.show()
         wizard.setCurrentId(wizard.review_page_id)
         _APP.processEvents()
 
