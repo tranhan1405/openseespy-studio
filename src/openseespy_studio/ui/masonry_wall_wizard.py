@@ -179,9 +179,50 @@ class MasonryWallWizard(QWizard):
         self._build_material_page()
         self._build_formulation_page()
         self._build_review_page()
+        self.currentIdChanged.connect(self._page_changed)
         self._sync_formulation()
         self._sync_material_strategy()
         self._update_review()
+
+    def _page_changed(self, page_id: int) -> None:
+        self._update_review()
+        page_to_scroll = {
+            0: getattr(self, "geometry_scroll", None),
+            1: getattr(self, "material_scroll", None),
+            2: getattr(self, "formulation_scroll", None),
+            3: getattr(self, "preview_scroll", None),
+        }
+        scroll = page_to_scroll.get(int(page_id))
+        if scroll is not None:
+            scroll.verticalScrollBar().setValue(0)
+
+    def _scrollable_page_body(
+        self,
+        page: QWizardPage,
+        name: str,
+    ) -> QWidget:
+        """Keep wizard navigation fixed while page content scrolls vertically."""
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea(page)
+        scroll.setObjectName(f"masonry-wall-{name}-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+
+        body = QWidget()
+        body.setObjectName(f"masonry-wall-{name}-scroll-body")
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
+
+        setattr(self, f"{name}_scroll", scroll)
+        return body
 
     def _build_geometry_page(self) -> None:
         page = QWizardPage()
@@ -190,7 +231,9 @@ class MasonryWallWizard(QWizard):
             "Create a standalone masonry/infill panel in a 2D / 3DOF "
             "OpenSees domain."
         )
-        form = QFormLayout(page)
+        body = self._scrollable_page_body(page, "geometry")
+        layout = QVBoxLayout(body)
+        form = QFormLayout()
 
         self.wall_name = QLineEdit("Masonry Wall")
         self.formulation = QComboBox()
@@ -216,6 +259,12 @@ class MasonryWallWizard(QWizard):
         form.addRow(f"Origin X [{self.units.length}]:", self.origin_x)
         form.addRow(f"Origin Y [{self.units.length}]:", self.origin_y)
         form.addRow("", self.replace_geometry)
+        layout.addLayout(form)
+
+        self.geometry_preview = MasonryWallPreview()
+        self.geometry_preview.setObjectName("masonry-wall-geometry-preview")
+        self.geometry_preview.setMinimumHeight(230)
+        layout.addWidget(self.geometry_preview)
 
         note = QLabel(
             "Equivalent Struts is a simplified infill representation. "
@@ -227,7 +276,8 @@ class MasonryWallWizard(QWizard):
         note.setStyleSheet(
             "padding:8px;background:#eef5fb;color:#35536f;"
         )
-        form.addRow(note)
+        layout.addWidget(note)
+        layout.addStretch(1)
 
         for widget in (
             self.wall_name,
@@ -256,10 +306,7 @@ class MasonryWallWizard(QWizard):
         page.setSubTitle(
             "OpenSees uniaxialMaterial('Masonry') · Crisafulli/Torrisi model."
         )
-        outer = QVBoxLayout(page)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        body = QWidget()
+        body = self._scrollable_page_body(page, "material")
         form = QFormLayout(body)
 
         self.material_strategy = QComboBox()
@@ -380,8 +427,6 @@ class MasonryWallWizard(QWizard):
             self._update_review
         )
 
-        scroll.setWidget(body)
-        outer.addWidget(scroll)
         self.addPage(page)
 
     def _build_formulation_page(self) -> None:
@@ -390,7 +435,8 @@ class MasonryWallWizard(QWizard):
         page.setSubTitle(
             "Only parameters relevant to the selected formulation are editable."
         )
-        form = QFormLayout(page)
+        body = self._scrollable_page_body(page, "formulation")
+        form = QFormLayout(body)
 
         self.strut_width_ratio = _double(0.10, 1.0e-6, 1.0, 6)
         self.crossed_struts = QCheckBox("Use crossed diagonals")
@@ -422,8 +468,10 @@ class MasonryWallWizard(QWizard):
         page.setSubTitle(
             "Review topology, material model and FE objects before creation."
         )
-        layout = QVBoxLayout(page)
+        body = self._scrollable_page_body(page, "preview")
+        layout = QVBoxLayout(body)
         self.preview = MasonryWallPreview()
+        self.preview.setObjectName("masonry-wall-review-preview")
         layout.addWidget(self.preview)
 
         self.geometry_summary = QLabel()
@@ -443,6 +491,7 @@ class MasonryWallWizard(QWizard):
         self.validation_status = QLabel()
         self.validation_status.setWordWrap(True)
         layout.addWidget(self.validation_status)
+        layout.addStretch(1)
         self.addPage(page)
 
     def _formulation_changed(self, *_args) -> None:
@@ -573,15 +622,21 @@ class MasonryWallWizard(QWizard):
         return messages
 
     def _update_review(self, *_args) -> None:
-        if not hasattr(self, "preview"):
+        if not hasattr(self, "formulation"):
             return
         formulation = str(self.formulation.currentData())
-        self.preview.set_wall(
-            formulation=formulation,
-            width=float(self.width.value()),
-            height=float(self.height.value()),
-            crossed=bool(self.crossed_struts.isChecked()),
-        )
+        preview_kwargs = {
+            "formulation": formulation,
+            "width": float(self.width.value()),
+            "height": float(self.height.value()),
+            "crossed": bool(self.crossed_struts.isChecked()),
+        }
+        if hasattr(self, "geometry_preview"):
+            self.geometry_preview.set_wall(**preview_kwargs)
+        if hasattr(self, "preview"):
+            self.preview.set_wall(**preview_kwargs)
+        else:
+            return
         diagonal = math.hypot(
             float(self.width.value()),
             float(self.height.value()),
