@@ -13,6 +13,8 @@ from PySide6.QtWidgets import QApplication
 from openseespy_studio.frame_setup import prepare_frame_grid
 from openseespy_studio.generator import (
     FrameGridSpec,
+    frame_diaphragm_count,
+    frame_diaphragm_levels,
     frame_grid_coordinates,
     frame_joint_connection_count,
     generate_frame_grid,
@@ -324,6 +326,7 @@ def test_frame_wizard_member_page_filters_sections_by_formulation():
             wizard.geometry_page_id,
             wizard.members_page_id,
             wizard.joints_page_id,
+            wizard.floors_page_id,
         ]
         assert wizard.column_section.findData(1) >= 0
         assert wizard.column_section.findData(2) < 0
@@ -1217,3 +1220,190 @@ def test_frame_project_restores_standard_backend_after_macro_generation():
     assert (project.model.ndm, project.model.ndf) == (3, 6)
     assert not project.connections
     assert all(node.ndf == 6 for node in project.model.nodes.values())
+
+
+def test_frame_wizard_task4_floor_page_defaults_and_level_selection():
+    wizard = FrameWizard(_member_project())
+    try:
+        assert wizard.diaphragm_mode.currentData() == "None"
+        assert wizard.diaphragm_level_table.rowCount() == 3
+        assert wizard.floors_scroll.widgetResizable()
+        assert all(
+            wizard.diaphragm_level_table.item(row, 0).checkState()
+            == Qt.Checked
+            for row in range(3)
+        )
+
+        wizard.dimension.setCurrentIndex(
+            wizard.dimension.findData("3D")
+        )
+        wizard.diaphragm_mode.setCurrentIndex(
+            wizard.diaphragm_mode.findData("Rigid")
+        )
+        wizard.diaphragm_floor_mass.setValue(125.0)
+        wizard.diaphragm_rotational_inertia.setValue(80.0)
+        wizard.diaphragm_level_table.item(1, 0).setCheckState(
+            Qt.Unchecked
+        )
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.diaphragm_mode == "Rigid"
+        assert spec.diaphragm_levels == (1, 3)
+        assert spec.diaphragm_floor_mass == pytest.approx(125.0)
+        assert spec.diaphragm_rotational_inertia == pytest.approx(80.0)
+        assert frame_diaphragm_levels(spec) == (1, 3)
+        assert frame_diaphragm_count(spec) == 2
+        assert "Rigid diaphragms: 2" in wizard.diaphragm_summary.text()
+        assert "Floor definition ready" in (
+            wizard.diaphragm_validation_status.text()
+        )
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_rigid_diaphragm_rejects_2d_frame():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.diaphragm_mode.setCurrentIndex(
+            wizard.diaphragm_mode.findData("Rigid")
+        )
+        _APP.processEvents()
+        assert "require a 3D frame" in wizard._diaphragm_validation_error()
+        with pytest.raises(ValueError, match="require a 3D frame"):
+            validate_frame_grid_spec(wizard.spec())
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_generate_frame_project_builds_centroid_rigid_diaphragms():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=2,
+        ny=1,
+        nz=2,
+        dx=4.0,
+        dy=6.0,
+        dz=3.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        diaphragm_mode="Rigid",
+        diaphragm_levels=(1, 2),
+        diaphragm_floor_mass=20.0,
+        diaphragm_rotational_inertia=7.5,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["diaphragm_constraints"] == 2
+    assert result["diaphragm_master_nodes"] == 2
+    rigid = [
+        constraint
+        for constraint in project.constraints.values()
+        if constraint.constraint_type == "rigidDiaphragm"
+    ]
+    assert len(rigid) == 2
+    assert all(constraint.perp_dirn == 3 for constraint in rigid)
+    assert all(len(constraint.constrained_nodes) == 6 for constraint in rigid)
+
+    masters = [
+        project.model.nodes[constraint.retained_node]
+        for constraint in rigid
+    ]
+    assert {tuple(node.xyz) for node in masters} == {
+        (4.0, 3.0, 3.0),
+        (4.0, 3.0, 6.0),
+    }
+    assert all(node.fixity == (0, 0, 1, 1, 1, 0) for node in masters)
+    assert all(
+        node.mass == pytest.approx((20.0, 20.0, 0.0, 0.0, 0.0, 7.5))
+        for node in masters
+    )
+
+
+def test_frame_rigid_diaphragm_empty_level_tuple_means_all_floors():
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=3,
+        planar_2d=False,
+        diaphragm_mode="Rigid",
+    )
+    assert frame_diaphragm_levels(spec) == (1, 2, 3)
+    assert frame_diaphragm_count(spec) == 3
+
+
+def test_frame_rigid_diaphragm_validates_level_and_mass_inputs():
+    bad_level = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=2,
+        planar_2d=False,
+        diaphragm_mode="Rigid",
+        diaphragm_levels=(3,),
+    )
+    with pytest.raises(ValueError, match="between 1"):
+        validate_frame_grid_spec(bad_level)
+
+    bad_mass = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=2,
+        planar_2d=False,
+        diaphragm_mode="Rigid",
+        diaphragm_floor_mass=-1.0,
+    )
+    with pytest.raises(ValueError, match="floor mass"):
+        validate_frame_grid_spec(bad_mass)
+
+
+def test_frame_rigid_diaphragm_coexists_with_zero_length_joints():
+    project = _joint_project()
+    project.add_section(
+        SectionData(
+            90,
+            "3D elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=90,
+        beam_section_tag=90,
+        joint_model="ZeroLength",
+        joint_material_tag=9,
+        diaphragm_mode="Rigid",
+        diaphragm_levels=(1,),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+    assert result["joint_connections"] == 8
+    assert result["diaphragm_constraints"] == 1
+    assert any(
+        constraint.constraint_type == "rigidDiaphragm"
+        for constraint in project.constraints.values()
+    )
