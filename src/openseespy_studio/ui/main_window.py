@@ -5712,10 +5712,14 @@ class MainWindow(QMainWindow):
         beam_udl_loads = int(
             joint_result.get("beam_udl_loads", 0)
         )
-        if self_weight_loads or beam_udl_loads:
+        floor_area_loads = int(
+            joint_result.get("floor_area_loads", 0)
+        )
+        if self_weight_loads or beam_udl_loads or floor_area_loads:
             message += (
                 f" · {self_weight_loads} self-weight load(s)"
                 f" / {beam_udl_loads} beam UDL(s)"
+                f" / {floor_area_loads} floor-area beam load(s)"
             )
 
         self._refresh_all(message)
