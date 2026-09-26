@@ -301,9 +301,15 @@ class MasonryWallWizard(QWizard):
         self.Um = _double(-0.002, -1.0, -1.0e-12, 7)
         self.Uult = _double(-0.010, -1.0, -1.0e-12, 7)
         self.Ucl = _double(0.0005, 1.0e-12, 1.0, 7)
-        self.L = _double(1.0, 1.0e-9, 1.0e9)
-        self.a1 = _double(1.0, 1.0e-9, 100.0)
-        self.a2 = _double(0.20, 0.0, 100.0)
+        self.L = _double(1.0, 1.0, 1.0)
+        self.a1 = _double(1.0, 1.0, 1.0)
+        self.a2 = _double(0.20, 0.0, 1.0)
+        self.L.setToolTip(
+            "Normalized to 1 for FEWIZ truss/MasonPan12 wall workflows."
+        )
+        self.a1.setToolTip(
+            "Normalized Area1=1; Area2 is the relative degraded area."
+        )
         self.D1 = _double(-0.002, -1.0, -1.0e-12, 7)
         self.D2 = _double(-0.006, -1.0, -1.0e-12, 7)
         self.Ach = _double(0.40, 0.0, 10.0)
@@ -325,9 +331,9 @@ class MasonryWallWizard(QWizard):
         form.addRow("Um:", self.Um)
         form.addRow("Uult:", self.Uult)
         form.addRow("Ucl:", self.Ucl)
-        form.addRow("L:", self.L)
-        form.addRow("Area1 factor A1:", self.a1)
-        form.addRow("Area2 factor A2:", self.a2)
+        form.addRow("Normalized L:", self.L)
+        form.addRow("Normalized Area1 A1:", self.a1)
+        form.addRow("Relative Area2 A2:", self.a2)
         form.addRow("D1:", self.D1)
         form.addRow("D2:", self.D2)
         form.addRow("Ach:", self.Ach)
