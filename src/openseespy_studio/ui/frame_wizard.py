@@ -166,6 +166,8 @@ class FramePreview(QWidget):
         self.load_beam_udl = False
         self.load_beam_scope = "Both"
         self.load_storeys: tuple[int, ...] = ()
+        self.load_floor_area = False
+        self.load_floor_area_direction = "X"
         self.setMinimumHeight(285)
 
     def set_frame(
@@ -203,6 +205,8 @@ class FramePreview(QWidget):
         load_beam_udl: bool = False,
         load_beam_scope: str = "Both",
         load_storeys: tuple[int, ...] = (),
+        load_floor_area: bool = False,
+        load_floor_area_direction: str = "X",
     ) -> None:
         self.dimension = str(dimension)
         self.x_coordinates = list(x_coordinates)
@@ -247,6 +251,8 @@ class FramePreview(QWidget):
         self.load_beam_udl = bool(load_beam_udl)
         self.load_beam_scope = str(load_beam_scope)
         self.load_storeys = tuple(int(value) for value in load_storeys)
+        self.load_floor_area = bool(load_floor_area)
+        self.load_floor_area_direction = str(load_floor_area_direction)
         self.update()
 
     @staticmethod
@@ -823,13 +829,26 @@ class FramePreview(QWidget):
                 "LOAD ↓",
             )
 
-            if self.load_beam_udl:
+            if self.load_beam_udl or self.load_floor_area:
                 selected_storeys = (
                     self.load_storeys
                     if self.load_storeys
                     else tuple(range(1, len(self.z_coordinates)))
                 )
-                scope = self.load_beam_scope
+                draw_x = (
+                    self.load_beam_udl
+                    and self.load_beam_scope in {"X", "Both"}
+                ) or (
+                    self.load_floor_area
+                    and self.load_floor_area_direction == "X"
+                )
+                draw_y = (
+                    self.load_beam_udl
+                    and self.load_beam_scope in {"Y", "Both"}
+                ) or (
+                    self.load_floor_area
+                    and self.load_floor_area_direction == "Y"
+                )
 
                 def arrow_at(point: QPointF) -> None:
                     length = 13.0
@@ -852,7 +871,7 @@ class FramePreview(QWidget):
                         continue
                     z_value = self.z_coordinates[storey]
 
-                    if scope in {"X", "Both"}:
+                    if draw_x:
                         if self.dimension == "2D":
                             for bay in range(len(self.x_coordinates) - 1):
                                 x_mid = 0.5 * (
@@ -884,7 +903,7 @@ class FramePreview(QWidget):
 
                     if (
                         self.dimension == "3D"
-                        and scope in {"Y", "Both"}
+                        and draw_y
                     ):
                         for i, x_value in enumerate(self.x_coordinates):
                             del i
@@ -3496,7 +3515,8 @@ class FrameWizard(QWizard):
         page.setTitle("Loads & Gravity")
         page.setSubTitle(
             "Create one static Plain load pattern after final frame topology "
-            "is generated. Add automatic member self-weight and/or beam UDL."
+            "is generated. Add member self-weight, direct beam UDL and/or "
+            "one-way floor area gravity distributed by tributary width."
         )
 
         scroll = QScrollArea()
@@ -3590,9 +3610,49 @@ class FrameWizard(QWizard):
         layout.addWidget(udl_group)
         self.load_udl_group = udl_group
 
+        self.load_floor_area = QCheckBox(
+            "Distribute a floor area gravity load to one beam direction"
+        )
+        self.load_floor_area_pressure = self._nonnegative(0.0)
+        self.load_floor_area_pressure.setDecimals(4)
+        self.load_floor_area_direction = QComboBox()
+        self.load_floor_area_direction.addItem(
+            "X-direction beams · tributary width in Y",
+            "X",
+        )
+        self.load_floor_area_direction.addItem(
+            "Y-direction beams · tributary width in X",
+            "Y",
+        )
+
+        floor_area_group = QGroupBox("Floor area gravity · tributary method")
+        floor_area_form = QFormLayout(floor_area_group)
+        floor_area_form.addRow("", self.load_floor_area)
+        floor_area_form.addRow(
+            (
+                "Downward pressure "
+                f"[{self.units.force}/{self.units.length}²]:"
+            ),
+            self.load_floor_area_pressure,
+        )
+        floor_area_form.addRow(
+            "Load carried by:",
+            self.load_floor_area_direction,
+        )
+        floor_area_hint = QLabel(
+            "One-way distribution for 3D frames. Edge beams receive half the "
+            "adjacent bay width; interior beams receive half of each adjacent "
+            "bay. The resulting global-Z line load is applied to the final "
+            "beam segments, including Chevron-split members."
+        )
+        floor_area_hint.setWordWrap(True)
+        floor_area_form.addRow(floor_area_hint)
+        layout.addWidget(floor_area_group)
+        self.load_floor_area_group = floor_area_group
+
         self.load_storey_table = QTableWidget(0, 2)
         self.load_storey_table.setHorizontalHeaderLabels(
-            ["Storey", "Beam UDL"]
+            ["Storey", "Beam / floor load"]
         )
         self.load_storey_table.horizontalHeader().setStretchLastSection(True)
         self.load_storey_table.setSelectionMode(QAbstractItemView.NoSelection)
@@ -3602,12 +3662,13 @@ class FrameWizard(QWizard):
         self.load_storey_table.setMinimumHeight(170)
         self.load_storey_table.setMaximumHeight(260)
 
-        scope_group = QGroupBox("Beam UDL storey scope")
+        scope_group = QGroupBox("Beam / floor load storey scope")
         scope_layout = QVBoxLayout(scope_group)
         scope_layout.addWidget(self.load_storey_table)
         scope_hint = QLabel(
             "Self-weight always follows all generated frame columns/beams. "
-            "The storey selection applies only to beam UDL."
+            "The storey selection applies to direct beam UDL and floor area "
+            "gravity distribution."
         )
         scope_hint.setWordWrap(True)
         scope_layout.addWidget(scope_hint)
@@ -3650,9 +3711,11 @@ class FrameWizard(QWizard):
         )
         self.load_self_weight.toggled.connect(self._load_control_changed)
         self.load_beam_udl.toggled.connect(self._load_control_changed)
+        self.load_floor_area.toggled.connect(self._load_control_changed)
         for combo in (
             self.load_beam_udl_coordinate,
             self.load_beam_scope,
+            self.load_floor_area_direction,
         ):
             combo.currentIndexChanged.connect(self._load_control_changed)
         for spin in (
@@ -3660,6 +3723,7 @@ class FrameWizard(QWizard):
             self.load_udl_x,
             self.load_udl_y,
             self.load_udl_z,
+            self.load_floor_area_pressure,
         ):
             spin.valueChanged.connect(self._load_control_changed)
         self.load_storey_table.itemChanged.connect(
@@ -3744,7 +3808,21 @@ class FrameWizard(QWizard):
         self.load_self_weight_group.setEnabled(active)
         self.load_udl_group.setEnabled(active)
         self.load_scope_group.setEnabled(
-            active and self.load_beam_udl.isChecked()
+            active
+            and (
+                self.load_beam_udl.isChecked()
+                or self.load_floor_area.isChecked()
+            )
+        )
+        floor_area_available = (
+            active and self.dimension.currentData() == "3D"
+        )
+        self.load_floor_area_group.setEnabled(floor_area_available)
+        self.load_floor_area_pressure.setEnabled(
+            floor_area_available and self.load_floor_area.isChecked()
+        )
+        self.load_floor_area_direction.setEnabled(
+            floor_area_available and self.load_floor_area.isChecked()
         )
         self.load_self_weight_density.setEnabled(
             active and self.load_self_weight.isChecked()
@@ -3812,8 +3890,10 @@ class FrameWizard(QWizard):
 
         if spec.load_mode != "Static":
             return ""
-        if spec.load_beam_udl and not self._selected_load_storeys():
-            return "Select at least one storey for beam UDL."
+        if (
+            spec.load_beam_udl or spec.load_floor_area
+        ) and not self._selected_load_storeys():
+            return "Select at least one storey for beam / floor load."
 
         if spec.load_self_weight:
             density = float(spec.load_self_weight_density)
@@ -3862,6 +3942,14 @@ class FrameWizard(QWizard):
                     f"({vector[0]:g}, {vector[1]:g}, {vector[2]:g}) "
                     f"{spec.load_beam_udl_coordinate_system} · "
                     f"{spec.load_beam_scope} beams · storeys "
+                    + ", ".join(map(str, frame_load_storeys(spec)))
+                )
+            if spec.load_floor_area:
+                parts.append(
+                    "Floor area gravity "
+                    f"{spec.load_floor_area_pressure:g} "
+                    f"{self.units.force}/{self.units.length}² · "
+                    f"to {spec.load_floor_area_direction} beams · storeys "
                     + ", ".join(map(str, frame_load_storeys(spec)))
                 )
             self.load_summary.setText(
@@ -4723,6 +4811,21 @@ class FrameWizard(QWizard):
                 if hasattr(self, "load_storey_table")
                 else ()
             ),
+            load_floor_area=(
+                bool(self.load_floor_area.isChecked())
+                if hasattr(self, "load_floor_area")
+                else False
+            ),
+            load_floor_area_pressure=(
+                float(self.load_floor_area_pressure.value())
+                if hasattr(self, "load_floor_area_pressure")
+                else 0.0
+            ),
+            load_floor_area_direction=(
+                str(self.load_floor_area_direction.currentData() or "X")
+                if hasattr(self, "load_floor_area_direction")
+                else "X"
+            ),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
                 self.base_support.currentData() or "Fixed"
@@ -4815,6 +4918,8 @@ class FrameWizard(QWizard):
             load_beam_udl=spec.load_beam_udl,
             load_beam_scope=spec.load_beam_scope,
             load_storeys=spec.load_storeys,
+            load_floor_area=spec.load_floor_area,
+            load_floor_area_direction=spec.load_floor_area_direction,
         )
 
         counts = self._object_counts(spec)
