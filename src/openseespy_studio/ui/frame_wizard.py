@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..frame_setup import prepare_frame_grid
+from ..frame_management import frame_regeneration_plan
 from ..frame_presets import (
     BUILTIN_FRAME_PRESETS,
     frame_preset_dependency_issues,
@@ -1071,6 +1072,12 @@ class FrameWizard(QWizard):
         self.project = project
         self.units = UnitSystem.from_mapping(project.units)
         self.managed_edit = bool(managed_edit)
+        self.initial_managed_recipe = (
+            dict(initial_preset or {})
+            if self.managed_edit
+            else {}
+        )
+        self._managed_regeneration_plan: dict = {}
 
         self.setWindowTitle(
             "Edit Frame Wizard Model"
@@ -4455,6 +4462,35 @@ class FrameWizard(QWizard):
         loading_layout.addWidget(self.review_loading)
         layout.addWidget(loading_group)
 
+        self.review_regen_group = QGroupBox("Managed regeneration")
+        regen_layout = QFormLayout(self.review_regen_group)
+        self.review_regen_mode = QComboBox()
+        self.review_regen_mode.addItem(
+            "Regenerate all · rebuild managed FE domain",
+            "all",
+        )
+        self.review_regen_mode.addItem(
+            "Update compatible parts · preserve stable tags",
+            "compatible",
+        )
+        self.review_regen_mode.currentIndexChanged.connect(
+            self._update_review_page
+        )
+        regen_layout.addRow("Mode:", self.review_regen_mode)
+
+        self.review_regen_diff = QLabel()
+        self.review_regen_diff.setWordWrap(True)
+        regen_layout.addRow(self.review_regen_diff)
+
+        self.review_conflict_ack = QCheckBox(
+            "I understand that Regenerate all will overwrite the manual "
+            "changes detected in the managed FE domain."
+        )
+        self.review_conflict_ack.toggled.connect(self._update_review_page)
+        regen_layout.addRow(self.review_conflict_ack)
+        self.review_regen_group.setVisible(self.managed_edit)
+        layout.addWidget(self.review_regen_group)
+
         self.review_build = QLabel()
         self.review_build.setWordWrap(True)
         build_group = QGroupBox("Generation dry-run")
@@ -4536,7 +4572,41 @@ class FrameWizard(QWizard):
                     "Confirm replacement of the current FE domain before "
                     "generating the model."
                 )
+
+            if self.managed_edit and hasattr(self, "review_regen_mode"):
+                plan = dict(self._managed_regeneration_plan or {})
+                mode = str(
+                    self.review_regen_mode.currentData() or "all"
+                )
+                if mode == "compatible" and not plan.get(
+                    "compatible",
+                    False,
+                ):
+                    errors.append(
+                        "Update compatible parts is unavailable because "
+                        "generated tags would change or manual edits were "
+                        "detected."
+                    )
+                conflicts = list(plan.get("conflicts", []))
+                if (
+                    mode == "all"
+                    and conflicts
+                    and hasattr(self, "review_conflict_ack")
+                    and not self.review_conflict_ack.isChecked()
+                ):
+                    errors.append(
+                        "Confirm overwrite of detected manual changes before "
+                        "regenerating the managed model."
+                    )
         return errors
+
+    def regeneration_mode(self) -> str:
+        if not self.managed_edit or not hasattr(
+            self,
+            "review_regen_mode",
+        ):
+            return "all"
+        return str(self.review_regen_mode.currentData() or "all")
 
     def _review_dry_run(
         self,
@@ -4706,6 +4776,106 @@ class FrameWizard(QWizard):
         definition_errors = self._review_validation_errors(
             include_replacement_ack=False
         )
+
+        self._managed_regeneration_plan = {}
+        if self.managed_edit:
+            if definition_errors:
+                self.review_regen_diff.setText(
+                    "<b>Regeneration diff unavailable</b><br>"
+                    "Resolve the model-definition issues first."
+                )
+                self.review_conflict_ack.setVisible(False)
+            else:
+                try:
+                    plan = frame_regeneration_plan(
+                        self.project,
+                        self.initial_managed_recipe,
+                        spec,
+                    )
+                    self._managed_regeneration_plan = plan
+                    conflicts = list(plan.get("conflicts", []))
+                    domains = dict(plan.get("domains", {}))
+                    changed = [
+                        (
+                            name,
+                            int(info.get("before", 0)),
+                            int(info.get("after", 0)),
+                        )
+                        for name, info in domains.items()
+                        if (
+                            int(info.get("before", 0))
+                            != int(info.get("after", 0))
+                            or not bool(info.get("stable", False))
+                        )
+                    ]
+                    diff_lines = []
+                    if changed:
+                        diff_lines.append(
+                            "<b>Generated-object diff:</b> "
+                            + " · ".join(
+                                f"{name} {before}→{after}"
+                                for name, before, after in changed[:6]
+                            )
+                        )
+                    else:
+                        diff_lines.append(
+                            "<b>Generated-object diff:</b> no tag-set changes."
+                        )
+
+                    if bool(plan.get("all_tags_stable", False)):
+                        diff_lines.append(
+                            "Stable-tag check: all generated object tags "
+                            "will be retained."
+                        )
+                    else:
+                        unstable = [
+                            name
+                            for name, info in domains.items()
+                            if not bool(info.get("stable", False))
+                        ]
+                        diff_lines.append(
+                            "Tag-set changes: " + ", ".join(unstable[:6])
+                        )
+
+                    if conflicts:
+                        diff_lines.append(
+                            "<b>Manual edit conflict:</b> "
+                            + " · ".join(
+                                (
+                                    f"{item.get('domain')} "
+                                    f"{int(item.get('expected_count', 0))}"
+                                    f"→{int(item.get('current_count', 0))}"
+                                )
+                                for item in conflicts[:6]
+                            )
+                        )
+                    else:
+                        diff_lines.append(
+                            "Manual edit check: managed FE domain matches "
+                            "the saved recipe snapshot."
+                        )
+                    self.review_regen_diff.setText("<br>".join(diff_lines))
+
+                    compatible_item = self.review_regen_mode.model().item(1)
+                    if compatible_item is not None:
+                        compatible_item.setEnabled(
+                            bool(plan.get("compatible", False))
+                        )
+                    if (
+                        self.regeneration_mode() == "compatible"
+                        and not bool(plan.get("compatible", False))
+                    ):
+                        self.review_regen_mode.blockSignals(True)
+                        self.review_regen_mode.setCurrentIndex(0)
+                        self.review_regen_mode.blockSignals(False)
+                    self.review_conflict_ack.setVisible(bool(conflicts))
+                except (TypeError, ValueError) as exc:
+                    definition_errors.append(str(exc))
+                    self.review_regen_diff.setText(
+                        "<b>Regeneration diff failed</b><br>" + str(exc)
+                    )
+                    self.review_conflict_ack.setVisible(False)
+
         dry_run_error = ""
         if definition_errors:
             self.review_build.setText(
