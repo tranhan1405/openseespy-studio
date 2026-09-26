@@ -69,6 +69,71 @@ jobs:
           print("WINDOWS_MASONRY_OK", ops.version())
           '@ | python -
 
+      - name: OpenSees wall macro runtime smoke test
+        shell: pwsh
+        run: |
+          @'
+          import openseespy.opensees as ops
+
+          from openseespy_studio.generator import to_openseespy
+          from openseespy_studio.project import ProjectDatabase
+          from openseespy_studio.rc_wall import (
+              RCWallSpec,
+              build_rc_wall_macro_2d,
+          )
+
+          for formulation in ("MVLEM", "SFI_MVLEM"):
+              project = ProjectDatabase()
+              project.units = {"length": "m", "force": "N", "time": "s"}
+              result = build_rc_wall_macro_2d(
+                  project,
+                  RCWallSpec(
+                      width=1.2,
+                      height=3.0,
+                      thickness=0.2,
+                      boundary_width=0.2,
+                      vertical_elements=2,
+                      macro_fibers=5,
+                      formulation=formulation,
+                      boundary_unconfined_thickness=0.05,
+                      boundary_confined_thickness=0.15,
+                      replace_geometry=True,
+                  ),
+              )
+              source = to_openseespy(
+                  project.model,
+                  materials=project.materials,
+                  sections=project.sections,
+                  transformations=project.transformations,
+                  constraints=project.constraints,
+                  connections=project.connections,
+                  units=project.units,
+                  nd_materials=project.nd_materials,
+              )
+              exec(source, {})
+              top = result.node_tags[-1]
+              ops.timeSeries("Linear", 980)
+              ops.pattern("Plain", 980, 980)
+              ops.load(top, 1.0, 0.0, 0.0)
+              ops.system("UmfPack")
+              ops.numberer("RCM")
+              ops.constraints("Plain")
+              ops.test("NormDispIncr", 1.0e-10, 30)
+              ops.algorithm("Newton")
+              ops.integrator("LoadControl", 1.0)
+              ops.analysis("Static")
+              ok = ops.analyze(1)
+              if ok != 0:
+                  raise RuntimeError(
+                      f"{formulation} Windows smoke analysis failed: {ok}"
+                  )
+              print(
+                  "WINDOWS_WALL_MACRO_OK",
+                  formulation,
+                  ops.nodeDisp(top, 1),
+              )
+          '@ | python -
+
       - name: Build standalone application
         shell: pwsh
         run: pyinstaller packaging\openseespy_studio.spec --noconfirm --clean
