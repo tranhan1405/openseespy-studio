@@ -1575,6 +1575,8 @@ class PropertiesPanel(QWidget):
             "NodalDisplacement",
             "NodalReaction",
             "MemberForce",
+            "MasonryStrutForce",
+            "MasonryStrutStrain",
             "ShellForce",
             "ShellDeformation",
             "ShellDisplacement",
@@ -1603,6 +1605,14 @@ class PropertiesPanel(QWidget):
             ]
         elif kind == "MemberForce":
             component_options = ["N", "Vy", "Vz", "T", "My", "Mz"]
+        elif kind == "MasonryStrutForce":
+            component_options = [
+                "P1", "P2", "P3", "P4", "P5", "P6"
+            ]
+        elif kind == "MasonryStrutStrain":
+            component_options = [
+                "E1", "E2", "E3", "E4", "E5", "E6"
+            ]
         elif kind == "ShellDisplacement":
             component_options = ["|U|", "UX", "UY", "UZ"]
         elif kind == "ShellForce":
@@ -26911,6 +26921,45 @@ class MainWindow(QMainWindow):
                     return None
                 selected = [tag]
             elements = set(selected)
+
+        elif kind in {
+            "MasonryPanelShear",
+            "MasonryStrutForce",
+            "MasonryStrutStrain",
+        }:
+            masonry_tags = sorted(
+                int(tag)
+                for tag, element in self.model.elements.items()
+                if element.element_type == "MasonPan12"
+            )
+            if not masonry_tags:
+                if not self._ensure_prerequisite(
+                    title="Masonry Result",
+                    message=(
+                        "Masonry Results require a MasonPan12 infill panel. "
+                        "Create one with the Masonry Wall Wizard now?"
+                    ),
+                    action_label="Open Masonry Wall Wizard...",
+                    available=lambda: any(
+                        element.element_type == "MasonPan12"
+                        for element in self.model.elements.values()
+                    ),
+                    creator=self._show_masonry_wall_wizard,
+                ):
+                    return None
+                masonry_tags = sorted(
+                    int(tag)
+                    for tag, element in self.model.elements.items()
+                    if element.element_type == "MasonPan12"
+                )
+            if not masonry_tags:
+                return None
+            selected_masonry = {
+                int(tag)
+                for tag in elements
+                if int(tag) in masonry_tags
+            }
+            elements = selected_masonry or set(masonry_tags)
 
         elif kind == "SectionResponse":
             sources = section_response_sources(
