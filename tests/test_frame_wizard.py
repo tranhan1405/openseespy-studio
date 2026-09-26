@@ -3311,6 +3311,12 @@ def test_frame_wizard_modal_controls_map_to_spec_and_summary():
 def test_frame_wizard_final_review_page_is_live_and_ready_for_valid_model():
     wizard = FrameWizard(_member_project())
     try:
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
         wizard.show()
         _APP.processEvents()
         wizard.setCurrentId(wizard.review_page_id)
@@ -3382,6 +3388,12 @@ def test_frame_wizard_final_review_blocks_generate_for_invalid_definition():
 def test_frame_wizard_final_review_updates_3d_system_summary():
     wizard = FrameWizard(_member_project())
     try:
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
         wizard.dimension.setCurrentIndex(
             wizard.dimension.findData("3D")
         )
