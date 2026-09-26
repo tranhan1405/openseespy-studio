@@ -5568,24 +5568,11 @@ class MainWindow(QMainWindow):
         if not dialog.exec():
             return
 
+        # Preview & Create owns replacement acknowledgement and runs a
+        # cloned-project generation dry-run before QWizard accepts.  Reaching
+        # this point therefore means the complete Frame Wizard build contract
+        # has already been reviewed by the user.
         spec = dialog.spec()
-        if self.model.nodes or self.model.elements:
-            answer = QMessageBox.question(
-                self,
-                "Replace Current FE Model",
-                (
-                    "Frame Wizard currently uses replacement mode in this "
-                    "first implementation phase.\n\n"
-                    "Existing FE geometry and model-linked objects will be "
-                    "cleared. Material and section libraries are preserved.\n\n"
-                    "Continue and generate the frame?"
-                ),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes:
-                return
-
         self._generate_frame_grid(spec)
 
     def _open_frame_grid(self, *, planar_2d: bool) -> None:
@@ -5751,7 +5738,11 @@ class MainWindow(QMainWindow):
             beam_transf_tag=spec.beam_transf_tag,
         )
         self._record_project_change(
-            "Generate 2D frame" if spec.planar_2d else "Generate frame grid",
+            (
+                "Frame Wizard · Generate 2D frame"
+                if spec.planar_2d
+                else "Frame Wizard · Generate 3D frame"
+            ),
             before,
         )
         if spec.planar_2d:
@@ -5763,6 +5754,13 @@ class MainWindow(QMainWindow):
                 self.viewport.set_view("xy")
             else:
                 self.viewport.set_view("xz")
+        else:
+            self.viewport.set_view("iso")
+
+        modal_tag = int(joint_result.get("modal_analysis_tag", 0))
+        if modal_tag > 0 and modal_tag in self.project.analyses:
+            self._select_tree_payload("analysis", modal_tag)
+            self._show_analysis_properties(modal_tag)
 
     def _sync_viewport_display_data(
         self,
