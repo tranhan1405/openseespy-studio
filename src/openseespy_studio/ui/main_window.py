@@ -5669,6 +5669,14 @@ class MainWindow(QMainWindow):
                     f" · {joint_connections} {joint_model} joint core(s)"
                 )
 
+        diaphragm_count = int(
+            joint_result.get("diaphragm_constraints", 0)
+        )
+        if diaphragm_count:
+            message += (
+                f" · {diaphragm_count} rigid floor diaphragm(s)"
+            )
+
         self._refresh_all(message)
         self.frame_grid_panel.set_assignment_tags(
             column_section_tag=spec.column_section_tag,
