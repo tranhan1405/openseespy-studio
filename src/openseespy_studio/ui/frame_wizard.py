@@ -347,6 +347,18 @@ class FrameWizard(QWizard):
         return widget
 
     @staticmethod
+    def _nonnegative(
+        value: float = 0.0,
+        *,
+        decimals: int = 6,
+    ) -> QDoubleSpinBox:
+        widget = QDoubleSpinBox()
+        widget.setDecimals(decimals)
+        widget.setRange(0.0, 1.0e12)
+        widget.setValue(value)
+        return widget
+
+    @staticmethod
     def _coordinate(value: float = 0.0) -> QDoubleSpinBox:
         widget = QDoubleSpinBox()
         widget.setDecimals(4)
@@ -569,9 +581,8 @@ class FrameWizard(QWizard):
         page = QWizardPage()
         page.setTitle("Members & Sections")
         page.setSubTitle(
-            "Assign column and beam formulations, sections and geometric "
-            "transformations. This phase supports elasticBeamColumn and "
-            "distributed force/displacement-based beam-column elements."
+            "Assign element formulations, section integration, geometric "
+            "transformations, plastic-hinge sections and member mass."
         )
 
         scroll = QScrollArea()
@@ -599,18 +610,54 @@ class FrameWizard(QWizard):
 
         self.column_integration = QComboBox()
         self.beam_integration = QComboBox()
+        integration_items = (
+            ("Lobatto · distributed", "Lobatto"),
+            ("Legendre · distributed", "Legendre"),
+            ("Radau · distributed", "Radau"),
+            ("HingeRadau", "HingeRadau"),
+            ("HingeRadauTwo", "HingeRadauTwo"),
+            ("HingeMidpoint", "HingeMidpoint"),
+            ("HingeEndpoint", "HingeEndpoint"),
+            ("Concentrated Plasticity", "ConcentratedPlasticity"),
+        )
         for combo in (self.column_integration, self.beam_integration):
-            combo.addItem("Lobatto", "Lobatto")
-            combo.addItem("Legendre", "Legendre")
-            combo.addItem("Radau", "Radau")
+            for label, value in integration_items:
+                combo.addItem(label, value)
 
         self.column_integration_points = self._spin(5, 2, 20)
         self.beam_integration_points = self._spin(5, 2, 20)
 
+        self.column_hinge_i_section = QComboBox()
+        self.column_hinge_j_section = QComboBox()
+        self.column_interior_section = QComboBox()
+        self.beam_hinge_i_section = QComboBox()
+        self.beam_hinge_j_section = QComboBox()
+        self.beam_interior_section = QComboBox()
+
+        default_hinge = self.units.length_from_m(0.30)
+        self.column_hinge_i_length = self._nonnegative(default_hinge)
+        self.column_hinge_j_length = self._nonnegative(default_hinge)
+        self.beam_hinge_i_length = self._nonnegative(default_hinge)
+        self.beam_hinge_j_length = self._nonnegative(default_hinge)
+
+        self.column_mass_per_length = self._nonnegative(0.0)
+        self.beam_mass_per_length = self._nonnegative(0.0)
+        self.column_consistent_mass = QCheckBox(
+            "Use consistent mass matrix"
+        )
+        self.beam_consistent_mass = QCheckBox(
+            "Use consistent mass matrix"
+        )
+
+        mass_unit = (
+            f"{self.units.force}·{self.units.time}²/"
+            f"{self.units.length}²"
+        )
+
         column_box = QGroupBox("Columns")
         column_form = QFormLayout(column_box)
         column_form.addRow("Formulation:", self.column_formulation)
-        column_form.addRow("Section:", self.column_section)
+        column_form.addRow("Primary section:", self.column_section)
         column_form.addRow(
             "Geometric transformation:",
             self.column_transformation,
@@ -623,12 +670,37 @@ class FrameWizard(QWizard):
             "Integration points:",
             self.column_integration_points,
         )
+        column_form.addRow(
+            "I-end hinge section:",
+            self.column_hinge_i_section,
+        )
+        column_form.addRow(
+            "J-end hinge section:",
+            self.column_hinge_j_section,
+        )
+        column_form.addRow(
+            "Interior section:",
+            self.column_interior_section,
+        )
+        column_form.addRow(
+            f"I-end hinge length [{self.units.length}]:",
+            self.column_hinge_i_length,
+        )
+        column_form.addRow(
+            f"J-end hinge length [{self.units.length}]:",
+            self.column_hinge_j_length,
+        )
+        column_form.addRow(
+            f"Mass / length [{mass_unit}]:",
+            self.column_mass_per_length,
+        )
+        column_form.addRow("", self.column_consistent_mass)
         layout.addWidget(column_box)
 
         beam_box = QGroupBox("Beams")
         beam_form = QFormLayout(beam_box)
         beam_form.addRow("Formulation:", self.beam_formulation)
-        beam_form.addRow("Section:", self.beam_section)
+        beam_form.addRow("Primary section:", self.beam_section)
         beam_form.addRow(
             "Geometric transformation:",
             self.beam_transformation,
@@ -638,13 +710,40 @@ class FrameWizard(QWizard):
             "Integration points:",
             self.beam_integration_points,
         )
+        beam_form.addRow(
+            "I-end hinge section:",
+            self.beam_hinge_i_section,
+        )
+        beam_form.addRow(
+            "J-end hinge section:",
+            self.beam_hinge_j_section,
+        )
+        beam_form.addRow(
+            "Interior section:",
+            self.beam_interior_section,
+        )
+        beam_form.addRow(
+            f"I-end hinge length [{self.units.length}]:",
+            self.beam_hinge_i_length,
+        )
+        beam_form.addRow(
+            f"J-end hinge length [{self.units.length}]:",
+            self.beam_hinge_j_length,
+        )
+        beam_form.addRow(
+            f"Mass / length [{mass_unit}]:",
+            self.beam_mass_per_length,
+        )
+        beam_form.addRow("", self.beam_consistent_mass)
         layout.addWidget(beam_box)
 
         note = QLabel(
-            "Auto geomTransf keeps FEWIZ's safe defaults: PDelta for "
-            "columns and Linear for beams. Existing transformations can "
-            "override Auto. Advanced hinge integrations are reserved for "
-            "the second half of Task 2."
+            "Auto geomTransf uses PDelta for columns and Linear for beams. "
+            "Distributed integrations use the Primary section. Hinge "
+            "integrations use explicit I/J-end and interior sections. "
+            "ConcentratedPlasticity does not use hinge lengths. "
+            "forceBeamColumn accepts member mass but not a consistent-mass "
+            "switch, so FEWIZ disables that option for force-based members."
         )
         note.setWordWrap(True)
         note.setStyleSheet("padding:8px;")
@@ -679,12 +778,23 @@ class FrameWizard(QWizard):
                 self._member_formulation_changed
             )
         for combo in (
+            self.column_integration,
+            self.beam_integration,
+        ):
+            combo.currentIndexChanged.connect(
+                self._member_integration_changed
+            )
+        for combo in (
             self.column_section,
             self.beam_section,
             self.column_transformation,
             self.beam_transformation,
-            self.column_integration,
-            self.beam_integration,
+            self.column_hinge_i_section,
+            self.column_hinge_j_section,
+            self.column_interior_section,
+            self.beam_hinge_i_section,
+            self.beam_hinge_j_section,
+            self.beam_interior_section,
         ):
             combo.currentIndexChanged.connect(
                 self._update_member_summary
@@ -692,8 +802,19 @@ class FrameWizard(QWizard):
         for spin in (
             self.column_integration_points,
             self.beam_integration_points,
+            self.column_hinge_i_length,
+            self.column_hinge_j_length,
+            self.beam_hinge_i_length,
+            self.beam_hinge_j_length,
+            self.column_mass_per_length,
+            self.beam_mass_per_length,
         ):
             spin.valueChanged.connect(self._update_member_summary)
+        for checkbox in (
+            self.column_consistent_mass,
+            self.beam_consistent_mass,
+        ):
+            checkbox.toggled.connect(self._update_member_summary)
 
     @staticmethod
     def _section_is_compatible(
@@ -706,6 +827,10 @@ class FrameWizard(QWizard):
         if element_type == "elasticBeamColumn":
             return section_type == "Elastic"
         return section_type in {"Elastic", "Fiber"}
+
+    @staticmethod
+    def _hinge_section_is_compatible(section_type: str) -> bool:
+        return str(section_type) in {"Elastic", "Fiber"}
 
     def _populate_section_combo(
         self,
@@ -734,6 +859,29 @@ class FrameWizard(QWizard):
             combo.setCurrentIndex(1)
         combo.blockSignals(False)
 
+    def _populate_hinge_section_combo(
+        self,
+        combo: QComboBox,
+    ) -> None:
+        previous = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("Select section…", None)
+        for tag in sorted(self.project.sections):
+            section = self.project.sections[tag]
+            if not self._hinge_section_is_compatible(
+                section.section_type
+            ):
+                continue
+            combo.addItem(
+                f"{tag} · {section.name} ({section.section_type})",
+                int(tag),
+            )
+        index = combo.findData(previous)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+
     def _populate_member_dependencies(self) -> None:
         self._populate_section_combo(
             self.column_section,
@@ -749,6 +897,15 @@ class FrameWizard(QWizard):
                 or "elasticBeamColumn"
             ),
         )
+        for combo in (
+            self.column_hinge_i_section,
+            self.column_hinge_j_section,
+            self.column_interior_section,
+            self.beam_hinge_i_section,
+            self.beam_hinge_j_section,
+            self.beam_interior_section,
+        ):
+            self._populate_hinge_section_combo(combo)
 
         for combo, auto_text in (
             (
@@ -775,6 +932,9 @@ class FrameWizard(QWizard):
             combo.setCurrentIndex(index if index >= 0 else 0)
             combo.blockSignals(False)
 
+        self._sync_hinge_defaults("column")
+        self._sync_hinge_defaults("beam")
+
     def _member_formulation_changed(self, *_args) -> None:
         self._populate_section_combo(
             self.column_section,
@@ -790,8 +950,42 @@ class FrameWizard(QWizard):
                 or "elasticBeamColumn"
             ),
         )
+        self._sync_hinge_defaults("column")
+        self._sync_hinge_defaults("beam")
         self._sync_member_controls()
         self._update_member_summary()
+
+    def _member_integration_changed(self, *_args) -> None:
+        self._sync_hinge_defaults("column")
+        self._sync_hinge_defaults("beam")
+        self._sync_member_controls()
+        self._update_member_summary()
+
+    def _sync_hinge_defaults(self, role: str) -> None:
+        main = getattr(self, f"{role}_section")
+        main_tag = main.currentData()
+        if main_tag is None:
+            return
+        for suffix in (
+            "hinge_i_section",
+            "hinge_j_section",
+            "interior_section",
+        ):
+            combo = getattr(self, f"{role}_{suffix}")
+            if combo.currentData() is None:
+                index = combo.findData(main_tag)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+
+    @staticmethod
+    def _is_hinge_integration(integration_type: str) -> bool:
+        return str(integration_type) in {
+            "HingeRadau",
+            "HingeRadauTwo",
+            "HingeMidpoint",
+            "HingeEndpoint",
+            "ConcentratedPlasticity",
+        }
 
     def _sync_member_controls(self) -> None:
         columns_on = bool(self.create_columns.isChecked())
@@ -806,33 +1000,67 @@ class FrameWizard(QWizard):
             self.column_formulation,
             self.column_section,
             self.column_transformation,
+            self.column_mass_per_length,
         ):
             widget.setEnabled(columns_on)
         for widget in (
             self.beam_formulation,
             self.beam_section,
             self.beam_transformation,
+            self.beam_mass_per_length,
         ):
             widget.setEnabled(beams_on)
 
-        column_nonlinear = (
-            self.column_formulation.currentData()
-            in {"forceBeamColumn", "dispBeamColumn"}
-        )
-        beam_nonlinear = (
-            self.beam_formulation.currentData()
-            in {"forceBeamColumn", "dispBeamColumn"}
-        )
-        self.column_integration.setEnabled(
-            columns_on and column_nonlinear
-        )
-        self.column_integration_points.setEnabled(
-            columns_on and column_nonlinear
-        )
-        self.beam_integration.setEnabled(beams_on and beam_nonlinear)
-        self.beam_integration_points.setEnabled(
-            beams_on and beam_nonlinear
-        )
+        for role, enabled in (
+            ("column", columns_on),
+            ("beam", beams_on),
+        ):
+            formulation = str(
+                getattr(self, f"{role}_formulation").currentData()
+                or "elasticBeamColumn"
+            )
+            nonlinear = formulation in {
+                "forceBeamColumn",
+                "dispBeamColumn",
+            }
+            integration = str(
+                getattr(self, f"{role}_integration").currentData()
+                or "Lobatto"
+            )
+            hinge = nonlinear and self._is_hinge_integration(
+                integration
+            )
+            concentrated = integration == "ConcentratedPlasticity"
+
+            getattr(self, f"{role}_integration").setEnabled(
+                enabled and nonlinear
+            )
+            getattr(self, f"{role}_integration_points").setEnabled(
+                enabled and nonlinear and not hinge
+            )
+            for suffix in (
+                "hinge_i_section",
+                "hinge_j_section",
+                "interior_section",
+            ):
+                getattr(self, f"{role}_{suffix}").setEnabled(
+                    enabled and hinge
+                )
+            getattr(self, f"{role}_hinge_i_length").setEnabled(
+                enabled and hinge and not concentrated
+            )
+            getattr(self, f"{role}_hinge_j_length").setEnabled(
+                enabled and hinge and not concentrated
+            )
+
+            consistent = getattr(self, f"{role}_consistent_mass")
+            consistent.setEnabled(
+                enabled and formulation != "forceBeamColumn"
+            )
+            if formulation == "forceBeamColumn" and consistent.isChecked():
+                consistent.blockSignals(True)
+                consistent.setChecked(False)
+                consistent.blockSignals(False)
 
     def _member_validation_error(self) -> str:
         columns_on = bool(self.create_columns.isChecked())
@@ -843,26 +1071,20 @@ class FrameWizard(QWizard):
                 and self.create_beams_y.isChecked()
             )
         )
-        for role, enabled, formulation, section_combo in (
-            (
-                "Column",
-                columns_on,
-                str(self.column_formulation.currentData()),
-                self.column_section,
-            ),
-            (
-                "Beam",
-                beams_on,
-                str(self.beam_formulation.currentData()),
-                self.beam_section,
-            ),
+        for role, key, enabled in (
+            ("Column", "column", columns_on),
+            ("Beam", "beam", beams_on),
         ):
             if not enabled:
                 continue
+            formulation = str(
+                getattr(self, f"{key}_formulation").currentData()
+            )
+            section_combo = getattr(self, f"{key}_section")
             section_tag = section_combo.currentData()
             if section_tag is None:
                 return (
-                    f"{role} members require a compatible section. "
+                    f"{role} members require a compatible primary section. "
                     "Create/assign one in the Section library first."
                 )
             section = self.project.sections.get(int(section_tag))
@@ -876,45 +1098,115 @@ class FrameWizard(QWizard):
                     f"{role} formulation {formulation} is not compatible "
                     f"with section type {section.section_type}."
                 )
+
+            if formulation not in {
+                "forceBeamColumn",
+                "dispBeamColumn",
+            }:
+                continue
+
+            integration = str(
+                getattr(self, f"{key}_integration").currentData()
+            )
+            if self._is_hinge_integration(integration):
+                for label, suffix in (
+                    ("I-end", "hinge_i_section"),
+                    ("J-end", "hinge_j_section"),
+                    ("interior", "interior_section"),
+                ):
+                    combo = getattr(self, f"{key}_{suffix}")
+                    tag = combo.currentData()
+                    if tag is None:
+                        return (
+                            f"{role} {integration} requires a {label} "
+                            "section."
+                        )
+                    hinge_section = self.project.sections.get(int(tag))
+                    if hinge_section is None:
+                        return (
+                            f"{role} {label} section {tag} no longer exists."
+                        )
+                    if not self._hinge_section_is_compatible(
+                        hinge_section.section_type
+                    ):
+                        return (
+                            f"{role} {label} section must be Elastic or "
+                            "Fiber."
+                        )
+                if integration != "ConcentratedPlasticity":
+                    length_i = getattr(
+                        self, f"{key}_hinge_i_length"
+                    ).value()
+                    length_j = getattr(
+                        self, f"{key}_hinge_j_length"
+                    ).value()
+                    if length_i <= 0.0 or length_j <= 0.0:
+                        return (
+                            f"{role} {integration} requires positive I/J "
+                            "hinge lengths."
+                        )
         return ""
+
+    def _member_summary_text(self, role: str) -> str:
+        formulation = str(
+            getattr(self, f"{role}_formulation").currentData()
+            or "elasticBeamColumn"
+        )
+        section = getattr(self, f"{role}_section").currentText()
+        transf = getattr(
+            self, f"{role}_transformation"
+        ).currentText()
+        mass = getattr(self, f"{role}_mass_per_length").value()
+        consistent = getattr(
+            self, f"{role}_consistent_mass"
+        ).isChecked()
+
+        detail = f"{formulation} · {section} · {transf}"
+        if formulation in {"forceBeamColumn", "dispBeamColumn"}:
+            integration = str(
+                getattr(self, f"{role}_integration").currentData()
+            )
+            if self._is_hinge_integration(integration):
+                detail += (
+                    f" · {integration} · I="
+                    f"{getattr(self, f'{role}_hinge_i_section').currentText()}"
+                    f" · J="
+                    f"{getattr(self, f'{role}_hinge_j_section').currentText()}"
+                    f" · interior="
+                    f"{getattr(self, f'{role}_interior_section').currentText()}"
+                )
+                if integration != "ConcentratedPlasticity":
+                    detail += (
+                        f" · LpI="
+                        f"{getattr(self, f'{role}_hinge_i_length').value():g}"
+                        f" · LpJ="
+                        f"{getattr(self, f'{role}_hinge_j_length').value():g}"
+                        f" {self.units.length}"
+                    )
+            else:
+                detail += (
+                    f" · {integration} / "
+                    f"{getattr(self, f'{role}_integration_points').value()} "
+                    "pts"
+                )
+        detail += f" · mass/L={mass:g}"
+        if consistent:
+            detail += " · consistent mass"
+        elif formulation != "forceBeamColumn":
+            detail += " · lumped mass"
+        return detail
 
     def _update_member_summary(self, *_args) -> None:
         if not hasattr(self, "member_summary"):
             return
         self._sync_member_controls()
 
-        column_type = str(
-            self.column_formulation.currentData()
-            or "elasticBeamColumn"
-        )
-        beam_type = str(
-            self.beam_formulation.currentData()
-            or "elasticBeamColumn"
-        )
-        column_section = self.column_section.currentText()
-        beam_section = self.beam_section.currentText()
-        column_transf = self.column_transformation.currentText()
-        beam_transf = self.beam_transformation.currentText()
-
-        column_extra = ""
-        if column_type in {"forceBeamColumn", "dispBeamColumn"}:
-            column_extra = (
-                f" · {self.column_integration.currentData()} / "
-                f"{self.column_integration_points.value()} pts"
-            )
-        beam_extra = ""
-        if beam_type in {"forceBeamColumn", "dispBeamColumn"}:
-            beam_extra = (
-                f" · {self.beam_integration.currentData()} / "
-                f"{self.beam_integration_points.value()} pts"
-            )
-
         self.member_summary.setText(
-            "<b>Member assignment summary</b><br>"
-            f"Columns: {column_type} · {column_section} · "
-            f"{column_transf}{column_extra}<br>"
-            f"Beams: {beam_type} · {beam_section} · "
-            f"{beam_transf}{beam_extra}"
+            "<b>Member assignment review</b><br>"
+            "Columns: "
+            + self._member_summary_text("column")
+            + "<br>Beams: "
+            + self._member_summary_text("beam")
         )
 
         error = self._member_validation_error()
@@ -928,8 +1220,8 @@ class FrameWizard(QWizard):
         else:
             self.member_validation_status.setText(
                 "<b>Member definition ready</b><br>"
-                "Selected formulations, sections and transformations are "
-                "compatible with this Task 2 phase."
+                "Formulations, sections, integration, transformations and "
+                "mass settings are consistent."
             )
             if finish is not None and self.currentId() == self.members_page_id:
                 finish.setEnabled(True)
@@ -1069,6 +1361,64 @@ class FrameWizard(QWizard):
             ),
             beam_integration_points=int(
                 self.beam_integration_points.value()
+            ),
+            column_hinge_i_section_tag=(
+                int(self.column_hinge_i_section.currentData())
+                if self.column_hinge_i_section.currentData() is not None
+                else None
+            ),
+            column_hinge_j_section_tag=(
+                int(self.column_hinge_j_section.currentData())
+                if self.column_hinge_j_section.currentData() is not None
+                else None
+            ),
+            column_interior_section_tag=(
+                int(self.column_interior_section.currentData())
+                if self.column_interior_section.currentData() is not None
+                else None
+            ),
+            beam_hinge_i_section_tag=(
+                int(self.beam_hinge_i_section.currentData())
+                if self.beam_hinge_i_section.currentData() is not None
+                else None
+            ),
+            beam_hinge_j_section_tag=(
+                int(self.beam_hinge_j_section.currentData())
+                if self.beam_hinge_j_section.currentData() is not None
+                else None
+            ),
+            beam_interior_section_tag=(
+                int(self.beam_interior_section.currentData())
+                if self.beam_interior_section.currentData() is not None
+                else None
+            ),
+            column_hinge_i_length=float(
+                self.column_hinge_i_length.value()
+            ),
+            column_hinge_j_length=float(
+                self.column_hinge_j_length.value()
+            ),
+            beam_hinge_i_length=float(
+                self.beam_hinge_i_length.value()
+            ),
+            beam_hinge_j_length=float(
+                self.beam_hinge_j_length.value()
+            ),
+            column_mass_per_length=float(
+                self.column_mass_per_length.value()
+            ),
+            beam_mass_per_length=float(
+                self.beam_mass_per_length.value()
+            ),
+            column_consistent_mass=bool(
+                self.column_consistent_mass.isChecked()
+                and self.column_formulation.currentData()
+                != "forceBeamColumn"
+            ),
+            beam_consistent_mass=bool(
+                self.beam_consistent_mass.isChecked()
+                and self.beam_formulation.currentData()
+                != "forceBeamColumn"
             ),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
