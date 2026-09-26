@@ -74,6 +74,7 @@ from ..analysis_templates import (
     default_control_node,
 )
 from ..frame_setup import prepare_frame_grid
+from ..frame_presets import frame_spec_from_preset, frame_spec_to_preset
 from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, generate_frame_project, to_openseespy
 from ..importer import import_openseespy_source
 from ..jobs import JobRecord
@@ -5573,7 +5574,45 @@ class MainWindow(QMainWindow):
         # this point therefore means the complete Frame Wizard build contract
         # has already been reviewed by the user.
         spec = dialog.spec()
-        self._generate_frame_grid(spec)
+        self._generate_frame_grid(
+            spec,
+            managed_by_frame_wizard=True,
+            recipe_name=dialog.active_preset_name,
+        )
+
+    def _edit_frame_wizard(self) -> None:
+        recipe = dict(self.project.frame_wizard_recipe)
+        if not recipe:
+            QMessageBox.information(
+                self,
+                "Edit in Frame Wizard",
+                "The current FE model is not managed by Frame Wizard.",
+            )
+            return
+        try:
+            frame_spec_from_preset(recipe)
+        except (TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                "Edit in Frame Wizard",
+                f"The saved Frame Wizard recipe is invalid:\n\n{exc}",
+            )
+            return
+
+        dialog = FrameWizard(
+            self.project,
+            parent=self,
+            initial_preset=recipe,
+            managed_edit=True,
+        )
+        if not dialog.exec():
+            return
+        self._generate_frame_grid(
+            dialog.spec(),
+            managed_by_frame_wizard=True,
+            recipe_name=dialog.active_preset_name,
+            regenerating=True,
+        )
 
     def _open_frame_grid(self, *, planar_2d: bool) -> None:
         self.frame_grid_panel.set_planar_2d(planar_2d)
@@ -5595,7 +5634,14 @@ class MainWindow(QMainWindow):
     def _show_frame_grid_2d(self) -> None:
         self._open_frame_grid(planar_2d=True)
 
-    def _generate_frame_grid(self, spec: FrameGridSpec) -> None:
+    def _generate_frame_grid(
+        self,
+        spec: FrameGridSpec,
+        *,
+        managed_by_frame_wizard: bool = False,
+        recipe_name: str | None = None,
+        regenerating: bool = False,
+    ) -> None:
         before = self.project.to_dict()
         try:
             created_transformations = prepare_frame_grid(
@@ -5607,6 +5653,22 @@ class MainWindow(QMainWindow):
             # then applies any Frame Wizard joint topology (duplicate nodes,
             # equalDOF ties and connection springs).
             joint_result = generate_frame_project(self.project, spec)
+            if managed_by_frame_wizard:
+                managed_name = str(recipe_name or "").strip()
+                if managed_name in {"", "Custom"}:
+                    managed_name = "Frame Wizard Managed Model"
+                self.project.frame_wizard_recipe = frame_spec_to_preset(
+                    spec,
+                    name=managed_name,
+                    description=(
+                        "Managed FE model recipe created by Frame Wizard. "
+                        "Use Edit in Frame Wizard to reopen and regenerate it."
+                    ),
+                )
+            else:
+                # Quick Frame Grid also replaces the FE domain, so any
+                # previous managed recipe no longer describes the live model.
+                self.project.frame_wizard_recipe = {}
         except (TypeError, ValueError) as exc:
             self.project = ProjectDatabase.from_dict(before)
             self.model = self.project.model
@@ -5739,9 +5801,17 @@ class MainWindow(QMainWindow):
         )
         self._record_project_change(
             (
-                "Frame Wizard · Generate 2D frame"
-                if spec.planar_2d
-                else "Frame Wizard · Generate 3D frame"
+                (
+                    "Frame Wizard · Regenerate 2D frame"
+                    if spec.planar_2d
+                    else "Frame Wizard · Regenerate 3D frame"
+                )
+                if regenerating
+                else (
+                    "Frame Wizard · Generate 2D frame"
+                    if spec.planar_2d
+                    else "Frame Wizard · Generate 3D frame"
+                )
             ),
             before,
         )
@@ -6042,7 +6112,13 @@ class MainWindow(QMainWindow):
 
         # Geometry defines topology, Mesh stores discretization/FE recipes,
         # and generated OpenSees entities live only under FE Model.
-        fe_model = QTreeWidgetItem(["FE Model"])
+        fe_model = QTreeWidgetItem([
+            (
+                "FE Model · Frame Wizard Managed"
+                if self.project.frame_wizard_recipe
+                else "FE Model"
+            )
+        ])
         fe_model.setIcon(0, studio_icon("fe-model"))
         fe_model.setData(0, Qt.UserRole, ("fe_model_root", None))
         fe_model.setExpanded(True)
@@ -28814,6 +28890,12 @@ class MainWindow(QMainWindow):
                     )),
                     ("Mass Sources", len(self.project.mass_sources)),
                     ("Recorders", len(self.project.recorders)),
+                    (
+                        "Managed By",
+                        "Frame Wizard"
+                        if self.project.frame_wizard_recipe
+                        else "Manual / mixed",
+                    ),
                 ],
             )
             return
@@ -30231,6 +30313,9 @@ class MainWindow(QMainWindow):
             properties.triggered.connect(
                 lambda: self._show_tree_root_properties("model_root")
             )
+            if self.project.frame_wizard_recipe:
+                edit_frame = menu.addAction("Edit in Frame Wizard...")
+                edit_frame.triggered.connect(self._edit_frame_wizard)
             menu.addAction(self.actions["check_model"])
             menu.addAction(self.actions["run"])
             menu.addSeparator()
@@ -30295,6 +30380,9 @@ class MainWindow(QMainWindow):
                 "New Connection / Joint..."
             )
             connection_action.triggered.connect(self._create_connection)
+            if self.project.frame_wizard_recipe:
+                edit_frame = menu.addAction("Edit in Frame Wizard...")
+                edit_frame.triggered.connect(self._edit_frame_wizard)
             exec_menu()
             return
 
