@@ -944,7 +944,7 @@ class RCWallWizard(QWizard):
         )
         self.macro_shear_material = QComboBox()
         self.macro_shear_material.addItem(
-            "Select existing uniaxial shear material…",
+            "Auto · Kshear = G·A/h from wall properties",
             None,
         )
         for tag in sorted(self.project.materials):
@@ -960,7 +960,10 @@ class RCWallWizard(QWizard):
             (self.macro_web_fsam, "web"),
             (self.macro_boundary_fsam, "boundary"),
         ):
-            combo.addItem(f"Select {role} FSAM nD material…", None)
+            combo.addItem(
+                f"Auto · generate {role} FSAM from wall properties",
+                None,
+            )
             for tag in sorted(self.project.nd_materials):
                 material = self.project.nd_materials[tag]
                 if material.material_type != "FSAM":
@@ -979,10 +982,11 @@ class RCWallWizard(QWizard):
         form.addRow("SFI_MVLEM boundary FSAM:", self.macro_boundary_fsam)
 
         self.macro_dependency_note = QLabel(
-            "MVLEM creates its Concrete02/Steel02 fiber materials from the "
-            "wizard values and reuses one existing uniaxial shear material. "
-            "SFI_MVLEM reuses existing FSAM nD materials for web/boundary "
-            "macro-fibers."
+            "MVLEM/MVLEM_3D create Concrete02/Steel02 fiber materials and, "
+            "by default, an elastic shear spring K=G·A/h with correct F/L "
+            "units. Select an existing material only to override Auto. "
+            "SFI_MVLEM can auto-generate its Steel02 + ConcreteCM + FSAM "
+            "web/boundary dependencies, or reuse an existing FSAM pair."
         )
         self.macro_dependency_note.setWordWrap(True)
         self.macro_dependency_note.setStyleSheet(
@@ -2439,20 +2443,14 @@ class RCWallWizard(QWizard):
                 ))
             if self.macro_density.value() < 0.0:
                 items.append(("macro", "Macro density cannot be negative."))
-            if formulation in {"MVLEM", "MVLEM_3D"}:
-                if self.macro_shear_material.currentData() is None:
-                    items.append((
-                        "material",
-                        f"{formulation} requires a shear material.",
-                    ))
             if formulation == "SFI_MVLEM":
-                if (
-                    self.macro_web_fsam.currentData() is None
-                    or self.macro_boundary_fsam.currentData() is None
-                ):
+                web_fsam = self.macro_web_fsam.currentData()
+                boundary_fsam = self.macro_boundary_fsam.currentData()
+                if (web_fsam is None) != (boundary_fsam is None):
                     items.append((
                         "material",
-                        "SFI_MVLEM requires web and boundary FSAM materials.",
+                        "SFI_MVLEM must use Auto for both FSAM roles or "
+                        "select both web and boundary FSAM materials.",
                     ))
             if formulation == "MVLEM_3D":
                 if self.macro_thick_mod.value() <= 0.0:
@@ -2869,6 +2867,12 @@ class RCWallWizard(QWizard):
                     f"Web FSAM: {self.macro_web_fsam.currentText()}<br>"
                     f"Boundary FSAM: "
                     f"{self.macro_boundary_fsam.currentText()}<br>"
+                    + (
+                        "Dependencies: auto-generated Steel02 + ConcreteCM + "
+                        "FSAM<br>"
+                        if self.macro_web_fsam.currentData() is None
+                        else "Dependencies: reuse selected FSAM pair<br>"
+                    )
                     "Fiber mapping: Boundary | Web … Web | Boundary"
                 )
             else:
@@ -2881,6 +2885,11 @@ class RCWallWizard(QWizard):
                     )
                     + "<br>"
                     f"Shear: {self.macro_shear_material.currentText()}<br>"
+                    + (
+                        "Shear units: force/deformation (F/L)<br>"
+                        if self.macro_shear_material.currentData() is None
+                        else ""
+                    )
                     f"CoR c = {self.macro_center_ratio.value():g} · "
                     f"density = {self.macro_density.value():g}"
                     + (
