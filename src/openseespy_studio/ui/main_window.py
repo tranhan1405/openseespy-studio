@@ -5688,10 +5688,15 @@ class MainWindow(QMainWindow):
         foundation_connections = int(
             joint_result.get("foundation_connections", 0)
         )
+        foundation_profiles = int(
+            joint_result.get("foundation_profiles_used", 0)
+        )
         if foundation_connections:
             message += (
                 f" · {foundation_connections} foundation spring connection(s)"
             )
+            if foundation_profiles:
+                message += f" / {foundation_profiles} profile(s)"
 
         self._refresh_all(message)
         self.frame_grid_panel.set_assignment_tags(
