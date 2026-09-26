@@ -15,8 +15,11 @@ from openseespy_studio.generator import (
     FrameGridSpec,
     frame_brace_element_count,
     frame_brace_panel_count,
+    frame_brace_panels,
     frame_brace_storeys,
     frame_brace_x_bays,
+    frame_brace_x_grid_lines,
+    frame_brace_y_bays,
     frame_brace_y_grid_lines,
     frame_diaphragm_count,
     frame_diaphragm_levels,
@@ -2104,6 +2107,25 @@ def _brace_project() -> ProjectDatabase:
             },
         )
     )
+    project.add_material(
+        MaterialData(
+            tag=82,
+            name="Brace nonlinear steel",
+            material_type="Steel01",
+            parameters={
+                "Fy": 3.5e8,
+                "E0": 2.0e11,
+                "b": 0.01,
+            },
+            source={
+                "response_quantity": "stress_strain",
+                "parameter_dimensions": {
+                    "Fy": "stress",
+                    "E0": "stress",
+                },
+            },
+        )
+    )
     return project
 
 
@@ -2374,3 +2396,267 @@ def test_main_window_frame_wizard_reports_bracing_generation():
     assert '"brace_panels"' in source
     assert '"brace_elements"' in source
     assert "braced panel(s)" in source
+
+
+def test_frame_brace_yz_scope_helpers_and_counts():
+    spec = FrameGridSpec(
+        nx=2,
+        ny=3,
+        nz=2,
+        planar_2d=False,
+        create_beams_x=True,
+        create_beams_y=True,
+        brace_mode="Truss",
+        brace_plane_mode="Y",
+        brace_material_tag=81,
+        brace_y_bays=(0, 2),
+        brace_storeys=(1, 2),
+        brace_x_plane_scope="Exterior",
+    )
+    assert frame_brace_y_bays(spec) == (0, 2)
+    assert frame_brace_x_grid_lines(spec) == (0, 2)
+    assert frame_brace_panel_count(spec) == 8
+    assert frame_brace_element_count(spec) == 16
+    assert all(panel[0] == "Y" for panel in frame_brace_panels(spec))
+
+
+def test_generate_frame_yz_bracing_uses_beam_y_plane_nodes():
+    project = _brace_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.5,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        brace_mode="Truss",
+        brace_plane_mode="Y",
+        brace_pattern="X",
+        brace_material_tag=81,
+        brace_area=0.01,
+        brace_y_bays=(0,),
+        brace_storeys=(1,),
+        brace_x_plane_scope="XMin",
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["brace_panels"] == 1
+    assert result["brace_yz_panels"] == 1
+    assert result["brace_xz_panels"] == 0
+    assert result["brace_elements"] == 2
+    braces = [
+        element
+        for element in project.model.elements.values()
+        if element.group.startswith("brace-y:")
+    ]
+    assert len(braces) == 2
+    assert all(
+        project.model.nodes[tag].xyz[0] == pytest.approx(0.0)
+        for element in braces
+        for tag in element.node_tags()
+    )
+
+
+def test_frame_mixed_panel_overrides_change_pattern_and_can_disable_panel():
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        create_beams_x=True,
+        create_beams_y=True,
+        brace_mode="Truss",
+        brace_plane_mode="Both",
+        brace_pattern="X",
+        brace_material_tag=81,
+        brace_x_bays=(0,),
+        brace_y_bays=(0,),
+        brace_storeys=(1,),
+        brace_y_plane_scope="YMin",
+        brace_x_plane_scope="XMin",
+        brace_panel_patterns=(
+            ("X", 0, 0, 1, "DiagonalForward"),
+            ("Y", 0, 0, 1, "None"),
+        ),
+    )
+    panels = frame_brace_panels(spec)
+    assert panels == (("X", 0, 0, 1, "DiagonalForward"),)
+    assert frame_brace_panel_count(spec) == 1
+    assert frame_brace_element_count(spec) == 1
+
+
+def test_generate_mixed_bracing_supports_kright_on_yz_panel():
+    project = _brace_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=4.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=1,
+        beam_section_tag=1,
+        brace_mode="Truss",
+        brace_plane_mode="Both",
+        brace_pattern="X",
+        brace_material_tag=81,
+        brace_area=0.01,
+        brace_x_bays=(0,),
+        brace_y_bays=(0,),
+        brace_storeys=(1,),
+        brace_y_plane_scope="YMin",
+        brace_x_plane_scope="XMin",
+        brace_panel_patterns=(
+            ("X", 0, 0, 1, "DiagonalForward"),
+            ("Y", 0, 0, 1, "KRight"),
+        ),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["brace_panels"] == 2
+    assert result["brace_elements"] == 3
+    assert result["brace_xz_panels"] == 1
+    assert result["brace_yz_panels"] == 1
+    assert result["brace_midpoint_nodes"] == 1
+    assert result["brace_member_splits"] == 1
+
+    midpoint_tags = [
+        tag
+        for tag, node in project.model.nodes.items()
+        if node.xyz == pytest.approx((0.0, 4.0, 2.0))
+    ]
+    assert len(midpoint_tags) == 1
+    midpoint_tag = midpoint_tags[0]
+    brace_y = [
+        element
+        for element in project.model.elements.values()
+        if element.group.startswith("brace-y:")
+    ]
+    assert len(brace_y) == 2
+    assert all(midpoint_tag in element.node_tags() for element in brace_y)
+
+
+def test_frame_wizard_mixed_panel_matrix_flows_to_spec():
+    wizard = FrameWizard(_brace_project())
+    try:
+        wizard.dimension.setCurrentIndex(
+            wizard.dimension.findData("3D")
+        )
+        wizard.brace_mode.setCurrentIndex(
+            wizard.brace_mode.findData("Truss")
+        )
+        wizard.brace_material.setCurrentIndex(
+            wizard.brace_material.findData(81)
+        )
+        wizard.brace_plane_mode.setCurrentIndex(
+            wizard.brace_plane_mode.findData("Both")
+        )
+        wizard.brace_y_plane_scope.setCurrentIndex(
+            wizard.brace_y_plane_scope.findData("YMin")
+        )
+        wizard.brace_x_plane_scope.setCurrentIndex(
+            wizard.brace_x_plane_scope.findData("XMin")
+        )
+
+        for row in range(wizard.brace_x_table.rowCount()):
+            wizard.brace_x_table.item(row, 1).setCheckState(
+                Qt.Checked if row == 0 else Qt.Unchecked
+            )
+        for row in range(wizard.brace_y_table.rowCount()):
+            wizard.brace_y_table.item(row, 1).setCheckState(
+                Qt.Checked if row == 0 else Qt.Unchecked
+            )
+        for row in range(wizard.brace_storey_table.rowCount()):
+            wizard.brace_storey_table.item(row, 1).setCheckState(
+                Qt.Checked if row == 0 else Qt.Unchecked
+            )
+        _APP.processEvents()
+
+        wizard._refresh_brace_panel_table()
+        assert wizard.brace_panel_table.rowCount() == 2
+
+        first = wizard.brace_panel_table.cellWidget(0, 4)
+        second = wizard.brace_panel_table.cellWidget(1, 4)
+        assert isinstance(first, QComboBox)
+        assert isinstance(second, QComboBox)
+        first.setCurrentIndex(first.findData("DiagonalForward"))
+        second.setCurrentIndex(second.findData("KRight"))
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.brace_plane_mode == "Both"
+        assert len(spec.brace_panel_patterns) == 2
+        assert {entry[-1] for entry in spec.brace_panel_patterns} == {
+            "DiagonalForward",
+            "KRight",
+        }
+        assert frame_brace_panel_count(spec) == 2
+        assert frame_brace_element_count(spec) == 3
+        assert "X-Z 1, Y-Z 1" in wizard.brace_summary.text()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_brb_ready_requires_nonlinear_material_and_corottruss():
+    wizard = FrameWizard(_brace_project())
+    try:
+        wizard.brace_mode.setCurrentIndex(
+            wizard.brace_mode.findData("Truss")
+        )
+        wizard.brace_material.setCurrentIndex(
+            wizard.brace_material.findData(81)
+        )
+        wizard.brace_response_preset.setCurrentIndex(
+            wizard.brace_response_preset.findData("BRBReady")
+        )
+        _APP.processEvents()
+
+        assert wizard.brace_element_type.currentData() == "corotTruss"
+        error = wizard._brace_validation_error()
+        assert "calibrated nonlinear" in error
+
+        wizard.brace_material.setCurrentIndex(
+            wizard.brace_material.findData(82)
+        )
+        _APP.processEvents()
+        assert wizard._brace_validation_error() == ""
+        spec = wizard.spec()
+        assert spec.brace_response_preset == "BRBReady"
+        assert spec.brace_material_tag == 82
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_brace_panel_override_validation_rejects_duplicates():
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        create_beams_x=True,
+        create_beams_y=True,
+        brace_mode="Truss",
+        brace_material_tag=81,
+        brace_panel_patterns=(
+            ("X", 0, 0, 1, "X"),
+            ("X", 0, 0, 1, "KRight"),
+        ),
+    )
+    with pytest.raises(ValueError, match="duplicate panel keys"):
+        validate_frame_grid_spec(spec)
