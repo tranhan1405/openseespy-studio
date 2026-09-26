@@ -24,7 +24,11 @@ from openseespy_studio.moment_curvature import (
     build_moment_curvature_project,
 )
 from openseespy_studio.postprocess import moment_curvature_curve
-from openseespy_studio.rc_wall import RCWallSpec, build_rc_wall
+from openseespy_studio.rc_wall import (
+    RCWallSpec,
+    build_rc_wall,
+    build_rc_wall_macro_2d,
+)
 from openseespy_studio.project import (
     MATERIAL_DEFAULTS,
     AnalysisSettingsData,
@@ -3262,4 +3266,75 @@ print('MASONPAN12_ANALYSIS_OK', ops.nodeDisp({top_right}, 1))
     assert completed.returncode == 0, completed.stderr
     assert "MASONPAN12_ANALYSIS_OK" in completed.stdout
     assert "MASONPAN12_RESPONSES_OK 2 6 6" in completed.stdout
+
+@pytest.mark.parametrize("formulation", ["MVLEM", "SFI_MVLEM"])
+def test_wall_macro_wizard_defaults_run_in_real_opensees(
+    tmp_path: Path,
+    formulation: str,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    spec = RCWallSpec(
+        width=1.20,
+        height=3.00,
+        thickness=0.20,
+        boundary_width=0.20,
+        vertical_elements=2,
+        macro_fibers=5,
+        formulation=formulation,
+        macro_shear_material_tag=None,
+        macro_web_fsam_tag=None,
+        macro_boundary_fsam_tag=None,
+        boundary_unconfined_thickness=0.05,
+        boundary_confined_thickness=0.15,
+        replace_geometry=True,
+        name=f"Runtime {formulation}",
+    )
+    result = build_rc_wall_macro_2d(project, spec)
+    top_node = result.node_tags[-1]
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in script
+    assert f"ops.element('{formulation}'" in script
+
+    run_block = f"""
+ops.timeSeries('Linear', 950)
+ops.pattern('Plain', 950, 950)
+ops.load({top_node}, 1.0, 0.0, 0.0)
+ops.system('UmfPack')
+ops.numberer('RCM')
+ops.constraints('Plain')
+ops.test('NormDispIncr', 1.0e-10, 30)
+ops.algorithm('Newton')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+_wall_macro_ok = ops.analyze(1)
+if _wall_macro_ok != 0:
+    raise RuntimeError(
+        f'{formulation} default wizard analysis failed: {{_wall_macro_ok}}'
+    )
+print('WALL_MACRO_RUNTIME_OK', '{formulation}', ops.nodeDisp({top_node}, 1))
+"""
+    script_path = tmp_path / f"{formulation.lower()}-wizard-smoke.py"
+    script_path.write_text(script + "\n" + run_block, encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert f"WALL_MACRO_RUNTIME_OK {formulation}" in completed.stdout
 
