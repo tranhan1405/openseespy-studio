@@ -74,6 +74,10 @@ from ..analysis_templates import (
     default_control_node,
 )
 from ..frame_setup import prepare_frame_grid
+from ..frame_management import (
+    frame_regeneration_plan,
+    managed_frame_snapshot,
+)
 from ..frame_presets import frame_spec_from_preset, frame_spec_to_preset
 from ..generator import FrameGridSpec, cyclic_displacement_steps, generate_frame_grid, generate_frame_project, to_openseespy
 from ..importer import import_openseespy_source
@@ -5612,6 +5616,7 @@ class MainWindow(QMainWindow):
             managed_by_frame_wizard=True,
             recipe_name=dialog.active_preset_name,
             regenerating=True,
+            regeneration_mode=dialog.regeneration_mode(),
         )
 
     def _open_frame_grid(self, *, planar_2d: bool) -> None:
@@ -5641,7 +5646,44 @@ class MainWindow(QMainWindow):
         managed_by_frame_wizard: bool = False,
         recipe_name: str | None = None,
         regenerating: bool = False,
+        regeneration_mode: str = "all",
     ) -> None:
+        regeneration_mode = str(regeneration_mode or "all")
+        if regeneration_mode not in {"all", "compatible"}:
+            raise ValueError(
+                "Frame Wizard regeneration mode must be 'all' or 'compatible'."
+            )
+        if (
+            regenerating
+            and regeneration_mode == "compatible"
+            and self.project.frame_wizard_recipe
+        ):
+            try:
+                plan = frame_regeneration_plan(
+                    self.project,
+                    dict(self.project.frame_wizard_recipe),
+                    spec,
+                )
+            except (TypeError, ValueError) as exc:
+                QMessageBox.warning(
+                    self,
+                    "Update Compatible Parts",
+                    str(exc),
+                )
+                return
+            if not bool(plan.get("compatible", False)):
+                QMessageBox.warning(
+                    self,
+                    "Update Compatible Parts",
+                    (
+                        "Compatible update is no longer safe. Generated tags "
+                        "would change or manual edits were detected. Reopen "
+                        "Frame Wizard and use Regenerate all after reviewing "
+                        "the diff."
+                    ),
+                )
+                return
+
         before = self.project.to_dict()
         try:
             created_transformations = prepare_frame_grid(
@@ -5657,7 +5699,7 @@ class MainWindow(QMainWindow):
                 managed_name = str(recipe_name or "").strip()
                 if managed_name in {"", "Custom"}:
                     managed_name = "Frame Wizard Managed Model"
-                self.project.frame_wizard_recipe = frame_spec_to_preset(
+                recipe = frame_spec_to_preset(
                     spec,
                     name=managed_name,
                     description=(
@@ -5665,6 +5707,13 @@ class MainWindow(QMainWindow):
                         "Use Edit in Frame Wizard to reopen and regenerate it."
                     ),
                 )
+                recipe["managed_snapshot"] = managed_frame_snapshot(
+                    self.project
+                )
+                recipe["last_regeneration_mode"] = (
+                    regeneration_mode if regenerating else "generate"
+                )
+                self.project.frame_wizard_recipe = recipe
             else:
                 # Quick Frame Grid also replaces the FE domain, so any
                 # previous managed recipe no longer describes the live model.
@@ -5678,12 +5727,19 @@ class MainWindow(QMainWindow):
 
         self.selection.clear()
 
+        if regenerating and regeneration_mode == "compatible":
+            message = "Updated compatible Frame Wizard model · stable tags preserved"
+        elif regenerating:
+            message = "Regenerated Frame Wizard model"
+        else:
+            message = ""
+
         if created_transformations:
             names = ", ".join(
                 f"{item.name} [{item.tag}]"
                 for item in created_transformations
             )
-            message = (
+            generated_detail = (
                 (
                     f"Generated 2D {spec.nx}-bay, {spec.nz}-storey frame"
                     if spec.planar_2d
@@ -5695,7 +5751,7 @@ class MainWindow(QMainWindow):
                 + f" · created {names}"
             )
         else:
-            message = (
+            generated_detail = (
                 f"Generated 2D {spec.nx}-bay, {spec.nz}-storey frame"
                 if spec.planar_2d
                 else (
@@ -5703,6 +5759,11 @@ class MainWindow(QMainWindow):
                     f"{spec.nz}-storey frame"
                 )
             )
+        message = (
+            f"{message} · {generated_detail}"
+            if message
+            else generated_detail
+        )
 
         joint_connections = int(
             joint_result.get("joint_connections", 0)
@@ -5802,9 +5863,17 @@ class MainWindow(QMainWindow):
         self._record_project_change(
             (
                 (
-                    "Frame Wizard · Regenerate 2D frame"
-                    if spec.planar_2d
-                    else "Frame Wizard · Regenerate 3D frame"
+                    (
+                        "Frame Wizard · Compatible update 2D frame"
+                        if spec.planar_2d
+                        else "Frame Wizard · Compatible update 3D frame"
+                    )
+                    if regeneration_mode == "compatible"
+                    else (
+                        "Frame Wizard · Regenerate 2D frame"
+                        if spec.planar_2d
+                        else "Frame Wizard · Regenerate 3D frame"
+                    )
                 )
                 if regenerating
                 else (
