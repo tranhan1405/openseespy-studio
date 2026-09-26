@@ -180,6 +180,7 @@ class MasonryWallWizard(QWizard):
         self._build_formulation_page()
         self._build_review_page()
         self._sync_formulation()
+        self._sync_material_strategy()
         self._update_review()
 
     def _build_geometry_page(self) -> None:
@@ -261,6 +262,38 @@ class MasonryWallWizard(QWizard):
         body = QWidget()
         form = QFormLayout(body)
 
+        self.material_strategy = QComboBox()
+        self.material_strategy.addItem(
+            "Create custom Masonry material from values below",
+            "CreateCustom",
+        )
+        self.material_strategy.addItem(
+            "Reuse existing Masonry material(s) from project",
+            "UseExisting",
+        )
+        self.existing_material = QComboBox()
+        self.existing_lateral_material = QComboBox()
+        for combo, role in (
+            (self.existing_material, "central / strut"),
+            (self.existing_lateral_material, "lateral"),
+        ):
+            combo.addItem(f"Select {role} Masonry material…", None)
+            for tag in sorted(self.project.materials):
+                material = self.project.materials[tag]
+                if material.material_type != "Masonry":
+                    continue
+                combo.addItem(
+                    f"{tag} - {material.name} (Masonry)",
+                    int(tag),
+                )
+
+        form.addRow("Material source:", self.material_strategy)
+        form.addRow("Existing central / strut:", self.existing_material)
+        form.addRow(
+            "Existing lateral (MasonPan12):",
+            self.existing_lateral_material,
+        )
+
         stress_label = self.units.engineering_stress_label
         self.Fm = _double(5.0, 1.0e-9, 1.0e9)
         self.Ft = _double(0.20, 1.0e-9, 1.0e9)
@@ -320,14 +353,26 @@ class MasonryWallWizard(QWizard):
         )
         form.addRow(warning)
 
-        for widget in (
+        self._custom_material_widgets = (
             self.Fm, self.Ft, self.Emo, self.Um, self.Uult, self.Ucl,
             self.L, self.a1, self.a2, self.D1, self.D2, self.Ach,
             self.Are, self.Ba, self.Bch, self.Gun, self.Gplu,
-            self.Gplr, self.Exp1, self.Exp2,
-        ):
-            widget.valueChanged.connect(self._update_review)
-        self.IENV.currentIndexChanged.connect(self._update_review)
+            self.Gplr, self.Exp1, self.Exp2, self.IENV,
+        )
+        for widget in self._custom_material_widgets:
+            if isinstance(widget, QDoubleSpinBox):
+                widget.valueChanged.connect(self._update_review)
+            else:
+                widget.currentIndexChanged.connect(self._update_review)
+        self.material_strategy.currentIndexChanged.connect(
+            self._material_strategy_changed
+        )
+        self.existing_material.currentIndexChanged.connect(
+            self._update_review
+        )
+        self.existing_lateral_material.currentIndexChanged.connect(
+            self._update_review
+        )
 
         scroll.setWidget(body)
         outer.addWidget(scroll)
@@ -396,6 +441,11 @@ class MasonryWallWizard(QWizard):
 
     def _formulation_changed(self, *_args) -> None:
         self._sync_formulation()
+        self._sync_material_strategy()
+        self._update_review()
+
+    def _material_strategy_changed(self, *_args) -> None:
+        self._sync_material_strategy()
         self._update_review()
 
     def _sync_formulation(self) -> None:
@@ -418,6 +468,24 @@ class MasonryWallWizard(QWizard):
                 "lateral-strut material."
             )
 
+    def _sync_material_strategy(self) -> None:
+        if not hasattr(self, "material_strategy"):
+            return
+        use_existing = (
+            str(self.material_strategy.currentData()) == "UseExisting"
+        )
+        formulation = (
+            str(self.formulation.currentData())
+            if hasattr(self, "formulation")
+            else "EquivalentStrut"
+        )
+        for widget in getattr(self, "_custom_material_widgets", ()):
+            widget.setEnabled(not use_existing)
+        self.existing_material.setEnabled(use_existing)
+        self.existing_lateral_material.setEnabled(
+            use_existing and formulation == "MasonPan12"
+        )
+
     def data(self) -> MasonryWallSpec:
         stress_to_pa = self.units.engineering_stress_to_pa
         return MasonryWallSpec(
@@ -433,6 +501,17 @@ class MasonryWallWizard(QWizard):
             crossed_struts=bool(self.crossed_struts.isChecked()),
             masonpan_w_tot=float(self.masonpan_w_tot.value()),
             masonpan_w1=float(self.masonpan_w1.value()),
+            material_strategy=str(self.material_strategy.currentData()),
+            existing_material_tag=(
+                None
+                if self.existing_material.currentData() is None
+                else int(self.existing_material.currentData())
+            ),
+            existing_lateral_material_tag=(
+                None
+                if self.existing_lateral_material.currentData() is None
+                else int(self.existing_lateral_material.currentData())
+            ),
             Fm=-abs(stress_to_pa(self.Fm.value())),
             Ft=abs(stress_to_pa(self.Ft.value())),
             Um=float(self.Um.value()),
@@ -462,6 +541,21 @@ class MasonryWallWizard(QWizard):
             validate_masonry_wall_spec(self.data())
         except ValueError as exc:
             messages.append(str(exc))
+        spec = self.data()
+        if spec.material_strategy == "UseExisting":
+            if spec.existing_material_tag is None:
+                messages.append(
+                    "Select an existing Masonry material for the strut / "
+                    "central-strut role."
+                )
+            if (
+                spec.formulation == "MasonPan12"
+                and spec.existing_lateral_material_tag is None
+            ):
+                messages.append(
+                    "Select an existing Masonry material for MasonPan12 "
+                    "lateral struts."
+                )
         if (
             not self.replace_geometry.isChecked()
             and (int(self.project.model.ndm), int(self.project.model.ndf))
@@ -495,14 +589,28 @@ class MasonryWallWizard(QWizard):
                 f"{width:g} {self.units.length} · area {area:g} "
                 f"{self.units.length}²"
             )
-            objects = f"4 nodes · {count} strut element(s) · 1 Masonry material"
+            material_objects = (
+                "reuse 1 Masonry material"
+                if self.material_strategy.currentData() == "UseExisting"
+                else "create 1 Masonry material"
+            )
+            objects = (
+                f"4 nodes · {count} strut element(s) · {material_objects}"
+            )
         else:
             topology = (
                 "12 perimeter nodes · six internal struts in native MasonPan12 · "
                 f"w_tot={self.masonpan_w_tot.value():g} · "
                 f"w1={self.masonpan_w1.value():g}"
             )
-            objects = "12 nodes · 1 MasonPan12 element · 2 Masonry materials"
+            material_objects = (
+                "reuse 2 Masonry material references"
+                if self.material_strategy.currentData() == "UseExisting"
+                else "create 2 Masonry materials"
+            )
+            objects = (
+                "12 nodes · 1 MasonPan12 element · " + material_objects
+            )
 
         mode = (
             "Replace current FE model"
@@ -519,17 +627,35 @@ class MasonryWallWizard(QWizard):
             f"{topology}<br>{objects}<br>"
             f"Mode: {mode}"
         )
-        self.material_summary.setText(
-            "<b>Masonry constitutive model</b><br>"
-            f"Fm = -{self.Fm.value():g} {self.units.engineering_stress_label} · "
-            f"Ft = {self.Ft.value():g} {self.units.engineering_stress_label} · "
-            f"Emo = {self.Emo.value():g} "
-            f"{self.units.engineering_stress_label}<br>"
-            f"Um={self.Um.value():g} · Uult={self.Uult.value():g} · "
-            f"Ucl={self.Ucl.value():g}<br>"
-            "<span style='color:#a15c00'>Custom / unverified starting "
-            "parameters — calibration required.</span>"
-        )
+        if self.material_strategy.currentData() == "UseExisting":
+            primary = self.existing_material.currentText()
+            lateral = self.existing_lateral_material.currentText()
+            material_text = (
+                "<b>Masonry constitutive model</b><br>"
+                f"Reused central / strut: {primary}"
+            )
+            if formulation == "MasonPan12":
+                material_text += f"<br>Reused lateral: {lateral}"
+            material_text += (
+                "<br><span style='color:#35536f'>Existing project material "
+                "parameters and provenance are preserved.</span>"
+            )
+        else:
+            material_text = (
+                "<b>Masonry constitutive model</b><br>"
+                f"Fm = -{self.Fm.value():g} "
+                f"{self.units.engineering_stress_label} · "
+                f"Ft = {self.Ft.value():g} "
+                f"{self.units.engineering_stress_label} · "
+                f"Emo = {self.Emo.value():g} "
+                f"{self.units.engineering_stress_label}<br>"
+                f"Um={self.Um.value():g} · Uult={self.Uult.value():g} · "
+                f"Ucl={self.Ucl.value():g}<br>"
+                "L=1 · Area1=1 normalized for the FEWIZ masonry workflow<br>"
+                "<span style='color:#a15c00'>Custom / unverified starting "
+                "parameters — calibration required.</span>"
+            )
+        self.material_summary.setText(material_text)
         messages = self._validation_messages()
         if messages:
             self.validation_status.setStyleSheet(
@@ -555,6 +681,9 @@ class MasonryWallWizard(QWizard):
         try:
             if self.currentId() == self.pageIds()[-1]:
                 validate_masonry_wall_spec(self.data())
+                messages = self._validation_messages()
+                if messages:
+                    raise ValueError(messages[0])
             elif self.currentId() == self.pageIds()[0]:
                 if (
                     not self.replace_geometry.isChecked()
@@ -568,6 +697,9 @@ class MasonryWallWizard(QWizard):
                     )
             elif self.currentId() == self.pageIds()[1]:
                 validate_masonry_wall_spec(self.data())
+                messages = self._validation_messages()
+                if messages:
+                    raise ValueError(messages[0])
         except ValueError as exc:
             QMessageBox.warning(self, "Masonry Wall Wizard", str(exc))
             return False
