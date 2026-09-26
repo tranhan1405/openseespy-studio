@@ -3625,8 +3625,11 @@ def test_frame_wizard_builtin_preset_loads_and_surfaces_dependencies():
 def test_frame_wizard_user_preset_persists_in_qsettings_and_reloads():
     settings = FrameWizard._preset_settings()
     key = "frame_wizard/presets_json"
+    recent_key = "frame_wizard/recent_presets_json"
     previous = settings.value(key, None)
+    previous_recent = settings.value(recent_key, None)
     settings.remove(key)
+    settings.remove(recent_key)
     settings.sync()
 
     wizard = FrameWizard(_member_project())
@@ -3671,8 +3674,11 @@ def test_frame_wizard_user_preset_persists_in_qsettings_and_reloads():
         wizard.deleteLater()
         _APP.processEvents()
         settings.remove(key)
+        settings.remove(recent_key)
         if previous is not None:
             settings.setValue(key, previous)
+        if previous_recent is not None:
+            settings.setValue(recent_key, previous_recent)
         settings.sync()
 
 
@@ -3706,3 +3712,220 @@ def test_frame_wizard_preset_dependency_warning_for_missing_section():
         wizard.close()
         wizard.deleteLater()
         _APP.processEvents()
+
+
+def test_frame_wizard_preset_library_permissions_follow_selected_type():
+    settings = FrameWizard._preset_settings()
+    preset_key = "frame_wizard/presets_json"
+    recent_key = "frame_wizard/recent_presets_json"
+    previous = settings.value(preset_key, None)
+    previous_recent = settings.value(recent_key, None)
+    settings.remove(preset_key)
+    settings.remove(recent_key)
+    settings.sync()
+
+    wizard = FrameWizard(_member_project())
+    try:
+        builtin = wizard.preset_combo.findData(
+            "builtin:3D Moment Frame"
+        )
+        assert builtin >= 0
+        wizard.preset_combo.setCurrentIndex(builtin)
+        wizard._sync_preset_library_controls()
+        assert wizard.preset_load.isEnabled()
+        assert wizard.preset_duplicate.isEnabled()
+        assert wizard.preset_export.isEnabled()
+        assert not wizard.preset_rename.isEnabled()
+        assert not wizard.preset_delete.isEnabled()
+
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
+        wizard._store_user_preset("Editable", wizard.spec())
+        user = wizard.preset_combo.findData("user:Editable")
+        assert user >= 0
+        wizard.preset_combo.setCurrentIndex(user)
+        wizard._sync_preset_library_controls()
+        assert wizard.preset_rename.isEnabled()
+        assert wizard.preset_delete.isEnabled()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+        settings.remove(preset_key)
+        settings.remove(recent_key)
+        if previous is not None:
+            settings.setValue(preset_key, previous)
+        if previous_recent is not None:
+            settings.setValue(recent_key, previous_recent)
+        settings.sync()
+
+
+def test_frame_wizard_preset_duplicate_rename_delete_round_trip():
+    settings = FrameWizard._preset_settings()
+    preset_key = "frame_wizard/presets_json"
+    recent_key = "frame_wizard/recent_presets_json"
+    previous = settings.value(preset_key, None)
+    previous_recent = settings.value(recent_key, None)
+    settings.remove(preset_key)
+    settings.remove(recent_key)
+    settings.sync()
+
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
+        wizard._store_user_preset("Base", wizard.spec())
+
+        duplicate = wizard._duplicate_preset(
+            "user:Base",
+            "Base Copy",
+        )
+        assert duplicate == "Base Copy"
+        assert "Base Copy" in wizard._user_presets()
+
+        renamed = wizard._rename_user_preset(
+            "Base Copy",
+            "Renamed",
+        )
+        assert renamed == "Renamed"
+        assert "Base Copy" not in wizard._user_presets()
+        assert "Renamed" in wizard._user_presets()
+
+        wizard._delete_user_preset("Renamed")
+        assert "Renamed" not in wizard._user_presets()
+        assert wizard.preset_combo.findData("user:Renamed") < 0
+        assert "Base" in wizard._user_presets()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+        settings.remove(preset_key)
+        settings.remove(recent_key)
+        if previous is not None:
+            settings.setValue(preset_key, previous)
+        if previous_recent is not None:
+            settings.setValue(recent_key, previous_recent)
+        settings.sync()
+
+
+def test_frame_wizard_preset_export_import_and_collision_name(tmp_path):
+    settings = FrameWizard._preset_settings()
+    preset_key = "frame_wizard/presets_json"
+    recent_key = "frame_wizard/recent_presets_json"
+    previous = settings.value(preset_key, None)
+    previous_recent = settings.value(recent_key, None)
+    settings.remove(preset_key)
+    settings.remove(recent_key)
+    settings.sync()
+
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
+        wizard.x_bays.setValue(5)
+        wizard.storeys.setValue(4)
+        wizard._store_user_preset("Portable", wizard.spec())
+
+        path = tmp_path / "portable-frame.json"
+        exported = wizard._export_preset_to_path(
+            "user:Portable",
+            str(path),
+        )
+        assert exported == "Portable"
+        assert path.exists()
+        assert '"kind": "fewiz.frame-wizard"' in path.read_text(
+            encoding="utf-8"
+        )
+
+        imported = wizard._import_preset_from_path(str(path))
+        assert imported == "Portable (2)"
+        assert "Portable (2)" in wizard._user_presets()
+
+        index = wizard.preset_combo.findData("user:Portable (2)")
+        assert index >= 0
+        wizard.preset_combo.setCurrentIndex(index)
+        wizard._load_selected_preset()
+        _APP.processEvents()
+        assert wizard.active_preset_name == "Portable (2)"
+        assert wizard.x_bays.value() == 5
+        assert wizard.storeys.value() == 4
+        assert wizard.spec().column_section_tag == 1
+        assert wizard.spec().beam_section_tag == 1
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+        settings.remove(preset_key)
+        settings.remove(recent_key)
+        if previous is not None:
+            settings.setValue(preset_key, previous)
+        if previous_recent is not None:
+            settings.setValue(recent_key, previous_recent)
+        settings.sync()
+
+
+def test_frame_wizard_recent_presets_keep_latest_five_unique_items():
+    settings = FrameWizard._preset_settings()
+    preset_key = "frame_wizard/presets_json"
+    recent_key = "frame_wizard/recent_presets_json"
+    previous = settings.value(preset_key, None)
+    previous_recent = settings.value(recent_key, None)
+    settings.remove(preset_key)
+    settings.remove(recent_key)
+    settings.sync()
+
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(1)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
+        for index in range(6):
+            wizard._store_user_preset(
+                f"Recent {index}",
+                wizard.spec(),
+            )
+
+        recent = wizard._recent_preset_tokens()
+        assert len(recent) == 5
+        assert recent[0] == "user:Recent 5"
+        assert "user:Recent 0" not in recent
+        assert len(set(recent)) == 5
+
+        wizard._remember_recent_preset("user:Recent 3")
+        recent = wizard._recent_preset_tokens()
+        assert recent[0] == "user:Recent 3"
+        assert len(recent) == 5
+
+        wizard._refresh_preset_combo()
+        labels = [
+            wizard.preset_combo.itemText(row)
+            for row in range(wizard.preset_combo.count())
+        ]
+        assert "Recent presets" in labels
+        assert any("Recent 3 · User" in label for label in labels)
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+        settings.remove(preset_key)
+        settings.remove(recent_key)
+        if previous is not None:
+            settings.setValue(preset_key, previous)
+        if previous_recent is not None:
+            settings.setValue(recent_key, previous_recent)
+        settings.sync()
