@@ -1794,7 +1794,7 @@ def apply_frame_foundation_springs(
             constraint = ConstraintData(
                 tag=next_constraint_tag,
                 name=(
-                    f"Foundation {profile_label} rigid transfer N{base_tag}"
+                    f"Foundation rigid transfer {profile_label} N{base_tag}"
                 ),
                 constraint_type="equalDOF",
                 retained_node=ground_tag,
@@ -1809,7 +1809,7 @@ def apply_frame_foundation_springs(
         connection = ConnectionData(
             tag=next_connection_tag,
             name=(
-                f"Foundation {profile_label} spring N{base_tag}"
+                f"Foundation spring {profile_label} N{base_tag}"
             ),
             connection_type="zeroLength",
             node_i=ground_tag,
