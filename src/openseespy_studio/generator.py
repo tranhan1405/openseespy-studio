@@ -283,7 +283,28 @@ def material_to_openseespy(
     stress = unit_system.stress_from_pa
 
     if material.material_type == "Elastic":
-        return f"ops.uniaxialMaterial('Elastic', {material.tag}, {stress(p['E']):g})"
+        source = material.source if isinstance(material.source, dict) else {}
+        dimensions = source.get("parameter_dimensions", {})
+        stiffness_parameter = (
+            isinstance(dimensions, dict)
+            and str(dimensions.get("E", "")).strip().lower()
+            in {"stiffness", "force_per_length", "force/length"}
+        )
+        if stiffness_parameter:
+            # OpenSees MVLEM/MVLEM_3D feed the shear material a relative
+            # displacement and read its stress as a force. Its tangent is
+            # therefore F/L, not material stress F/L^2.
+            elastic_e = (
+                float(p["E"])
+                * unit_system.length_to_m
+                / unit_system.force_to_n
+            )
+        else:
+            elastic_e = stress(p["E"])
+        return (
+            "ops.uniaxialMaterial('Elastic', "
+            f"{material.tag}, {elastic_e:g})"
+        )
 
     if material.material_type == "Steel01":
         return (
