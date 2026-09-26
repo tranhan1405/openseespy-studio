@@ -5698,6 +5698,14 @@ class MainWindow(QMainWindow):
             if foundation_profiles:
                 message += f" / {foundation_profiles} profile(s)"
 
+        brace_panels = int(joint_result.get("brace_panels", 0))
+        brace_elements = int(joint_result.get("brace_elements", 0))
+        if brace_panels:
+            message += (
+                f" · {brace_panels} braced panel(s)"
+                f" / {brace_elements} brace element(s)"
+            )
+
         self._refresh_all(message)
         self.frame_grid_panel.set_assignment_tags(
             column_section_tag=spec.column_section_tag,
