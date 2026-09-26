@@ -11,11 +11,13 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -32,8 +34,11 @@ from ..frame_setup import prepare_frame_grid
 from ..frame_presets import (
     BUILTIN_FRAME_PRESETS,
     frame_preset_dependency_issues,
+    frame_preset_from_json,
+    frame_preset_to_json,
     frame_spec_from_preset,
     frame_spec_to_preset,
+    unique_frame_preset_name,
 )
 from ..generator import (
     FrameGridSpec,
