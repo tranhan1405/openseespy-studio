@@ -5659,9 +5659,15 @@ class MainWindow(QMainWindow):
             joint_result.get("joint_connections", 0)
         )
         if joint_connections:
-            message += (
-                f" · {joint_connections} semi-rigid joint spring(s)"
-            )
+            joint_model = str(spec.joint_model or "None")
+            if joint_model == "ZeroLength":
+                message += (
+                    f" · {joint_connections} semi-rigid joint spring(s)"
+                )
+            else:
+                message += (
+                    f" · {joint_connections} {joint_model} joint core(s)"
+                )
 
         self._refresh_all(message)
         self.frame_grid_panel.set_assignment_tags(
