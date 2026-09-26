@@ -198,8 +198,20 @@ def test_masonpan12_export_import_round_trip_preserves_topology_and_materials():
     ).project
 
     assert len(imported.model.nodes) == 12
-    assert len(imported.model.elements) == 1
-    element = next(iter(imported.model.elements.values()))
+    assert len(imported.model.elements) == 13
+    masonry_elements = [
+        element
+        for element in imported.model.elements.values()
+        if element.element_type == "MasonPan12"
+    ]
+    boundary_elements = [
+        element
+        for element in imported.model.elements.values()
+        if element.element_type == "elasticBeamColumn"
+    ]
+    assert len(masonry_elements) == 1
+    assert len(boundary_elements) == 12
+    element = masonry_elements[0]
     assert element.element_type == "MasonPan12"
     assert len(element.node_tags()) == 12
     assert element.node_tags() == tuple(source_result.node_tags)
