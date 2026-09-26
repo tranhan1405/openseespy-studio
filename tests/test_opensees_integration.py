@@ -3842,3 +3842,98 @@ def test_frame_wizard_rigid_diaphragm_builds_in_real_opensees(
     )
     assert completed.returncode == 0, completed.stderr
     assert "FRAME_DIAPHRAGM_OK" in completed.stdout
+
+
+def test_frame_wizard_explicit_shell_slab_builds_in_real_opensees(
+    tmp_path: Path,
+):
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            950,
+            "Frame elastic",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            951,
+            "Elastic shell slab",
+            "ElasticMembranePlate",
+            parameters={
+                "E": 30.0e9,
+                "nu": 0.20,
+                "h": 0.20,
+                "rho": 0.0,
+                "EpModifier": 1.0,
+            },
+        )
+    )
+
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        dx=5.0,
+        dy=4.0,
+        dz=3.0,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=True,
+        column_section_tag=950,
+        beam_section_tag=950,
+        diaphragm_mode="Shell",
+        diaphragm_levels=(1,),
+        slab_section_tag=951,
+        slab_element_type="ShellMITC4",
+        slab_divisions_x=2,
+        slab_divisions_y=2,
+        slab_mass_per_area=2.0,
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["slab_elements"] == 4
+    assert result["slab_beam_segments_added"] == 4
+    source = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "# ERROR:" not in source
+    assert source.count("ops.element('ShellMITC4'") == 4
+    assert "ops.section('ElasticMembranePlateSection', 951" in source
+    assert source.count("ops.mass(") >= 9
+
+    target = tmp_path / "frame-wizard-shell-slab.py"
+    target.write_text(
+        source + "\nprint('FRAME_SHELL_SLAB_OK')\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(target)],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "FRAME_SHELL_SLAB_OK" in completed.stdout
