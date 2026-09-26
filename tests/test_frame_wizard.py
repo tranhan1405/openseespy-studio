@@ -10,14 +10,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
+from openseespy_studio.frame_setup import prepare_frame_grid
 from openseespy_studio.generator import (
     FrameGridSpec,
     frame_grid_coordinates,
     generate_frame_grid,
+    to_openseespy,
     validate_frame_grid_spec,
 )
 from openseespy_studio.model import StructuralModel
-from openseespy_studio.project import ProjectDatabase
+from openseespy_studio.project import ProjectDatabase, SectionData
 from openseespy_studio.ui.frame_wizard import FrameWizard
 from openseespy_studio.ui.main_window import MainWindow
 
@@ -281,4 +283,216 @@ def test_frame_wizard_validation_blocks_empty_member_topology():
         wizard.close()
         wizard.deleteLater()
         _APP.processEvents()
+
+def _member_project() -> ProjectDatabase:
+    project = ProjectDatabase()
+    project.units = {"length": "m", "force": "N", "time": "s"}
+    project.add_section(
+        SectionData(
+            1,
+            "Elastic Frame",
+            "Elastic",
+            parameters={
+                "E": 2.0e11,
+                "A": 0.03,
+                "Iz": 1.2e-4,
+                "Iy": 9.0e-5,
+                "G": 7.7e10,
+                "J": 6.0e-5,
+                "Avy": 0.025,
+                "Avz": 0.025,
+            },
+        )
+    )
+    project.add_section(
+        SectionData(
+            2,
+            "Fiber Frame",
+            "Fiber",
+            parameters={"GJ": 1.0e6},
+        )
+    )
+    return project
+
+
+def test_frame_wizard_member_page_filters_sections_by_formulation():
+    wizard = FrameWizard(_member_project())
+    try:
+        assert wizard.pageIds() == [
+            wizard.geometry_page_id,
+            wizard.members_page_id,
+        ]
+        assert wizard.column_section.findData(1) >= 0
+        assert wizard.column_section.findData(2) < 0
+        assert wizard.beam_section.findData(1) >= 0
+        assert wizard.beam_section.findData(2) < 0
+
+        wizard.column_formulation.setCurrentIndex(
+            wizard.column_formulation.findData("forceBeamColumn")
+        )
+        wizard.beam_formulation.setCurrentIndex(
+            wizard.beam_formulation.findData("dispBeamColumn")
+        )
+        _APP.processEvents()
+
+        assert wizard.column_section.findData(1) >= 0
+        assert wizard.column_section.findData(2) >= 0
+        assert wizard.beam_section.findData(1) >= 0
+        assert wizard.beam_section.findData(2) >= 0
+        assert wizard.column_integration.isEnabled()
+        assert wizard.column_integration_points.isEnabled()
+        assert wizard.beam_integration.isEnabled()
+        assert wizard.beam_integration_points.isEnabled()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_member_page_requires_sections_when_members_exist():
+    wizard = FrameWizard(ProjectDatabase())
+    try:
+        wizard.setCurrentId(wizard.members_page_id)
+        _APP.processEvents()
+
+        assert not wizard.validateCurrentPage()
+        assert "require a compatible section" in (
+            wizard.member_validation_status.text()
+        )
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_member_settings_flow_to_grid_spec():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.column_formulation.setCurrentIndex(
+            wizard.column_formulation.findData("forceBeamColumn")
+        )
+        wizard.beam_formulation.setCurrentIndex(
+            wizard.beam_formulation.findData("dispBeamColumn")
+        )
+        wizard.column_section.setCurrentIndex(
+            wizard.column_section.findData(2)
+        )
+        wizard.beam_section.setCurrentIndex(
+            wizard.beam_section.findData(1)
+        )
+        wizard.column_integration.setCurrentIndex(
+            wizard.column_integration.findData("Radau")
+        )
+        wizard.beam_integration.setCurrentIndex(
+            wizard.beam_integration.findData("Legendre")
+        )
+        wizard.column_integration_points.setValue(4)
+        wizard.beam_integration_points.setValue(6)
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.column_element_type == "forceBeamColumn"
+        assert spec.beam_element_type == "dispBeamColumn"
+        assert spec.column_section_tag == 2
+        assert spec.beam_section_tag == 1
+        assert spec.column_transf_tag is None
+        assert spec.beam_transf_tag is None
+        assert spec.column_integration_type == "Radau"
+        assert spec.beam_integration_type == "Legendre"
+        assert spec.column_integration_points == 4
+        assert spec.beam_integration_points == 6
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_grid_backend_assigns_member_formulations_and_integrations():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=True,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        column_element_type="forceBeamColumn",
+        beam_element_type="dispBeamColumn",
+        column_integration_type="Radau",
+        beam_integration_type="Legendre",
+        column_integration_points=4,
+        beam_integration_points=6,
+    )
+
+    prepare_frame_grid(project, spec)
+    generate_frame_grid(project.model, spec)
+
+    columns = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "column-2d"
+    ]
+    beams = [
+        element
+        for element in project.model.elements.values()
+        if element.group == "beam-2d"
+    ]
+    assert len(columns) == 2
+    assert len(beams) == 1
+    assert all(
+        element.element_type == "forceBeamColumn"
+        for element in columns
+    )
+    assert all(
+        element.integration_type == "Radau"
+        and element.integration_points == 4
+        for element in columns
+    )
+    assert all(
+        element.element_type == "dispBeamColumn"
+        for element in beams
+    )
+    assert all(
+        element.integration_type == "Legendre"
+        and element.integration_points == 6
+        for element in beams
+    )
+    assert spec.column_transf_tag in project.transformations
+    assert spec.beam_transf_tag in project.transformations
+    assert (
+        project.transformations[spec.column_transf_tag].transformation_type
+        == "PDelta"
+    )
+    assert (
+        project.transformations[spec.beam_transf_tag].transformation_type
+        == "Linear"
+    )
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "ops.beamIntegration('Radau'" in script
+    assert "ops.element('forceBeamColumn'" in script
+    assert "ops.beamIntegration('Legendre'" in script
+    assert "ops.element('dispBeamColumn'" in script
+    assert "# ERROR:" not in script
+
+
+def test_frame_grid_validation_rejects_unsupported_member_formulation():
+    spec = FrameGridSpec(
+        planar_2d=True,
+        column_element_type="notAFrameElement",
+    )
+    with pytest.raises(ValueError, match="Column formulation"):
+        validate_frame_grid_spec(spec)
 
