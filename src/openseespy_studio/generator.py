@@ -74,6 +74,9 @@ class FrameGridSpec:
     beam_mass_per_length: float = 0.0
     column_consistent_mass: bool = False
     beam_consistent_mass: bool = False
+    joint_model: str = "None"
+    joint_material_tag: int | None = None
+    joint_scope: str = "all"
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -258,6 +261,32 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                     f"{role} beam integration {integration_type!r} is not "
                     "supported by Frame Wizard."
                 )
+    joint_model = str(spec.joint_model or "None")
+    if joint_model not in {"None", "ZeroLength"}:
+        raise ValueError(
+            f"Frame Wizard joint model {joint_model!r} is not available in "
+            "this phase."
+        )
+    if str(spec.joint_scope) not in {"all", "interior"}:
+        raise ValueError("Frame joint scope must be 'all' or 'interior'.")
+    if joint_model == "ZeroLength":
+        if not bool(spec.create_columns):
+            raise ValueError(
+                "Semi-rigid beam-column joints require columns to be created."
+            )
+        if not (
+            bool(spec.create_beams_x)
+            or (not spec.planar_2d and bool(spec.create_beams_y))
+        ):
+            raise ValueError(
+                "Semi-rigid beam-column joints require at least one beam family."
+            )
+        if spec.joint_material_tag is None or int(spec.joint_material_tag) <= 0:
+            raise ValueError(
+                "Semi-rigid beam-column joints require a rotational "
+                "uniaxial material."
+            )
+
     frame_grid_coordinates(spec)
 
 
@@ -440,6 +469,203 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
     for j in range(spec.ny + 1):
         for i in range(spec.nx + 1):
             model.set_fixity(node_at[(i, j, 0)], (1, 1, 1, 1, 1, 1))
+
+
+def frame_joint_connection_count(spec: FrameGridSpec) -> int:
+    """Return the number of explicit zeroLength joint springs to create."""
+    if str(spec.joint_model or "None") != "ZeroLength":
+        return 0
+    if not bool(spec.create_columns):
+        return 0
+
+    nx = int(spec.nx)
+    nz = int(spec.nz)
+    scope = str(spec.joint_scope or "all")
+
+    if spec.planar_2d:
+        x_indices = range(nx + 1)
+        if scope == "interior":
+            x_indices = range(1, nx)
+        joint_nodes = len(tuple(x_indices)) * nz
+        return joint_nodes if spec.create_beams_x else 0
+
+    ny = int(spec.ny)
+    x_indices = range(nx + 1)
+    y_indices = range(ny + 1)
+    if scope == "interior":
+        x_indices = range(1, nx)
+        y_indices = range(1, ny)
+    joint_nodes = len(tuple(x_indices)) * len(tuple(y_indices)) * nz
+    per_joint = int(bool(spec.create_beams_x)) + int(bool(spec.create_beams_y))
+    return joint_nodes * per_joint
+
+
+def _frame_center_node_tag(
+    spec: FrameGridSpec,
+    i: int,
+    j: int,
+    k: int,
+) -> int:
+    if spec.planar_2d:
+        return int(spec.start_node_tag) + k * (int(spec.nx) + 1) + i
+    plane = (int(spec.nx) + 1) * (int(spec.ny) + 1)
+    return (
+        int(spec.start_node_tag)
+        + k * plane
+        + j * (int(spec.nx) + 1)
+        + i
+    )
+
+
+def apply_frame_zero_length_joints(project, spec: FrameGridSpec) -> dict[str, int]:
+    """Insert semi-rigid beam-column joints into an already-built frame grid.
+
+    The column/grid node remains the retained joint node.  Each active beam
+    family receives a coincident duplicate node. Beam elements are rewired to
+    that duplicate, all non-spring DOFs are tied back with equalDOF, and one
+    zeroLength rotational spring connects the duplicate to the column node.
+    """
+    validate_frame_grid_spec(spec)
+    if str(spec.joint_model or "None") != "ZeroLength":
+        return {
+            "joint_nodes": 0,
+            "joint_connections": 0,
+            "duplicate_nodes": 0,
+            "joint_constraints": 0,
+        }
+
+    material_tag = int(spec.joint_material_tag)
+    if material_tag not in project.materials:
+        raise ValueError(
+            f"Joint rotational material tag {material_tag} does not exist."
+        )
+
+    model = project.model
+    next_node_tag = max(model.nodes, default=0) + 1
+    next_connection_tag = max(
+        max(model.elements, default=0),
+        max(project.connections, default=0),
+    ) + 1
+    next_constraint_tag = max(project.constraints, default=0) + 1
+    nx = int(spec.nx)
+    ny = 1 if spec.planar_2d else int(spec.ny)
+    nz = int(spec.nz)
+    scope = str(spec.joint_scope or "all")
+
+    x_indices = list(range(nx + 1))
+    y_indices = [0] if spec.planar_2d else list(range(ny + 1))
+    if scope == "interior":
+        x_indices = list(range(1, nx))
+        if not spec.planar_2d:
+            y_indices = list(range(1, ny))
+
+    joint_nodes: set[int] = set()
+    connection_count = 0
+    constraint_count = 0
+    duplicate_count = 0
+
+    for k in range(1, nz + 1):
+        for j in y_indices:
+            for i in x_indices:
+                center_tag = _frame_center_node_tag(spec, i, j, k)
+                center = model.nodes.get(center_tag)
+                if center is None:
+                    continue
+
+                axes: list[tuple[str, int]] = []
+                if spec.create_beams_x:
+                    axes.append(("beam-2d" if spec.planar_2d else "beam-x", 5))
+                if not spec.planar_2d and spec.create_beams_y:
+                    axes.append(("beam-y", 4))
+
+                created_here = False
+                for group, spring_dof in axes:
+                    connected = [
+                        element
+                        for element in model.elements.values()
+                        if element.group == group
+                        and (element.i == center_tag or element.j == center_tag)
+                    ]
+                    if not connected:
+                        continue
+
+                    duplicate_tag = next_node_tag
+                    next_node_tag += 1
+                    duplicate = model.add_node(
+                        duplicate_tag,
+                        center.xyz[0],
+                        center.xyz[1],
+                        center.xyz[2],
+                        ndf=center.ndf,
+                    )
+                    duplicate.mass = (0.0,) * int(duplicate.ndf)
+
+                    for element in connected:
+                        if element.i == center_tag:
+                            element.i = duplicate_tag
+                        if element.j == center_tag:
+                            element.j = duplicate_tag
+
+                    tied_dofs = tuple(
+                        dof
+                        for dof in range(1, int(center.ndf) + 1)
+                        if dof != spring_dof
+                    )
+                    constraint = ConstraintData(
+                        tag=next_constraint_tag,
+                        name=(
+                            f"Frame joint tie N{center_tag}-{duplicate_tag}"
+                        ),
+                        constraint_type="equalDOF",
+                        retained_node=center_tag,
+                        constrained_nodes=[duplicate_tag],
+                        dofs=tied_dofs,
+                    )
+                    project.add_constraint(constraint)
+                    next_constraint_tag += 1
+                    constraint_count += 1
+
+                    connection = ConnectionData(
+                        tag=next_connection_tag,
+                        name=(
+                            f"Frame joint {group} N{center_tag}"
+                        ),
+                        connection_type="zeroLength",
+                        node_i=center_tag,
+                        node_j=duplicate_tag,
+                        materials_by_dof={spring_dof: material_tag},
+                        generated_constraint_tag=constraint.tag,
+                    )
+                    project.add_connection(connection)
+                    next_connection_tag += 1
+                    connection_count += 1
+                    duplicate_count += 1
+                    created_here = True
+
+                if created_here:
+                    joint_nodes.add(center_tag)
+
+    return {
+        "joint_nodes": len(joint_nodes),
+        "joint_connections": connection_count,
+        "duplicate_nodes": duplicate_count,
+        "joint_constraints": constraint_count,
+    }
+
+
+def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
+    """Replace model-linked project data with one Frame Wizard model."""
+    validate_frame_grid_spec(spec)
+    project.clear_model_linked_data()
+    generate_frame_grid(project.model, spec)
+    if str(spec.joint_model or "None") == "ZeroLength":
+        return apply_frame_zero_length_joints(project, spec)
+    return {
+        "joint_nodes": 0,
+        "joint_connections": 0,
+        "duplicate_nodes": 0,
+        "joint_constraints": 0,
+    }
 
 
 def material_source_comments(material: MaterialData) -> list[str]:
