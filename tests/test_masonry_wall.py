@@ -87,6 +87,13 @@ def test_equivalent_strut_masonry_builder_creates_crossed_diagonals():
     assert len(result.node_tags) == 4
     assert len(result.element_tags) == 2
     assert len(result.material_tags) == 1
+    assert len(result.boundary_element_tags) == 4
+    assert all(
+        project.model.elements[tag].element_type == "elasticBeamColumn"
+        for tag in result.boundary_element_tags
+    )
+    assert result.boundary_section_tag in project.sections
+    assert result.boundary_transformation_tag in project.transformations
     assert all(
         project.model.elements[tag].element_type == "corotTruss"
         for tag in result.element_tags
@@ -121,6 +128,13 @@ def test_masonpan12_builder_round_trips_and_exports_all_twelve_nodes():
     assert len(result.node_tags) == 12
     assert len(result.element_tags) == 1
     assert len(result.material_tags) == 2
+    assert len(result.boundary_element_tags) == 12
+    assert all(
+        project.model.elements[tag].element_type == "elasticBeamColumn"
+        for tag in result.boundary_element_tags
+    )
+    assert result.boundary_section_tag in project.sections
+    assert result.boundary_transformation_tag in project.transformations
     element = project.model.elements[result.element_tags[0]]
     assert element.element_type == "MasonPan12"
     assert element.node_tags() == tuple(result.node_tags)
@@ -456,6 +470,13 @@ def test_masonry_wall_wizard_all_pages_scroll_and_geometry_preview_is_live():
         )
         assert wizard.geometry_preview.formulation == "EquivalentStrut"
         assert wizard.geometry_preview.crossed is True
+        assert wizard.boundary_E.value() > 0.0
+        assert wizard.boundary_width.value() > 0.0
+        assert wizard.boundary_depth.value() > 0.0
+        spec = wizard.data()
+        assert spec.boundary_E > 0.0
+        assert spec.boundary_width > 0.0
+        assert spec.boundary_depth > 0.0
 
         wizard.crossed_struts.setChecked(False)
         assert wizard.geometry_preview.crossed is False
