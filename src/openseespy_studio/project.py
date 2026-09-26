@@ -7042,6 +7042,10 @@ class ProjectDatabase:
                     ):
                         if element.special_parameters.get(key) == original_tag:
                             element.special_parameters[key] = material.tag
+                if element.element_type in MASONRY_PANEL_ELEMENT_TYPES:
+                    for key in ("mat_1", "mat_2"):
+                        if element.special_parameters.get(key) == original_tag:
+                            element.special_parameters[key] = material.tag
                 if element.element_type in {"MVLEM", "MVLEM_3D"}:
                     element.wall_concrete_tags = tuple(
                         material.tag if int(tag) == original_tag else int(tag)
@@ -7125,6 +7129,17 @@ class ProjectDatabase:
                 )
             )
         )
+        dependent_masonry_panels = sorted(
+            element.tag
+            for element in self.model.elements.values()
+            if (
+                element.element_type in MASONRY_PANEL_ELEMENT_TYPES
+                and tag in {
+                    int(element.special_parameters[key])
+                    for key in ("mat_1", "mat_2")
+                }
+            )
+        )
         dependent_bearings = sorted(
             element.tag
             for element in self.model.elements.values()
@@ -7158,6 +7173,7 @@ class ProjectDatabase:
             or dependent_nd_materials
             or dependent_trusses
             or dependent_wall_elements
+            or dependent_masonry_panels
             or dependent_bearings
             or dependent_connections
             or dependent_recorders
@@ -7185,6 +7201,11 @@ class ProjectDatabase:
                 details.append(
                     "wall macro-elements "
                     + ", ".join(map(str, dependent_wall_elements))
+                )
+            if dependent_masonry_panels:
+                details.append(
+                    "masonry panel elements "
+                    + ", ".join(map(str, dependent_masonry_panels))
                 )
             if dependent_bearings:
                 details.append(
