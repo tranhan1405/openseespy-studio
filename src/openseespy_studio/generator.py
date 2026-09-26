@@ -54,6 +54,12 @@ class FrameGridSpec:
     beam_section_tag: int | None = None
     column_transf_tag: int | None = None
     beam_transf_tag: int | None = None
+    column_element_type: str = "elasticBeamColumn"
+    beam_element_type: str = "elasticBeamColumn"
+    column_integration_type: str = "Lobatto"
+    beam_integration_type: str = "Lobatto"
+    column_integration_points: int = 5
+    beam_integration_points: int = 5
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -133,6 +139,47 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
         or (not spec.planar_2d and bool(spec.create_beams_y))
     ):
         raise ValueError("Frame grid must create at least one member family.")
+
+    supported_frame_types = {
+        "elasticBeamColumn",
+        "forceBeamColumn",
+        "dispBeamColumn",
+    }
+    distributed_integrations = {"Lobatto", "Legendre", "Radau"}
+    for role, enabled, element_type, integration_type, points in (
+        (
+            "Column",
+            bool(spec.create_columns),
+            str(spec.column_element_type),
+            str(spec.column_integration_type),
+            int(spec.column_integration_points),
+        ),
+        (
+            "Beam",
+            bool(spec.create_beams_x)
+            or (not spec.planar_2d and bool(spec.create_beams_y)),
+            str(spec.beam_element_type),
+            str(spec.beam_integration_type),
+            int(spec.beam_integration_points),
+        ),
+    ):
+        if not enabled:
+            continue
+        if element_type not in supported_frame_types:
+            raise ValueError(
+                f"{role} formulation {element_type!r} is not supported by "
+                "Frame Wizard."
+            )
+        if element_type in {"forceBeamColumn", "dispBeamColumn"}:
+            if integration_type not in distributed_integrations:
+                raise ValueError(
+                    f"{role} distributed integration {integration_type!r} "
+                    "is not supported in this Frame Wizard phase."
+                )
+            if points < 2 or points > 20:
+                raise ValueError(
+                    f"{role} integration points must be between 2 and 20."
+                )
     frame_grid_coordinates(spec)
 
 
@@ -176,9 +223,12 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at_2d[(i, k)],
                         node_at_2d[(i, k + 1)],
+                        element_type=spec.column_element_type,
                         section_tag=spec.column_section_tag,
                         transf_tag=spec.column_transf_tag,
                         group="column-2d",
+                        integration_type=spec.column_integration_type,
+                        integration_points=spec.column_integration_points,
                     )
                     ele_tag += 1
 
@@ -189,9 +239,12 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at_2d[(i, k)],
                         node_at_2d[(i + 1, k)],
+                        element_type=spec.beam_element_type,
                         section_tag=spec.beam_section_tag,
                         transf_tag=spec.beam_transf_tag,
                         group="beam-2d",
+                        integration_type=spec.beam_integration_type,
+                        integration_points=spec.beam_integration_points,
                     )
                     ele_tag += 1
 
@@ -228,9 +281,12 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at[(i, j, k)],
                         node_at[(i, j, k + 1)],
+                        element_type=spec.column_element_type,
                         section_tag=spec.column_section_tag,
                         transf_tag=spec.column_transf_tag,
                         group="column",
+                        integration_type=spec.column_integration_type,
+                        integration_points=spec.column_integration_points,
                     )
                     ele_tag += 1
 
@@ -242,9 +298,12 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at[(i, j, k)],
                         node_at[(i + 1, j, k)],
+                        element_type=spec.beam_element_type,
                         section_tag=spec.beam_section_tag,
                         transf_tag=spec.beam_transf_tag,
                         group="beam-x",
+                        integration_type=spec.beam_integration_type,
+                        integration_points=spec.beam_integration_points,
                     )
                     ele_tag += 1
 
@@ -256,9 +315,12 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
                         ele_tag,
                         node_at[(i, j, k)],
                         node_at[(i, j + 1, k)],
+                        element_type=spec.beam_element_type,
                         section_tag=spec.beam_section_tag,
                         transf_tag=spec.beam_transf_tag,
                         group="beam-y",
+                        integration_type=spec.beam_integration_type,
+                        integration_points=spec.beam_integration_points,
                     )
                     ele_tag += 1
 
