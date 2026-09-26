@@ -91,6 +91,12 @@ class FrameGridSpec:
     diaphragm_levels: tuple[int, ...] = ()
     diaphragm_floor_mass: float = 0.0
     diaphragm_rotational_inertia: float = 0.0
+    slab_section_tag: int | None = None
+    slab_element_type: str = "ASDShellQ4"
+    slab_divisions_x: int = 1
+    slab_divisions_y: int = 1
+    slab_corotational: bool = False
+    slab_mass_per_area: float = 0.0
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -407,14 +413,14 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                 )
 
     diaphragm_mode = str(spec.diaphragm_mode or "None")
-    if diaphragm_mode not in {"None", "Rigid"}:
+    if diaphragm_mode not in {"None", "Rigid", "Shell"}:
         raise ValueError(
-            f"Frame Wizard diaphragm mode {diaphragm_mode!r} is not supported."
+            f"Frame Wizard floor mode {diaphragm_mode!r} is not supported."
         )
-    if diaphragm_mode == "Rigid":
+    if diaphragm_mode in {"Rigid", "Shell"}:
         if spec.planar_2d:
             raise ValueError(
-                "Rigid floor diaphragms require a 3D frame."
+                "Floor diaphragm/slab models require a 3D frame."
             )
         normalized_levels = tuple(
             sorted({int(level) for level in spec.diaphragm_levels})
@@ -424,9 +430,10 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
             for level in normalized_levels
         ):
             raise ValueError(
-                "Diaphragm floor levels must be between 1 and the number "
-                "of storeys."
+                "Floor levels must be between 1 and the number of storeys."
             )
+
+    if diaphragm_mode == "Rigid":
         floor_mass = float(spec.diaphragm_floor_mass)
         rotational_inertia = float(spec.diaphragm_rotational_inertia)
         if not math.isfinite(floor_mass) or floor_mass < 0.0:
@@ -440,6 +447,45 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
             raise ValueError(
                 "Diaphragm rotational inertia must be finite and "
                 "non-negative."
+            )
+
+    if diaphragm_mode == "Shell":
+        if str(spec.joint_model or "None") != "None":
+            raise ValueError(
+                "Explicit shell slabs currently require rigid centerline "
+                "beam-column joints so the slab cannot bypass joint springs."
+            )
+        if not bool(spec.create_beams_x) or not bool(spec.create_beams_y):
+            raise ValueError(
+                "Explicit shell slabs require both X and Y beam families."
+            )
+        if spec.slab_section_tag is None or int(spec.slab_section_tag) <= 0:
+            raise ValueError(
+                "Explicit shell slabs require a shell-compatible section."
+            )
+        if str(spec.slab_element_type) not in SHELL_ELEMENT_TYPES:
+            raise ValueError(
+                f"Unsupported slab shell formulation {spec.slab_element_type!r}."
+            )
+        nx_mesh = int(spec.slab_divisions_x)
+        ny_mesh = int(spec.slab_divisions_y)
+        if not 1 <= nx_mesh <= 50 or not 1 <= ny_mesh <= 50:
+            raise ValueError(
+                "Slab mesh divisions per bay must be between 1 and 50."
+            )
+        if (
+            (nx_mesh > 1 or ny_mesh > 1)
+            and str(spec.beam_element_type) != "elasticBeamColumn"
+        ):
+            raise ValueError(
+                "Refined conforming slab meshes currently require "
+                "elasticBeamColumn beams. Use 1×1 mesh per bay for nonlinear "
+                "beam formulations."
+            )
+        mass_per_area = float(spec.slab_mass_per_area)
+        if not math.isfinite(mass_per_area) or mass_per_area < 0.0:
+            raise ValueError(
+                "Additional slab mass per area must be finite and non-negative."
             )
 
     frame_grid_coordinates(spec)
@@ -1083,9 +1129,9 @@ def generate_frame_macro_joint_project(
     }
 
 
-def frame_diaphragm_levels(spec: FrameGridSpec) -> tuple[int, ...]:
-    """Return normalized elevated floor levels selected for diaphragm action."""
-    if str(spec.diaphragm_mode or "None") != "Rigid":
+def frame_floor_levels(spec: FrameGridSpec) -> tuple[int, ...]:
+    """Return normalized elevated levels selected for rigid/shell floor action."""
+    if str(spec.diaphragm_mode or "None") not in {"Rigid", "Shell"}:
         return ()
     levels = tuple(sorted({int(level) for level in spec.diaphragm_levels}))
     if levels:
@@ -1093,9 +1139,23 @@ def frame_diaphragm_levels(spec: FrameGridSpec) -> tuple[int, ...]:
     return tuple(range(1, int(spec.nz) + 1))
 
 
+def frame_diaphragm_levels(spec: FrameGridSpec) -> tuple[int, ...]:
+    """Return normalized elevated floor levels selected for rigid diaphragm."""
+    if str(spec.diaphragm_mode or "None") != "Rigid":
+        return ()
+    return frame_floor_levels(spec)
+
+
 def frame_diaphragm_count(spec: FrameGridSpec) -> int:
     """Return the number of rigid floor diaphragms requested."""
     return len(frame_diaphragm_levels(spec))
+
+
+def frame_slab_count(spec: FrameGridSpec) -> int:
+    """Return the number of explicit shell slab floors requested."""
+    if str(spec.diaphragm_mode or "None") != "Shell":
+        return 0
+    return len(frame_floor_levels(spec))
 
 
 def apply_frame_rigid_diaphragms(
@@ -1171,6 +1231,300 @@ def apply_frame_rigid_diaphragms(
     }
 
 
+def _frame_refined_axis(
+    coordinates: list[float],
+    divisions_per_bay: int,
+) -> list[float]:
+    result = [float(coordinates[0])]
+    divisions = int(divisions_per_bay)
+    for left, right in zip(coordinates[:-1], coordinates[1:]):
+        for index in range(1, divisions + 1):
+            ratio = index / divisions
+            result.append(
+                float(left) + ratio * (float(right) - float(left))
+            )
+    return result
+
+
+def _frame_coordinate_node_lookup(
+    model: StructuralModel,
+    *,
+    tolerance: float,
+) -> dict[tuple[int, int, int], int]:
+    lookup: dict[tuple[int, int, int], int] = {}
+    for tag, node in sorted(model.nodes.items()):
+        key = tuple(
+            int(round(float(value) / tolerance))
+            for value in node.xyz
+        )
+        lookup.setdefault(key, int(tag))
+    return lookup
+
+
+def _frame_find_or_create_node(
+    model: StructuralModel,
+    lookup: dict[tuple[int, int, int], int],
+    xyz: tuple[float, float, float],
+    *,
+    tolerance: float,
+) -> tuple[int, bool]:
+    key = tuple(
+        int(round(float(value) / tolerance))
+        for value in xyz
+    )
+    existing = lookup.get(key)
+    if existing is not None:
+        node = model.nodes.get(existing)
+        if (
+            node is not None
+            and sum(
+                (float(node.xyz[index]) - float(xyz[index])) ** 2
+                for index in range(3)
+            ) <= tolerance * tolerance
+        ):
+            return int(existing), False
+
+    tag = model.next_node_tag()
+    model.add_node(tag, *xyz, ndf=6)
+    lookup[key] = int(tag)
+    return int(tag), True
+
+
+def _frame_clone_member_segment(
+    model: StructuralModel,
+    source,
+    tag: int,
+    node_i: int,
+    node_j: int,
+) -> None:
+    model.add_element(
+        tag,
+        node_i,
+        node_j,
+        element_type=source.element_type,
+        section_tag=source.section_tag,
+        transf_tag=source.transf_tag,
+        group=source.group,
+        integration_type=source.integration_type,
+        integration_points=source.integration_points,
+        force_max_iter=source.force_max_iter,
+        force_tolerance=source.force_tolerance,
+        mass_per_length=source.mass_per_length,
+        consistent_mass=source.consistent_mass,
+        hinge_i_section_tag=source.hinge_i_section_tag,
+        hinge_j_section_tag=source.hinge_j_section_tag,
+        interior_section_tag=source.interior_section_tag,
+        hinge_i_length=source.hinge_i_length,
+        hinge_j_length=source.hinge_j_length,
+        beam_center_ratio=source.beam_center_ratio,
+    )
+
+
+def apply_frame_shell_slabs(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Mesh selected 3D floors with conforming quadrilateral shell elements."""
+    validate_frame_grid_spec(spec)
+    if str(spec.diaphragm_mode or "None") != "Shell":
+        return {
+            "slab_floors": 0,
+            "slab_elements": 0,
+            "slab_nodes_created": 0,
+            "slab_beam_segments_added": 0,
+            "slab_mass_nodes": 0,
+        }
+
+    section_tag = int(spec.slab_section_tag)
+    section = project.sections.get(section_tag)
+    if section is None:
+        raise ValueError(
+            f"Slab section tag {section_tag} does not exist in the project."
+        )
+    if section.section_type not in SHELL_SECTION_TYPES:
+        raise ValueError(
+            f"Slab section {section_tag} is not shell-compatible."
+        )
+
+    model = project.model
+    if (int(model.ndm), int(model.ndf)) != (3, 6):
+        raise ValueError(
+            "Explicit shell slabs require the standard 3D/6DOF frame backend."
+        )
+
+    x_base, y_base, z_coordinates = frame_grid_coordinates(spec)
+    x_mesh = _frame_refined_axis(x_base, int(spec.slab_divisions_x))
+    y_mesh = _frame_refined_axis(y_base, int(spec.slab_divisions_y))
+    levels = frame_floor_levels(spec)
+    span = max(
+        x_mesh[-1] - x_mesh[0],
+        y_mesh[-1] - y_mesh[0],
+        z_coordinates[-1] - z_coordinates[0],
+        1.0,
+    )
+    tolerance = 1.0e-9 * span
+    lookup = _frame_coordinate_node_lookup(
+        model,
+        tolerance=tolerance,
+    )
+
+    floor_grids: dict[int, list[list[int]]] = {}
+    created_count = 0
+    reused_count = 0
+    for level in levels:
+        z = float(z_coordinates[level])
+        grid: list[list[int]] = []
+        for y in y_mesh:
+            row: list[int] = []
+            for x in x_mesh:
+                node_tag, created = _frame_find_or_create_node(
+                    model,
+                    lookup,
+                    (float(x), float(y), z),
+                    tolerance=tolerance,
+                )
+                row.append(node_tag)
+                if created:
+                    created_count += 1
+                else:
+                    reused_count += 1
+            grid.append(row)
+        floor_grids[int(level)] = grid
+
+    # Refined slabs need matching nodes along every beam line. Split only
+    # elastic frame beams; validation prevents nonlinear hinge duplication.
+    split_count = 0
+    if int(spec.slab_divisions_x) > 1 or int(spec.slab_divisions_y) > 1:
+        original_beams = [
+            element
+            for element in list(model.elements.values())
+            if element.group in {"beam-x", "beam-y"}
+        ]
+        next_element_tag = max(model.elements, default=0) + 1
+        selected_z = {
+            round(float(z_coordinates[level]), 12)
+            for level in levels
+        }
+        for element in original_beams:
+            node_i = model.nodes[int(element.i)]
+            node_j = model.nodes[int(element.j)]
+            if round(float(node_i.xyz[2]), 12) not in selected_z:
+                continue
+            if abs(float(node_i.xyz[2]) - float(node_j.xyz[2])) > tolerance:
+                continue
+
+            divisions = (
+                int(spec.slab_divisions_x)
+                if element.group == "beam-x"
+                else int(spec.slab_divisions_y)
+            )
+            if divisions <= 1:
+                continue
+
+            points: list[int] = []
+            for index in range(divisions + 1):
+                ratio = index / divisions
+                xyz = tuple(
+                    float(node_i.xyz[axis])
+                    + ratio * (
+                        float(node_j.xyz[axis])
+                        - float(node_i.xyz[axis])
+                    )
+                    for axis in range(3)
+                )
+                tag, _created = _frame_find_or_create_node(
+                    model,
+                    lookup,
+                    xyz,
+                    tolerance=tolerance,
+                )
+                points.append(tag)
+
+            original_tag = int(element.tag)
+            model.elements.pop(original_tag)
+            _frame_clone_member_segment(
+                model,
+                element,
+                original_tag,
+                points[0],
+                points[1],
+            )
+            for left, right in zip(points[1:-1], points[2:]):
+                while next_element_tag in model.elements:
+                    next_element_tag += 1
+                _frame_clone_member_segment(
+                    model,
+                    element,
+                    next_element_tag,
+                    left,
+                    right,
+                )
+                next_element_tag += 1
+                split_count += 1
+
+    shell_count = 0
+    next_element_tag = max(model.elements, default=0) + 1
+    mass_per_area = float(spec.slab_mass_per_area)
+    mass_added: dict[int, float] = {}
+
+    for level in levels:
+        grid = floor_grids[int(level)]
+        for j in range(len(y_mesh) - 1):
+            for i in range(len(x_mesh) - 1):
+                n1 = grid[j][i]
+                n2 = grid[j][i + 1]
+                n3 = grid[j + 1][i + 1]
+                n4 = grid[j + 1][i]
+                while next_element_tag in model.elements:
+                    next_element_tag += 1
+                model.add_element(
+                    next_element_tag,
+                    n1,
+                    n2,
+                    element_type=str(spec.slab_element_type),
+                    section_tag=section_tag,
+                    group=f"slab:L{int(level)}",
+                    k=n3,
+                    l=n4,
+                    shell_corotational=(
+                        bool(spec.slab_corotational)
+                        if str(spec.slab_element_type) == "ASDShellQ4"
+                        else False
+                    ),
+                )
+                shell_count += 1
+
+                if mass_per_area > 0.0:
+                    area = (
+                        abs(float(x_mesh[i + 1]) - float(x_mesh[i]))
+                        * abs(float(y_mesh[j + 1]) - float(y_mesh[j]))
+                    )
+                    share = 0.25 * mass_per_area * area
+                    for node_tag in (n1, n2, n3, n4):
+                        mass_added[node_tag] = (
+                            mass_added.get(node_tag, 0.0) + share
+                        )
+                next_element_tag += 1
+
+    for node_tag, added_mass in mass_added.items():
+        node = model.nodes[int(node_tag)]
+        values = list(node.mass)
+        while len(values) < 6:
+            values.append(0.0)
+        for index in (0, 1, 2):
+            values[index] += float(added_mass)
+        node.mass = tuple(values[:6])
+
+    return {
+        "slab_floors": len(levels),
+        "slab_elements": shell_count,
+        "slab_nodes_created": created_count,
+        "slab_nodes_reused": reused_count,
+        "slab_beam_segments_added": split_count,
+        "slab_mass_nodes": len(mass_added),
+    }
+
+
 def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
     """Replace model-linked project data with one Frame Wizard model."""
     validate_frame_grid_spec(spec)
@@ -1199,8 +1553,11 @@ def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
             "panel_external_nodes": 0,
         }
 
-    if str(spec.diaphragm_mode or "None") == "Rigid":
+    floor_mode = str(spec.diaphragm_mode or "None")
+    if floor_mode == "Rigid":
         result.update(apply_frame_rigid_diaphragms(project, spec))
+    elif floor_mode == "Shell":
+        result.update(apply_frame_shell_slabs(project, spec))
     return result
 
 
