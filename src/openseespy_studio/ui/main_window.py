@@ -5685,6 +5685,14 @@ class MainWindow(QMainWindow):
                 f" / {slab_elements} shell element(s)"
             )
 
+        foundation_connections = int(
+            joint_result.get("foundation_connections", 0)
+        )
+        if foundation_connections:
+            message += (
+                f" · {foundation_connections} foundation spring connection(s)"
+            )
+
         self._refresh_all(message)
         self.frame_grid_panel.set_assignment_tags(
             column_section_tag=spec.column_section_tag,
