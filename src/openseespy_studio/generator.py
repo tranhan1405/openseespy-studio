@@ -112,8 +112,15 @@ class FrameGridSpec:
     brace_mass_per_length: float = 0.0
     brace_do_rayleigh: bool = False
     brace_x_bays: tuple[int, ...] = ()
+    brace_y_bays: tuple[int, ...] = ()
     brace_storeys: tuple[int, ...] = ()
+    brace_plane_mode: str = "X"
     brace_y_plane_scope: str = "All"
+    brace_x_plane_scope: str = "All"
+    brace_panel_patterns: tuple[
+        tuple[str, int, int, int, str], ...
+    ] = ()
+    brace_response_preset: str = "Standard"
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -630,6 +637,7 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
         "VUpper",
         "VLower",
         "KLeft",
+        "KRight",
     }
     if brace_pattern not in supported_brace_patterns:
         raise ValueError(
@@ -640,6 +648,23 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
             "Frame Wizard braces currently support truss or corotTruss."
         )
 
+    plane_mode = str(spec.brace_plane_mode or "X")
+    if plane_mode not in {"X", "Y", "Both"}:
+        raise ValueError(
+            "Brace plane mode must be X, Y, or Both."
+        )
+    if spec.planar_2d and plane_mode != "X":
+        raise ValueError(
+            "Planar Frame Wizard models support X-Z bracing only."
+        )
+
+    response_preset = str(spec.brace_response_preset or "Standard")
+    if response_preset not in {"Standard", "NonlinearReady", "BRBReady"}:
+        raise ValueError(
+            "Brace response preset must be Standard, NonlinearReady, or "
+            "BRBReady."
+        )
+
     brace_x_bays = tuple(sorted({int(value) for value in spec.brace_x_bays}))
     if brace_x_bays and any(
         value < 0 or value >= int(spec.nx)
@@ -647,6 +672,15 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
     ):
         raise ValueError(
             "Brace X-bay selections must be zero-based indices inside the "
+            "frame grid."
+        )
+    brace_y_bays = tuple(sorted({int(value) for value in spec.brace_y_bays}))
+    if brace_y_bays and any(
+        value < 0 or value >= int(spec.ny)
+        for value in brace_y_bays
+    ):
+        raise ValueError(
+            "Brace Y-bay selections must be zero-based indices inside the "
             "frame grid."
         )
     brace_storeys = tuple(
@@ -669,6 +703,62 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
         raise ValueError(
             "Brace Y-plane scope must be All, Exterior, YMin, or YMax."
         )
+    if str(spec.brace_x_plane_scope) not in {
+        "All",
+        "Exterior",
+        "XMin",
+        "XMax",
+    }:
+        raise ValueError(
+            "Brace X-plane scope must be All, Exterior, XMin, or XMax."
+        )
+
+    panel_overrides = tuple(spec.brace_panel_patterns)
+    seen_override_keys: set[tuple[str, int, int, int]] = set()
+    for raw in panel_overrides:
+        if len(raw) != 5:
+            raise ValueError(
+                "Brace panel override needs axis, plane, bay, storey, pattern."
+            )
+        axis = str(raw[0])
+        plane = int(raw[1])
+        bay = int(raw[2])
+        storey = int(raw[3])
+        pattern = str(raw[4])
+        if axis not in {"X", "Y"}:
+            raise ValueError("Brace panel override axis must be X or Y.")
+        if pattern not in supported_brace_patterns | {"None"}:
+            raise ValueError(
+                f"Unsupported per-panel brace pattern {pattern!r}."
+            )
+        key = (axis, plane, bay, storey)
+        if key in seen_override_keys:
+            raise ValueError(
+                "Brace panel overrides cannot contain duplicate panel keys."
+            )
+        seen_override_keys.add(key)
+        if not 1 <= storey <= int(spec.nz):
+            raise ValueError(
+                "Brace panel override storey is outside the frame."
+            )
+        if axis == "X":
+            if not 0 <= plane <= int(spec.ny):
+                raise ValueError(
+                    "X-Z brace panel Y-grid line is outside the frame."
+                )
+            if not 0 <= bay < int(spec.nx):
+                raise ValueError(
+                    "X-Z brace panel X bay is outside the frame."
+                )
+        else:
+            if not 0 <= plane <= int(spec.nx):
+                raise ValueError(
+                    "Y-Z brace panel X-grid line is outside the frame."
+                )
+            if not 0 <= bay < int(spec.ny):
+                raise ValueError(
+                    "Y-Z brace panel Y bay is outside the frame."
+                )
 
     if brace_mode == "Truss":
         if joint_model in macro_joint_models:
@@ -677,9 +767,17 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                 "3D/6DOF frame backend; native 2D macro-joint cores are not "
                 "combined with braces yet."
             )
-        if not bool(spec.create_columns) or not bool(spec.create_beams_x):
+        if not bool(spec.create_columns):
             raise ValueError(
-                "X-plane bracing requires columns and X-direction beams."
+                "Frame bracing requires columns."
+            )
+        if plane_mode in {"X", "Both"} and not bool(spec.create_beams_x):
+            raise ValueError(
+                "X-Z plane bracing requires X-direction beams."
+            )
+        if plane_mode in {"Y", "Both"} and not bool(spec.create_beams_y):
+            raise ValueError(
+                "Y-Z plane bracing requires Y-direction beams."
             )
         if (
             spec.brace_material_tag is None
@@ -696,30 +794,44 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
             raise ValueError(
                 "Brace mass per length must be finite and non-negative."
             )
+
+        active_patterns = {
+            brace_pattern,
+            *(
+                str(raw[4])
+                for raw in panel_overrides
+                if str(raw[4]) != "None"
+            ),
+        }
         selected_storeys = (
             brace_storeys
             if brace_storeys
             else tuple(range(1, int(spec.nz) + 1))
         )
-        if brace_pattern == "VLower" and 1 in selected_storeys:
-            raise ValueError(
-                "Chevron-to-lower-beam bracing cannot use storey 1 because "
-                "Frame Wizard does not create a beam on the base line."
-            )
-        if brace_pattern in {"VUpper", "VLower"} and (
+        if "VLower" in active_patterns and 1 in selected_storeys:
+            # This is conservative: per-panel overrides can disable S1, but
+            # the default pattern may still target it. UI removes S1 when
+            # VLower is selected globally.
+            if brace_pattern == "VLower":
+                raise ValueError(
+                    "Chevron-to-lower-beam bracing cannot use storey 1 because "
+                    "Frame Wizard does not create a beam on the base line."
+                )
+        if active_patterns & {"VUpper", "VLower"} and (
             str(spec.beam_element_type) != "elasticBeamColumn"
         ):
             raise ValueError(
                 "Chevron bracing that meets a beam midpoint currently "
                 "requires elasticBeamColumn beams."
             )
-        if brace_pattern == "KLeft" and (
+        if active_patterns & {"KLeft", "KRight"} and (
             str(spec.column_element_type) != "elasticBeamColumn"
         ):
             raise ValueError(
                 "K bracing at a column midpoint currently requires "
                 "elasticBeamColumn columns."
             )
+
 
     frame_grid_coordinates(spec)
 
@@ -1763,6 +1875,11 @@ def frame_brace_x_bays(spec: FrameGridSpec) -> tuple[int, ...]:
     return values if values else tuple(range(int(spec.nx)))
 
 
+def frame_brace_y_bays(spec: FrameGridSpec) -> tuple[int, ...]:
+    values = tuple(sorted({int(value) for value in spec.brace_y_bays}))
+    return values if values else tuple(range(int(spec.ny)))
+
+
 def frame_brace_storeys(spec: FrameGridSpec) -> tuple[int, ...]:
     values = tuple(sorted({int(value) for value in spec.brace_storeys}))
     return values if values else tuple(range(1, int(spec.nz) + 1))
@@ -1782,28 +1899,77 @@ def frame_brace_y_grid_lines(spec: FrameGridSpec) -> tuple[int, ...]:
     return tuple(range(ny + 1))
 
 
-def frame_brace_panel_count(spec: FrameGridSpec) -> int:
+def frame_brace_x_grid_lines(spec: FrameGridSpec) -> tuple[int, ...]:
+    nx = int(spec.nx)
+    scope = str(spec.brace_x_plane_scope or "All")
+    if scope == "XMin":
+        return (0,)
+    if scope == "XMax":
+        return (nx,)
+    if scope == "Exterior":
+        return (0,) if nx == 0 else (0, nx)
+    return tuple(range(nx + 1))
+
+
+def frame_brace_panel_pattern_map(
+    spec: FrameGridSpec,
+) -> dict[tuple[str, int, int, int], str]:
+    return {
+        (str(axis), int(plane), int(bay), int(storey)): str(pattern)
+        for axis, plane, bay, storey, pattern in spec.brace_panel_patterns
+    }
+
+
+def frame_brace_panels(
+    spec: FrameGridSpec,
+) -> tuple[tuple[str, int, int, int, str], ...]:
     if str(spec.brace_mode or "None") != "Truss":
-        return 0
-    return (
-        len(frame_brace_x_bays(spec))
-        * len(frame_brace_storeys(spec))
-        * len(frame_brace_y_grid_lines(spec))
-    )
+        return ()
+    mode = str(spec.brace_plane_mode or "X")
+    overrides = frame_brace_panel_pattern_map(spec)
+    panels: list[tuple[str, int, int, int, str]] = []
+
+    if mode in {"X", "Both"}:
+        for storey in frame_brace_storeys(spec):
+            for plane in frame_brace_y_grid_lines(spec):
+                for bay in frame_brace_x_bays(spec):
+                    pattern = overrides.get(
+                        ("X", plane, bay, storey),
+                        str(spec.brace_pattern),
+                    )
+                    if pattern != "None":
+                        panels.append(
+                            ("X", plane, bay, storey, pattern)
+                        )
+
+    if mode in {"Y", "Both"} and not spec.planar_2d:
+        for storey in frame_brace_storeys(spec):
+            for plane in frame_brace_x_grid_lines(spec):
+                for bay in frame_brace_y_bays(spec):
+                    pattern = overrides.get(
+                        ("Y", plane, bay, storey),
+                        str(spec.brace_pattern),
+                    )
+                    if pattern != "None":
+                        panels.append(
+                            ("Y", plane, bay, storey, pattern)
+                        )
+
+    return tuple(panels)
+
+
+def frame_brace_panel_count(spec: FrameGridSpec) -> int:
+    return len(frame_brace_panels(spec))
 
 
 def frame_brace_element_count(spec: FrameGridSpec) -> int:
-    panels = frame_brace_panel_count(spec)
-    if panels <= 0:
-        return 0
-    return panels * (
-        1
-        if str(spec.brace_pattern) in {
+    count = 0
+    for _axis, _plane, _bay, _storey, pattern in frame_brace_panels(spec):
+        count += 1 if pattern in {
             "DiagonalForward",
             "DiagonalBackward",
-        }
-        else 2
-    )
+        } else 2
+    return count
 
 
 def _frame_point_on_segment(
@@ -1900,7 +2066,7 @@ def apply_frame_bracing(
     project,
     spec: FrameGridSpec,
 ) -> dict[str, int]:
-    """Create first-stage XZ-plane truss bracing for selected frame panels."""
+    """Create selected X-Z / Y-Z truss braces with per-panel patterns."""
     validate_frame_grid_spec(spec)
     if str(spec.brace_mode or "None") != "Truss":
         return {
@@ -1908,6 +2074,8 @@ def apply_frame_bracing(
             "brace_elements": 0,
             "brace_midpoint_nodes": 0,
             "brace_member_splits": 0,
+            "brace_xz_panels": 0,
+            "brace_yz_panels": 0,
         }
 
     material_tag = int(spec.brace_material_tag)
@@ -1920,18 +2088,26 @@ def apply_frame_bracing(
     x_coordinates, y_coordinates, z_coordinates = frame_grid_coordinates(spec)
     span = max(
         x_coordinates[-1] - x_coordinates[0],
-        (y_coordinates[-1] - y_coordinates[0]) if len(y_coordinates) > 1 else 0.0,
+        (y_coordinates[-1] - y_coordinates[0])
+        if len(y_coordinates) > 1 else 0.0,
         z_coordinates[-1] - z_coordinates[0],
         1.0,
     )
     tolerance = 1.0e-9 * span
-    pattern = str(spec.brace_pattern)
     next_element_tag = max(model.elements, default=0) + 1
     midpoint_nodes: set[int] = set()
     split_count = 0
     brace_count = 0
+    xz_panels = 0
+    yz_panels = 0
 
-    def add_brace(node_i: int, node_j: int, panel_label: str) -> None:
+    def add_brace(
+        node_i: int,
+        node_j: int,
+        *,
+        axis: str,
+        panel_label: str,
+    ) -> None:
         nonlocal next_element_tag, brace_count
         while next_element_tag in model.elements:
             next_element_tag += 1
@@ -1940,7 +2116,7 @@ def apply_frame_bracing(
             int(node_i),
             int(node_j),
             element_type=str(spec.brace_element_type),
-            group=f"brace-x:{panel_label}",
+            group=f"brace-{axis.lower()}:{panel_label}",
             truss_area=float(spec.brace_area),
             truss_material_tag=material_tag,
             mass_per_length=float(spec.brace_mass_per_length),
@@ -1949,94 +2125,146 @@ def apply_frame_bracing(
         next_element_tag += 1
         brace_count += 1
 
-    for storey in frame_brace_storeys(spec):
+    for axis, plane, bay, storey, pattern in frame_brace_panels(spec):
         lower_k = int(storey) - 1
         upper_k = int(storey)
-        for y_index in frame_brace_y_grid_lines(spec):
-            for bay in frame_brace_x_bays(spec):
-                left = int(bay)
-                right = left + 1
-                n_bl = _frame_center_node_tag(
-                    spec, left, y_index, lower_k
-                )
-                n_br = _frame_center_node_tag(
-                    spec, right, y_index, lower_k
-                )
-                n_tl = _frame_center_node_tag(
-                    spec, left, y_index, upper_k
-                )
-                n_tr = _frame_center_node_tag(
-                    spec, right, y_index, upper_k
-                )
-                label = f"S{storey}:X{bay + 1}:Y{y_index + 1}"
 
-                if pattern == "DiagonalForward":
-                    add_brace(n_bl, n_tr, label)
-                elif pattern == "DiagonalBackward":
-                    add_brace(n_br, n_tl, label)
-                elif pattern == "X":
-                    add_brace(n_bl, n_tr, label)
-                    add_brace(n_br, n_tl, label)
-                elif pattern == "VUpper":
-                    point = (
-                        0.5 * (
-                            x_coordinates[left] + x_coordinates[right]
-                        ),
-                        y_coordinates[y_index],
-                        z_coordinates[upper_k],
+        if axis == "X":
+            left = int(bay)
+            right = left + 1
+            n_bl = _frame_center_node_tag(spec, left, plane, lower_k)
+            n_br = _frame_center_node_tag(spec, right, plane, lower_k)
+            n_tl = _frame_center_node_tag(spec, left, plane, upper_k)
+            n_tr = _frame_center_node_tag(spec, right, plane, upper_k)
+            lower_left_xyz = (
+                x_coordinates[left],
+                y_coordinates[plane],
+                z_coordinates[lower_k],
+            )
+            lower_right_xyz = (
+                x_coordinates[right],
+                y_coordinates[plane],
+                z_coordinates[lower_k],
+            )
+            upper_left_xyz = (
+                x_coordinates[left],
+                y_coordinates[plane],
+                z_coordinates[upper_k],
+            )
+            upper_right_xyz = (
+                x_coordinates[right],
+                y_coordinates[plane],
+                z_coordinates[upper_k],
+            )
+            beam_groups = {"beam-2d", "beam-x"}
+            xz_panels += 1
+            label = f"S{storey}:X{bay + 1}:Y{plane + 1}"
+        else:
+            low = int(bay)
+            high = low + 1
+            n_bl = _frame_center_node_tag(spec, plane, low, lower_k)
+            n_br = _frame_center_node_tag(spec, plane, high, lower_k)
+            n_tl = _frame_center_node_tag(spec, plane, low, upper_k)
+            n_tr = _frame_center_node_tag(spec, plane, high, upper_k)
+            lower_left_xyz = (
+                x_coordinates[plane],
+                y_coordinates[low],
+                z_coordinates[lower_k],
+            )
+            lower_right_xyz = (
+                x_coordinates[plane],
+                y_coordinates[high],
+                z_coordinates[lower_k],
+            )
+            upper_left_xyz = (
+                x_coordinates[plane],
+                y_coordinates[low],
+                z_coordinates[upper_k],
+            )
+            upper_right_xyz = (
+                x_coordinates[plane],
+                y_coordinates[high],
+                z_coordinates[upper_k],
+            )
+            beam_groups = {"beam-y"}
+            yz_panels += 1
+            label = f"S{storey}:Y{bay + 1}:X{plane + 1}"
+
+        if pattern == "DiagonalForward":
+            add_brace(n_bl, n_tr, axis=axis, panel_label=label)
+        elif pattern == "DiagonalBackward":
+            add_brace(n_br, n_tl, axis=axis, panel_label=label)
+        elif pattern == "X":
+            add_brace(n_bl, n_tr, axis=axis, panel_label=label)
+            add_brace(n_br, n_tl, axis=axis, panel_label=label)
+        elif pattern in {"VUpper", "VLower"}:
+            target_xyz = (
+                tuple(
+                    0.5 * (
+                        upper_left_xyz[index]
+                        + upper_right_xyz[index]
                     )
-                    mid, split = _frame_insert_member_midpoint_node(
-                        model,
-                        point,
-                        groups={"beam-2d", "beam-x"},
-                        tolerance=tolerance,
+                    for index in range(3)
+                )
+                if pattern == "VUpper"
+                else tuple(
+                    0.5 * (
+                        lower_left_xyz[index]
+                        + lower_right_xyz[index]
                     )
-                    midpoint_nodes.add(mid)
-                    split_count += split
-                    add_brace(n_bl, mid, label)
-                    add_brace(n_br, mid, label)
-                elif pattern == "VLower":
-                    point = (
-                        0.5 * (
-                            x_coordinates[left] + x_coordinates[right]
-                        ),
-                        y_coordinates[y_index],
-                        z_coordinates[lower_k],
-                    )
-                    mid, split = _frame_insert_member_midpoint_node(
-                        model,
-                        point,
-                        groups={"beam-2d", "beam-x"},
-                        tolerance=tolerance,
-                    )
-                    midpoint_nodes.add(mid)
-                    split_count += split
-                    add_brace(n_tl, mid, label)
-                    add_brace(n_tr, mid, label)
-                elif pattern == "KLeft":
-                    point = (
-                        x_coordinates[left],
-                        y_coordinates[y_index],
-                        0.5 * (
-                            z_coordinates[lower_k] + z_coordinates[upper_k]
-                        ),
-                    )
-                    mid, split = _frame_insert_member_midpoint_node(
-                        model,
-                        point,
-                        groups={"column-2d", "column"},
-                        tolerance=tolerance,
-                    )
-                    midpoint_nodes.add(mid)
-                    split_count += split
-                    add_brace(mid, n_br, label)
-                    add_brace(mid, n_tr, label)
+                    for index in range(3)
+                )
+            )
+            mid, split = _frame_insert_member_midpoint_node(
+                model,
+                target_xyz,
+                groups=beam_groups,
+                tolerance=tolerance,
+            )
+            midpoint_nodes.add(mid)
+            split_count += split
+            if pattern == "VUpper":
+                add_brace(n_bl, mid, axis=axis, panel_label=label)
+                add_brace(n_br, mid, axis=axis, panel_label=label)
+            else:
+                add_brace(n_tl, mid, axis=axis, panel_label=label)
+                add_brace(n_tr, mid, axis=axis, panel_label=label)
+        elif pattern in {"KLeft", "KRight"}:
+            side_xyz_a = (
+                lower_left_xyz if pattern == "KLeft" else lower_right_xyz
+            )
+            side_xyz_b = (
+                upper_left_xyz if pattern == "KLeft" else upper_right_xyz
+            )
+            point = tuple(
+                0.5 * (
+                    float(side_xyz_a[index])
+                    + float(side_xyz_b[index])
+                )
+                for index in range(3)
+            )
+            mid, split = _frame_insert_member_midpoint_node(
+                model,
+                point,
+                groups={"column-2d", "column"},
+                tolerance=tolerance,
+            )
+            midpoint_nodes.add(mid)
+            split_count += split
+            if pattern == "KLeft":
+                add_brace(mid, n_br, axis=axis, panel_label=label)
+                add_brace(mid, n_tr, axis=axis, panel_label=label)
+            else:
+                add_brace(mid, n_bl, axis=axis, panel_label=label)
+                add_brace(mid, n_tl, axis=axis, panel_label=label)
 
     return {
         "brace_panels": frame_brace_panel_count(spec),
         "brace_elements": brace_count,
         "brace_midpoint_nodes": len(midpoint_nodes),
         "brace_member_splits": split_count,
+        "brace_xz_panels": xz_panels,
+        "brace_yz_panels": yz_panels,
     }
 
 
