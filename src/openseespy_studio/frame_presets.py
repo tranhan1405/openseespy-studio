@@ -59,6 +59,63 @@ def frame_spec_to_preset(
     }
 
 
+def frame_preset_to_json(
+    preset: dict[str, Any],
+    *,
+    indent: int = 2,
+) -> str:
+    """Serialize one validated Frame Wizard preset as portable JSON."""
+    spec = frame_spec_from_preset(preset)
+    normalized = frame_spec_to_preset(
+        spec,
+        name=str(preset.get("name", "")).strip() or "Frame Preset",
+        description=str(preset.get("description", "")),
+        builtin=bool(preset.get("builtin", False)),
+    )
+    return __import__("json").dumps(
+        normalized,
+        indent=int(indent),
+        sort_keys=True,
+    ) + "\n"
+
+
+def frame_preset_from_json(text: str) -> dict[str, Any]:
+    """Parse and normalize one portable Frame Wizard preset JSON document."""
+    try:
+        raw = __import__("json").loads(str(text))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid Frame Wizard preset JSON: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("Frame Wizard preset JSON must contain one object.")
+    spec = frame_spec_from_preset(raw)
+    name = str(raw.get("name", "")).strip()
+    if not name:
+        raise ValueError("Imported Frame Wizard preset has no name.")
+    return frame_spec_to_preset(
+        spec,
+        name=name,
+        description=str(raw.get("description", "")),
+        builtin=False,
+    )
+
+
+def unique_frame_preset_name(
+    desired: str,
+    existing: Any,
+) -> str:
+    """Return a stable non-colliding preset name using '(2)', '(3)', ..."""
+    base = str(desired).strip()
+    if not base:
+        raise ValueError("Frame Wizard preset name cannot be empty.")
+    used = {str(value) for value in existing}
+    if base not in used:
+        return base
+    index = 2
+    while f"{base} ({index})" in used:
+        index += 1
+    return f"{base} ({index})"
+
+
 def frame_spec_from_preset(data: dict[str, Any]) -> FrameGridSpec:
     if not isinstance(data, dict):
         raise ValueError("Frame Wizard preset must be an object.")
