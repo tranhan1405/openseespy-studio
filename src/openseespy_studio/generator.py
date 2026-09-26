@@ -364,6 +364,19 @@ def material_to_openseespy(
             f"{int(round(p['GapClose']))})"
         )
 
+    if material.material_type == "Masonry":
+        return (
+            "ops.uniaxialMaterial('Masonry', "
+            f"{material.tag}, {stress(p['Fm']):g}, {stress(p['Ft']):g}, "
+            f"{p['Um']:g}, {p['Uult']:g}, {p['Ucl']:g}, "
+            f"{stress(p['Emo']):g}, {p['L']:g}, {p['a1']:g}, "
+            f"{p['a2']:g}, {p['D1']:g}, {p['D2']:g}, "
+            f"{p['Ach']:g}, {p['Are']:g}, {p['Ba']:g}, "
+            f"{p['Bch']:g}, {p['Gun']:g}, {p['Gplu']:g}, "
+            f"{p['Gplr']:g}, {p['Exp1']:g}, {p['Exp2']:g}, "
+            f"{int(round(p['IENV']))})"
+        )
+
     if material.material_type == "Hysteretic":
         keys = MATERIAL_PARAMETER_ORDER["Hysteretic"]
 
