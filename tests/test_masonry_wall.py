@@ -7,6 +7,7 @@ from openseespy_studio.importer import import_openseespy_source
 from openseespy_studio.masonry_wall import (
     MasonryWallSpec,
     build_masonry_wall,
+    validate_masonry_wall_spec,
 )
 from openseespy_studio.project import MaterialData, ProjectDatabase
 from openseespy_studio.ui.masonry_wall_wizard import MasonryWallWizard
