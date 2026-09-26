@@ -4091,6 +4091,45 @@ class FrameWizard(QWizard):
         layout.addWidget(direction_group)
         self.mass_direction_group = direction_group
 
+        self.modal_mode = QComboBox()
+        self.modal_mode.addItem(
+            "None · mass definition only",
+            "None",
+        )
+        self.modal_mode.addItem(
+            "Create Modal analysis + mode-shape results",
+            "Modal",
+        )
+        self.modal_num_modes = self._spin(6, 1, 100)
+        self.modal_eigen_solver = QComboBox()
+        self.modal_eigen_solver.addItem(
+            "Band ARPACK · recommended",
+            "-genBandArpack",
+        )
+        self.modal_eigen_solver.addItem(
+            "Full General LAPACK",
+            "-fullGenLapack",
+        )
+        self.modal_eigen_solver.addItem(
+            "Symmetric Band LAPACK",
+            "-symmBandLapack",
+        )
+
+        modal_group = QGroupBox("Modal analysis preset")
+        modal_form = QFormLayout(modal_group)
+        modal_form.addRow("After mass generation:", self.modal_mode)
+        modal_form.addRow("Number of modes:", self.modal_num_modes)
+        modal_form.addRow("Eigen solver:", self.modal_eigen_solver)
+        modal_hint = QLabel(
+            "Creates one Modal Analysis object plus Mode Motion and one "
+            "Mode Shape result request for each requested mode. The analysis "
+            "uses the same FEWIZ Analysis Template backend as manual setup."
+        )
+        modal_hint.setWordWrap(True)
+        modal_form.addRow(modal_hint)
+        layout.addWidget(modal_group)
+        self.modal_group = modal_group
+
         compatibility_note = QLabel(
             "Safety rule: automatic Mass Source replaces selected nodal mass. "
             "Therefore FEWIZ blocks it when a nonzero rigid-diaphragm floor "
@@ -4132,6 +4171,15 @@ class FrameWizard(QWizard):
         self.mass_gravity_axis.currentIndexChanged.connect(
             self._mass_control_changed
         )
+        self.modal_mode.currentIndexChanged.connect(
+            self._mass_control_changed
+        )
+        self.modal_num_modes.valueChanged.connect(
+            self._mass_control_changed
+        )
+        self.modal_eigen_solver.currentIndexChanged.connect(
+            self._mass_control_changed
+        )
         for check in (
             self.mass_direction_x,
             self.mass_direction_y,
@@ -4165,6 +4213,10 @@ class FrameWizard(QWizard):
         self.mass_static_factor.setEnabled(
             active and self.mass_include_static.isChecked()
         )
+
+        modal_active = self.modal_mode.currentData() == "Modal"
+        self.modal_num_modes.setEnabled(modal_active)
+        self.modal_eigen_solver.setEnabled(modal_active)
 
         if self.dimension.currentData() == "2D":
             self.mass_direction_y.blockSignals(True)
@@ -4211,7 +4263,7 @@ class FrameWizard(QWizard):
                 2: "UY",
                 3: "UZ",
             }
-            self.mass_summary.setText(
+            mass_text = (
                 "<b>Seismic mass summary</b><br>"
                 "Create + apply one Mass Source<br>"
                 "Components: "
@@ -4225,11 +4277,25 @@ class FrameWizard(QWizard):
                 )
             )
         else:
-            self.mass_summary.setText(
+            mass_text = (
                 "<b>Seismic mass summary</b><br>"
                 "No automatic Mass Source will be created. Existing element "
                 "mass and nodal mass are left unchanged."
             )
+
+        if spec.modal_mode == "Modal":
+            mass_text += (
+                "<br><br><b>Modal preset</b><br>"
+                f"{spec.modal_num_modes} mode(s) · "
+                f"{spec.modal_eigen_solver}<br>"
+                "Creates Modal analysis + Mode Motion + Mode Shape requests."
+            )
+        else:
+            mass_text += (
+                "<br><br><b>Modal preset</b><br>"
+                "No automatic modal analysis will be created."
+            )
+        self.mass_summary.setText(mass_text)
 
         finish = self.button(QWizard.FinishButton)
         if error:
@@ -5126,6 +5192,24 @@ class FrameWizard(QWizard):
                 self._selected_mass_directions()
                 if hasattr(self, "mass_direction_x")
                 else ((1,) if dimension == "2D" else (1, 2))
+            ),
+            modal_mode=(
+                str(self.modal_mode.currentData() or "None")
+                if hasattr(self, "modal_mode")
+                else "None"
+            ),
+            modal_num_modes=(
+                int(self.modal_num_modes.value())
+                if hasattr(self, "modal_num_modes")
+                else 6
+            ),
+            modal_eigen_solver=(
+                str(
+                    self.modal_eigen_solver.currentData()
+                    or "-genBandArpack"
+                )
+                if hasattr(self, "modal_eigen_solver")
+                else "-genBandArpack"
             ),
             planar_2d=(dimension == "2D"),
             planar_base_support=str(
