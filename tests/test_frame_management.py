@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from openseespy_studio.frame_management import (
     frame_regeneration_plan,
     managed_frame_conflicts,
@@ -64,7 +66,7 @@ def test_managed_snapshot_detects_manual_node_edit_by_domain():
 
 def test_regeneration_plan_preserves_all_tags_for_compatible_geometry_edit():
     project, spec, recipe = _managed_project()
-    revised = FrameGridSpec(**vars(spec))
+    revised = replace(spec)
     revised.dx = 6.25
 
     plan = frame_regeneration_plan(project, recipe, revised)
@@ -82,7 +84,7 @@ def test_regeneration_plan_preserves_all_tags_for_compatible_geometry_edit():
 
 def test_regeneration_plan_rejects_topology_change_for_compatible_update():
     project, spec, recipe = _managed_project()
-    revised = FrameGridSpec(**vars(spec))
+    revised = replace(spec)
     revised.nx = 3
 
     plan = frame_regeneration_plan(project, recipe, revised)
