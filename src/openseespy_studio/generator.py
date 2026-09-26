@@ -39,6 +39,12 @@ class FrameGridSpec:
     dx: float = 5.0
     dy: float = 6.0
     dz: float = 3.5
+    x_bay_widths: tuple[float, ...] = ()
+    y_bay_widths: tuple[float, ...] = ()
+    storey_heights: tuple[float, ...] = ()
+    origin_x: float = 0.0
+    origin_y: float = 0.0
+    origin_z: float = 0.0
     start_node_tag: int = 1
     start_element_tag: int = 1
     create_columns: bool = True
@@ -52,13 +58,93 @@ class FrameGridSpec:
     planar_base_support: str = "Fixed"
 
 
+def _frame_axis_coordinates(
+    count: int,
+    uniform_spacing: float,
+    individual_spacings: tuple[float, ...],
+    origin: float,
+    axis_name: str,
+) -> list[float]:
+    count = int(count)
+    if count < 1:
+        raise ValueError(f"{axis_name} needs at least one interval.")
+    if not math.isfinite(float(origin)):
+        raise ValueError(f"{axis_name} origin must be finite.")
+
+    values = tuple(float(value) for value in individual_spacings)
+    if values and len(values) != count:
+        raise ValueError(
+            f"{axis_name} spacing count is {len(values)} but expected {count}."
+        )
+    if not values:
+        values = (float(uniform_spacing),) * count
+    for index, value in enumerate(values, start=1):
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(
+                f"{axis_name} spacing {index} must be finite and positive."
+            )
+
+    coordinates = [float(origin)]
+    for value in values:
+        coordinates.append(coordinates[-1] + value)
+    return coordinates
+
+
+def frame_grid_coordinates(
+    spec: FrameGridSpec,
+) -> tuple[list[float], list[float], list[float]]:
+    """Resolve regular or individually-sized grid coordinates."""
+    x = _frame_axis_coordinates(
+        spec.nx,
+        spec.dx,
+        spec.x_bay_widths,
+        spec.origin_x,
+        "X bay",
+    )
+    if spec.planar_2d:
+        y = [float(spec.origin_y)]
+    else:
+        y = _frame_axis_coordinates(
+            spec.ny,
+            spec.dy,
+            spec.y_bay_widths,
+            spec.origin_y,
+            "Y bay",
+        )
+    z = _frame_axis_coordinates(
+        spec.nz,
+        spec.dz,
+        spec.storey_heights,
+        spec.origin_z,
+        "Storey",
+    )
+    return x, y, z
+
+
+def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
+    """Validate frame-grid topology and resolve coordinate arrays."""
+    if int(spec.start_node_tag) < 1 or int(spec.start_element_tag) < 1:
+        raise ValueError("Frame node and element start tags must be positive.")
+    if spec.planar_2d and spec.planar_base_support not in {"Fixed", "Pinned"}:
+        raise ValueError("2D frame base support must be Fixed or Pinned.")
+    if not (
+        bool(spec.create_columns)
+        or bool(spec.create_beams_x)
+        or (not spec.planar_2d and bool(spec.create_beams_y))
+    ):
+        raise ValueError("Frame grid must create at least one member family.")
+    frame_grid_coordinates(spec)
+
+
 def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
-    """Create a regular frame grid.
+    """Create a regular or individually-spaced frame grid.
 
     Standard mode creates a 3-D X-Y-Z frame. Planar mode creates an X-Z
     frame while retaining the Studio 3-D / 6-DOF backend and automatically
     restraining all out-of-plane DOFs.
     """
+    validate_frame_grid_spec(spec)
+    x_coordinates, y_coordinates, z_coordinates = frame_grid_coordinates(spec)
     model.clear()
 
     if spec.planar_2d:
@@ -74,9 +160,9 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
             for i in range(spec.nx + 1):
                 model.add_node(
                     node_tag,
-                    i * spec.dx,
-                    0.0,
-                    k * spec.dz,
+                    x_coordinates[i],
+                    y_coordinates[0],
+                    z_coordinates[k],
                 )
                 node_at_2d[(i, k)] = node_tag
                 model.set_fixity(node_tag, out_of_plane)
@@ -123,7 +209,12 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
     for k in range(spec.nz + 1):
         for j in range(spec.ny + 1):
             for i in range(spec.nx + 1):
-                model.add_node(node_tag, i * spec.dx, j * spec.dy, k * spec.dz)
+                model.add_node(
+                    node_tag,
+                    x_coordinates[i],
+                    y_coordinates[j],
+                    z_coordinates[k],
+                )
                 node_at[(i, j, k)] = node_tag
                 node_tag += 1
 
