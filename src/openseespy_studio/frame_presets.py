@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, fields
+import json
 from typing import Any
 
 from .generator import FrameGridSpec
@@ -72,7 +73,7 @@ def frame_preset_to_json(
         description=str(preset.get("description", "")),
         builtin=bool(preset.get("builtin", False)),
     )
-    return __import__("json").dumps(
+    return json.dumps(
         normalized,
         indent=int(indent),
         sort_keys=True,
@@ -82,7 +83,7 @@ def frame_preset_to_json(
 def frame_preset_from_json(text: str) -> dict[str, Any]:
     """Parse and normalize one portable Frame Wizard preset JSON document."""
     try:
-        raw = __import__("json").loads(str(text))
+        raw = json.loads(str(text))
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Invalid Frame Wizard preset JSON: {exc}") from exc
     if not isinstance(raw, dict):
