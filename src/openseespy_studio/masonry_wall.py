@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from .project import MaterialData, ProjectDatabase, SelectionSetData
+from .project import (
+    MaterialData,
+    ProjectDatabase,
+    SectionData,
+    SelectionSetData,
+    TransformationData,
+)
 
 
 @dataclass(slots=True)
@@ -26,6 +32,11 @@ class MasonryWallSpec:
     # MasonPan12 formulation.
     masonpan_w_tot: float = 0.25
     masonpan_w1: float = 0.50
+
+    # Surrounding frame required for a stable standalone infill model.
+    boundary_E: float = 30.0e9
+    boundary_width: float = 0.30
+    boundary_depth: float = 0.30
 
     # OpenSees Masonry material strategy.
     material_strategy: str = "CreateCustom"
@@ -61,6 +72,9 @@ class MasonryWallBuildResult:
     node_tags: list[int] = field(default_factory=list)
     element_tags: list[int] = field(default_factory=list)
     material_tags: list[int] = field(default_factory=list)
+    boundary_element_tags: list[int] = field(default_factory=list)
+    boundary_section_tag: int | None = None
+    boundary_transformation_tag: int | None = None
     selection_set_names: tuple[str, ...] = ()
 
 
@@ -74,6 +88,19 @@ def validate_masonry_wall_spec(spec: MasonryWallSpec) -> None:
         raise ValueError("Masonry wall width, height and thickness must be positive.")
     if not math.isfinite(float(spec.origin_x)) or not math.isfinite(float(spec.origin_y)):
         raise ValueError("Masonry wall origin must be finite.")
+    if (
+        not math.isfinite(float(spec.boundary_E))
+        or float(spec.boundary_E) <= 0.0
+    ):
+        raise ValueError("Masonry boundary-frame elastic modulus must be positive.")
+    if (
+        not math.isfinite(float(spec.boundary_width))
+        or not math.isfinite(float(spec.boundary_depth))
+        or min(float(spec.boundary_width), float(spec.boundary_depth)) <= 0.0
+    ):
+        raise ValueError(
+            "Masonry boundary-frame width and depth must be positive."
+        )
 
     if str(spec.material_strategy) not in {"CreateCustom", "UseExisting"}:
         raise ValueError(
@@ -259,6 +286,75 @@ def _prepare_project(project: ProjectDatabase, spec: MasonryWallSpec) -> None:
         )
 
 
+def _add_boundary_frame(
+    project: ProjectDatabase,
+    spec: MasonryWallSpec,
+    node_tags: list[int],
+) -> tuple[list[int], int, int]:
+    """Add the surrounding frame that makes the infill topology kinematically valid.
+
+    MasonPan12 is a six-strut infill macro-element. Its perimeter nodes are
+    intended to interact with surrounding beams and columns; the element does
+    not provide rotational stiffness or a self-stable standalone boundary.
+    FEWIZ therefore creates an elastic perimeter frame for the standalone
+    wizard workflow instead of leaving the infill nodes as mechanisms.
+    """
+    section_tag = project.next_section_tag()
+    width = float(spec.boundary_width)
+    depth = float(spec.boundary_depth)
+    area = width * depth
+    iz = width * depth**3 / 12.0
+    project.add_section(
+        SectionData(
+            section_tag,
+            f"{spec.name} · Boundary Frame",
+            "Elastic",
+            parameters={
+                "E": float(spec.boundary_E),
+                "A": area,
+                "Iz": iz,
+            },
+        )
+    )
+
+    transf_tag = project.next_transformation_tag()
+    project.add_transformation(
+        TransformationData(
+            transf_tag,
+            f"{spec.name} · Boundary Frame Linear",
+            "Linear",
+            orientation_mode="auto",
+        )
+    )
+
+    frame_tags: list[int] = []
+    pairs = [
+        (node_tags[index], node_tags[(index + 1) % len(node_tags)])
+        for index in range(len(node_tags))
+    ]
+    next_element = project.next_element_tag()
+    for i_node, j_node in pairs:
+        while (
+            next_element in project.model.elements
+            or next_element in project.connections
+        ):
+            next_element += 1
+        project.model.add_element(
+            next_element,
+            i_node,
+            j_node,
+            element_type="elasticBeamColumn",
+            section_tag=section_tag,
+            transf_tag=transf_tag,
+            group="masonry-boundary",
+        )
+        project.validate_element_state(next_element)
+        frame_tags.append(next_element)
+        next_element += 1
+
+    return frame_tags, section_tag, transf_tag
+
+
 def _build_equivalent_strut(
     project: ProjectDatabase,
     spec: MasonryWallSpec,
@@ -323,10 +419,15 @@ def _build_equivalent_strut(
         element_tags.append(next_element)
         next_element += 1
 
+    boundary_tags, boundary_section_tag, boundary_transf_tag = (
+        _add_boundary_frame(project, spec, node_tags)
+    )
+
     selection_names = (
         _unique_selection_name(project, f"{spec.name} · Base"),
         _unique_selection_name(project, f"{spec.name} · Top"),
         _unique_selection_name(project, f"{spec.name} · Masonry"),
+        _unique_selection_name(project, f"{spec.name} · Boundary Frame"),
     )
     project.add_selection_set(
         SelectionSetData(selection_names[0], node_tags={node_tags[0], node_tags[1]})
@@ -337,10 +438,16 @@ def _build_equivalent_strut(
     project.add_selection_set(
         SelectionSetData(selection_names[2], element_tags=set(element_tags))
     )
+    project.add_selection_set(
+        SelectionSetData(selection_names[3], element_tags=set(boundary_tags))
+    )
     return MasonryWallBuildResult(
         node_tags=node_tags,
         element_tags=element_tags,
         material_tags=[material_tag],
+        boundary_element_tags=boundary_tags,
+        boundary_section_tag=boundary_section_tag,
+        boundary_transformation_tag=boundary_transf_tag,
         selection_set_names=selection_names,
     )
 
@@ -441,10 +548,15 @@ def _build_masonpan12(
     )
     project.validate_element_state(element_tag)
 
+    boundary_tags, boundary_section_tag, boundary_transf_tag = (
+        _add_boundary_frame(project, spec, node_tags)
+    )
+
     selection_names = (
         _unique_selection_name(project, f"{spec.name} · Base"),
         _unique_selection_name(project, f"{spec.name} · Top"),
         _unique_selection_name(project, f"{spec.name} · Masonry"),
+        _unique_selection_name(project, f"{spec.name} · Boundary Frame"),
     )
     project.add_selection_set(
         SelectionSetData(selection_names[0], node_tags=set(node_tags[:4]))
@@ -455,10 +567,16 @@ def _build_masonpan12(
     project.add_selection_set(
         SelectionSetData(selection_names[2], element_tags={element_tag})
     )
+    project.add_selection_set(
+        SelectionSetData(selection_names[3], element_tags=set(boundary_tags))
+    )
     return MasonryWallBuildResult(
         node_tags=node_tags,
         element_tags=[element_tag],
         material_tags=[central_tag, lateral_tag],
+        boundary_element_tags=boundary_tags,
+        boundary_section_tag=boundary_section_tag,
+        boundary_transformation_tag=boundary_transf_tag,
         selection_set_names=selection_names,
     )
 
