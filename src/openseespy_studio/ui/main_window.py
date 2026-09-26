@@ -5675,7 +5675,14 @@ class MainWindow(QMainWindow):
             before,
         )
         if spec.planar_2d:
-            self.viewport.set_view("xz")
+            if str(spec.joint_model) in {
+                "Joint2D",
+                "BeamColumnJoint",
+                "KrawinklerPanelZone",
+            }:
+                self.viewport.set_view("xy")
+            else:
+                self.viewport.set_view("xz")
 
     def _sync_viewport_display_data(
         self,
