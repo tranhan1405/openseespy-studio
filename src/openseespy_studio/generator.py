@@ -77,6 +77,16 @@ class FrameGridSpec:
     joint_model: str = "None"
     joint_material_tag: int | None = None
     joint_scope: str = "all"
+    joint_panel_width: float = 0.40
+    joint_panel_height: float = 0.50
+    joint_interface_material_tags: tuple[int, ...] = (0, 0, 0, 0)
+    joint_large_disp: int = 0
+    joint_component_material_tags: tuple[int, ...] = ()
+    joint_height_factor: float = 1.0
+    joint_width_factor: float = 1.0
+    joint_rigid_a: float = 0.0
+    joint_rigid_e: float = 0.0
+    joint_rigid_i: float = 0.0
     planar_2d: bool = False
     planar_base_support: str = "Fixed"
 
@@ -262,30 +272,135 @@ def validate_frame_grid_spec(spec: FrameGridSpec) -> None:
                     "supported by Frame Wizard."
                 )
     joint_model = str(spec.joint_model or "None")
-    if joint_model not in {"None", "ZeroLength"}:
+    supported_joint_models = {
+        "None",
+        "ZeroLength",
+        "Joint2D",
+        "BeamColumnJoint",
+        "KrawinklerPanelZone",
+    }
+    if joint_model not in supported_joint_models:
         raise ValueError(
-            f"Frame Wizard joint model {joint_model!r} is not available in "
-            "this phase."
+            f"Frame Wizard joint model {joint_model!r} is not supported."
         )
     if str(spec.joint_scope) not in {"all", "interior"}:
         raise ValueError("Frame joint scope must be 'all' or 'interior'.")
-    if joint_model == "ZeroLength":
+
+    if joint_model != "None":
         if not bool(spec.create_columns):
             raise ValueError(
-                "Semi-rigid beam-column joints require columns to be created."
+                "Beam-column joints require columns to be created."
             )
         if not (
             bool(spec.create_beams_x)
             or (not spec.planar_2d and bool(spec.create_beams_y))
         ):
             raise ValueError(
-                "Semi-rigid beam-column joints require at least one beam family."
+                "Beam-column joints require at least one beam family."
             )
+
+    if joint_model == "ZeroLength":
         if spec.joint_material_tag is None or int(spec.joint_material_tag) <= 0:
             raise ValueError(
                 "Semi-rigid beam-column joints require a rotational "
                 "uniaxial material."
             )
+
+    macro_joint_models = {
+        "Joint2D",
+        "BeamColumnJoint",
+        "KrawinklerPanelZone",
+    }
+    if joint_model in macro_joint_models:
+        if not spec.planar_2d:
+            raise ValueError(
+                f"{joint_model} is a planar joint-core model in Frame Wizard; "
+                "switch the frame dimension to 2D."
+            )
+        if not bool(spec.create_beams_x):
+            raise ValueError(
+                f"{joint_model} requires X-direction beams in the 2D frame."
+            )
+        width = float(spec.joint_panel_width)
+        height = float(spec.joint_panel_height)
+        if (
+            not math.isfinite(width)
+            or not math.isfinite(height)
+            or width <= 0.0
+            or height <= 0.0
+        ):
+            raise ValueError(
+                "Joint panel width and height must be finite and positive."
+            )
+        x_coordinates, _, z_coordinates = frame_grid_coordinates(spec)
+        min_bay = min(
+            x_coordinates[index + 1] - x_coordinates[index]
+            for index in range(len(x_coordinates) - 1)
+        )
+        min_storey = min(
+            z_coordinates[index + 1] - z_coordinates[index]
+            for index in range(len(z_coordinates) - 1)
+        )
+        if width >= min_bay:
+            raise ValueError(
+                "Joint panel width must be smaller than every X bay width."
+            )
+        if height >= min_storey:
+            raise ValueError(
+                "Joint panel height must be smaller than every storey height."
+            )
+        if (
+            str(spec.joint_scope) == "interior"
+            and int(spec.nx) < 2
+        ):
+            raise ValueError(
+                "Interior joint scope requires at least two X bays."
+            )
+
+    if joint_model == "Joint2D":
+        if spec.joint_material_tag is None or int(spec.joint_material_tag) <= 0:
+            raise ValueError("Joint2D requires a panel rotational material.")
+        interface = tuple(int(tag) for tag in spec.joint_interface_material_tags)
+        if len(interface) != 4 or any(tag < 0 for tag in interface):
+            raise ValueError(
+                "Joint2D requires four interface material tags (zero = rigid)."
+            )
+        if int(spec.joint_large_disp) not in {0, 1, 2}:
+            raise ValueError("Joint2D large-displacement flag must be 0, 1, or 2.")
+
+    if joint_model == "BeamColumnJoint":
+        components = tuple(
+            int(tag) for tag in spec.joint_component_material_tags
+        )
+        if len(components) != 13 or any(tag <= 0 for tag in components):
+            raise ValueError(
+                "BeamColumnJoint requires 13 positive component material tags."
+            )
+        if (
+            not math.isfinite(float(spec.joint_height_factor))
+            or not math.isfinite(float(spec.joint_width_factor))
+            or float(spec.joint_height_factor) <= 0.0
+            or float(spec.joint_width_factor) <= 0.0
+        ):
+            raise ValueError(
+                "BeamColumnJoint height/width factors must be positive."
+            )
+
+    if joint_model == "KrawinklerPanelZone":
+        if spec.joint_material_tag is None or int(spec.joint_material_tag) <= 0:
+            raise ValueError(
+                "Krawinkler panel-zone requires a panel rotational material."
+            )
+        for label, value in (
+            ("rigid A", spec.joint_rigid_a),
+            ("rigid E", spec.joint_rigid_e),
+            ("rigid I", spec.joint_rigid_i),
+        ):
+            numeric = float(value)
+            if not math.isfinite(numeric) or numeric <= 0.0:
+                raise ValueError(
+                    f"Krawinkler panel-zone requires positive {label}."
+                )
 
     frame_grid_coordinates(spec)
 
@@ -472,15 +587,26 @@ def generate_frame_grid(model: StructuralModel, spec: FrameGridSpec) -> None:
 
 
 def frame_joint_connection_count(spec: FrameGridSpec) -> int:
-    """Return the number of explicit zeroLength joint springs to create."""
-    if str(spec.joint_model or "None") != "ZeroLength":
-        return 0
-    if not bool(spec.create_columns):
+    """Return the number of explicit joint connection objects to create."""
+    joint_model = str(spec.joint_model or "None")
+    if joint_model == "None" or not bool(spec.create_columns):
         return 0
 
     nx = int(spec.nx)
     nz = int(spec.nz)
     scope = str(spec.joint_scope or "all")
+
+    if joint_model in {
+        "Joint2D",
+        "BeamColumnJoint",
+        "KrawinklerPanelZone",
+    }:
+        if not spec.planar_2d or not spec.create_beams_x:
+            return 0
+        x_indices = range(nx + 1)
+        if scope == "interior":
+            x_indices = range(1, nx)
+        return len(tuple(x_indices)) * nz
 
     if spec.planar_2d:
         x_indices = range(nx + 1)
@@ -653,18 +779,285 @@ def apply_frame_zero_length_joints(project, spec: FrameGridSpec) -> dict[str, in
     }
 
 
+def _frame_add_member(
+    model: StructuralModel,
+    tag: int,
+    i_node: int,
+    j_node: int,
+    *,
+    role: str,
+    spec: FrameGridSpec,
+) -> None:
+    is_column = role == "column"
+    model.add_element(
+        tag,
+        i_node,
+        j_node,
+        element_type=(
+            spec.column_element_type if is_column else spec.beam_element_type
+        ),
+        section_tag=(
+            spec.column_section_tag if is_column else spec.beam_section_tag
+        ),
+        transf_tag=(
+            spec.column_transf_tag if is_column else spec.beam_transf_tag
+        ),
+        group="column-2d" if is_column else "beam-2d",
+        integration_type=(
+            spec.column_integration_type
+            if is_column else spec.beam_integration_type
+        ),
+        integration_points=(
+            spec.column_integration_points
+            if is_column else spec.beam_integration_points
+        ),
+        mass_per_length=(
+            spec.column_mass_per_length
+            if is_column else spec.beam_mass_per_length
+        ),
+        consistent_mass=(
+            spec.column_consistent_mass
+            if is_column else spec.beam_consistent_mass
+        ),
+        hinge_i_section_tag=(
+            spec.column_hinge_i_section_tag
+            if is_column else spec.beam_hinge_i_section_tag
+        ),
+        hinge_j_section_tag=(
+            spec.column_hinge_j_section_tag
+            if is_column else spec.beam_hinge_j_section_tag
+        ),
+        interior_section_tag=(
+            spec.column_interior_section_tag
+            if is_column else spec.beam_interior_section_tag
+        ),
+        hinge_i_length=(
+            spec.column_hinge_i_length
+            if is_column else spec.beam_hinge_i_length
+        ),
+        hinge_j_length=(
+            spec.column_hinge_j_length
+            if is_column else spec.beam_hinge_j_length
+        ),
+    )
+
+
+def _frame_macro_material_tags(spec: FrameGridSpec) -> set[int]:
+    model = str(spec.joint_model or "None")
+    tags: set[int] = set()
+    if model in {"Joint2D", "KrawinklerPanelZone"}:
+        if spec.joint_material_tag is not None:
+            tags.add(int(spec.joint_material_tag))
+    if model == "Joint2D":
+        tags.update(
+            int(tag)
+            for tag in spec.joint_interface_material_tags
+            if int(tag) > 0
+        )
+    if model == "BeamColumnJoint":
+        tags.update(int(tag) for tag in spec.joint_component_material_tags)
+    return tags
+
+
+def generate_frame_macro_joint_project(
+    project,
+    spec: FrameGridSpec,
+) -> dict[str, int]:
+    """Build a native 2D frame whose selected intersections are joint cores."""
+    validate_frame_grid_spec(spec)
+    joint_model = str(spec.joint_model)
+    if joint_model not in {
+        "Joint2D",
+        "BeamColumnJoint",
+        "KrawinklerPanelZone",
+    }:
+        raise ValueError("Macro-joint frame generator received a non-macro model.")
+
+    missing_materials = sorted(
+        tag
+        for tag in _frame_macro_material_tags(spec)
+        if tag not in project.materials
+    )
+    if missing_materials:
+        raise ValueError(
+            "Joint material tag(s) do not exist: "
+            + ", ".join(map(str, missing_materials))
+        )
+
+    x_coordinates, _, z_coordinates = frame_grid_coordinates(spec)
+    model = project.model
+    model.clear()
+    model.ndm = 2
+    model.ndf = 3
+
+    nx = int(spec.nx)
+    nz = int(spec.nz)
+    scope = str(spec.joint_scope or "all")
+    active_i = set(range(nx + 1))
+    if scope == "interior":
+        active_i = set(range(1, nx))
+
+    macro_points = {
+        (i, k)
+        for k in range(1, nz + 1)
+        for i in active_i
+    }
+    node_tag = int(spec.start_node_tag)
+    centers: dict[tuple[int, int], int] = {}
+    cores: dict[tuple[int, int], dict[str, int]] = {}
+    half_width = 0.5 * float(spec.joint_panel_width)
+    half_height = 0.5 * float(spec.joint_panel_height)
+
+    for k in range(nz + 1):
+        for i in range(nx + 1):
+            x = float(x_coordinates[i])
+            y = float(z_coordinates[k])
+            if (i, k) in macro_points:
+                core: dict[str, int] = {}
+                for key, px, py in (
+                    ("left", x - half_width, y),
+                    ("top", x, y + half_height),
+                    ("right", x + half_width, y),
+                    ("bottom", x, y - half_height),
+                ):
+                    model.add_node(node_tag, px, py, 0.0, ndf=3)
+                    core[key] = node_tag
+                    node_tag += 1
+                cores[(i, k)] = core
+            else:
+                model.add_node(node_tag, x, y, 0.0, ndf=3)
+                centers[(i, k)] = node_tag
+                node_tag += 1
+
+    def vertical_endpoint(i: int, k: int, *, leaving_up: bool) -> int:
+        core = cores.get((i, k))
+        if core is None:
+            return centers[(i, k)]
+        return core["top" if leaving_up else "bottom"]
+
+    def horizontal_endpoint(i: int, k: int, *, leaving_right: bool) -> int:
+        core = cores.get((i, k))
+        if core is None:
+            return centers[(i, k)]
+        return core["right" if leaving_right else "left"]
+
+    ele_tag = int(spec.start_element_tag)
+    if spec.create_columns:
+        for k in range(nz):
+            for i in range(nx + 1):
+                _frame_add_member(
+                    model,
+                    ele_tag,
+                    vertical_endpoint(i, k, leaving_up=True),
+                    vertical_endpoint(i, k + 1, leaving_up=False),
+                    role="column",
+                    spec=spec,
+                )
+                ele_tag += 1
+
+    if spec.create_beams_x:
+        for k in range(1, nz + 1):
+            for i in range(nx):
+                _frame_add_member(
+                    model,
+                    ele_tag,
+                    horizontal_endpoint(i, k, leaving_right=True),
+                    horizontal_endpoint(i + 1, k, leaving_right=False),
+                    role="beam",
+                    spec=spec,
+                )
+                ele_tag += 1
+
+    base_fixity = (
+        (1, 1, 1)
+        if spec.planar_base_support == "Fixed"
+        else (1, 1, 0)
+    )
+    for i in range(nx + 1):
+        model.set_fixity(centers[(i, 0)], base_fixity)
+
+    connection_tag = max(model.elements, default=0) + 1
+    for i, k in sorted(macro_points, key=lambda item: (item[1], item[0])):
+        core = cores[(i, k)]
+        external_nodes = [
+            core["left"],
+            core["top"],
+            core["right"],
+            core["bottom"],
+        ]
+        parameters: dict[str, object] = {
+            "external_nodes": external_nodes,
+        }
+        if joint_model == "Joint2D":
+            parameters.update({
+                "panel_material": int(spec.joint_material_tag),
+                "interface_materials": [
+                    int(tag) for tag in spec.joint_interface_material_tags
+                ],
+                "large_disp": int(spec.joint_large_disp),
+            })
+        elif joint_model == "BeamColumnJoint":
+            parameters.update({
+                "component_materials": [
+                    int(tag) for tag in spec.joint_component_material_tags
+                ],
+                "height_factor": float(spec.joint_height_factor),
+                "width_factor": float(spec.joint_width_factor),
+            })
+        else:
+            parameters.update({
+                "panel_material": int(spec.joint_material_tag),
+                "rigid_A": float(spec.joint_rigid_a),
+                "rigid_E": float(spec.joint_rigid_e),
+                "rigid_I": float(spec.joint_rigid_i),
+            })
+
+        project.add_connection(
+            ConnectionData(
+                tag=connection_tag,
+                name=f"Frame {joint_model} joint X{i + 1}-L{k}",
+                connection_type=joint_model,
+                node_i=core["left"],
+                node_j=core["right"],
+                materials_by_dof={},
+                parameters=parameters,
+            )
+        )
+        connection_tag += 1
+
+    return {
+        "joint_nodes": len(macro_points),
+        "joint_connections": len(macro_points),
+        "duplicate_nodes": 0,
+        "joint_constraints": 0,
+        "panel_external_nodes": 4 * len(macro_points),
+    }
+
+
 def generate_frame_project(project, spec: FrameGridSpec) -> dict[str, int]:
     """Replace model-linked project data with one Frame Wizard model."""
     validate_frame_grid_spec(spec)
     project.clear_model_linked_data()
+    joint_model = str(spec.joint_model or "None")
+    if joint_model in {
+        "Joint2D",
+        "BeamColumnJoint",
+        "KrawinklerPanelZone",
+    }:
+        return generate_frame_macro_joint_project(project, spec)
+
+    # Standard/zeroLength modes retain FEWIZ's 3D/6DOF frame backend.
+    project.model.ndm = 3
+    project.model.ndf = 6
     generate_frame_grid(project.model, spec)
-    if str(spec.joint_model or "None") == "ZeroLength":
+    if joint_model == "ZeroLength":
         return apply_frame_zero_length_joints(project, spec)
     return {
         "joint_nodes": 0,
         "joint_connections": 0,
         "duplicate_nodes": 0,
         "joint_constraints": 0,
+        "panel_external_nodes": 0,
     }
 
 
@@ -1815,6 +2208,7 @@ def connection_to_openseespy(
         rigid_i = float(connection.parameters["rigid_I"])
         p = f"_sare_pz_{connection.tag}"
         rayleigh = 1 if connection.do_rayleigh else 0
+        rotation_dof = 3 if int(ndm) == 2 and int(ndf) == 3 else 6
 
         # The macro follows the Gupta-Krawinkler topology used by the
         # OpenSees panel-zone example: eight very-stiff elastic frame
@@ -1900,7 +2294,7 @@ def connection_to_openseespy(
             (
                 f"ops.element('zeroLength', {connection.tag}, "
                 f"{p}_tlh, {p}_tlv, '-mat', {panel_material}, "
-                f"'-dir', 6, '-doRayleigh', {rayleigh})"
+                f"'-dir', {rotation_dof}, '-doRayleigh', {rayleigh})"
             ),
         ])
 
