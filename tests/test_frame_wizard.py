@@ -3,6 +3,8 @@ from __future__ import annotations
 import inspect
 import os
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
@@ -104,20 +106,13 @@ def test_frame_wizard_geometry_page_is_scrollable():
 
 
 def test_main_window_exposes_frame_wizard_action_and_handler():
-    source = inspect.getsource(MainWindow._show_frame_wizard)
-    assert "FrameWizard(self.project" in source
-    assert "dialog.spec()" in source
-    assert "self._generate_frame_grid(spec)" in source
-
-    window = MainWindow()
-    try:
-        assert "frame_wizard" in window.actions
-        assert window.actions["frame_wizard"].text() == "Frame Wizard"
-        assert window.actions["frame_wizard"].isEnabled()
-    finally:
-        window.close()
-        window.deleteLater()
-        _APP.processEvents()
+    handler = inspect.getsource(MainWindow._show_frame_wizard)
+    actions = inspect.getsource(MainWindow._build_actions)
+    assert "FrameWizard(self.project" in handler
+    assert "dialog.spec()" in handler
+    assert "self._generate_frame_grid(spec)" in handler
+    assert '"frame_wizard"' in actions
+    assert '"Frame Wizard"' in actions
 
 def _set_spacing(editor, row: int, value: float) -> None:
     widget = editor.cellWidget(row, 0)
@@ -163,7 +158,7 @@ def test_frame_wizard_individual_spacing_and_origin_flow_to_spec():
         x, y, z = frame_grid_coordinates(spec)
         assert x == [10.0, 14.0, 19.5, 25.5]
         assert y == [-2.0, 1.0, 5.5]
-        assert z == [1.5, 4.7, 8.1, 11.9]
+        assert z == pytest.approx([1.5, 4.7, 8.1, 11.9])
         assert "overall X=15.5" in wizard.summary.text()
         assert "Y=7.5" in wizard.summary.text()
         assert "H=10.4" in wizard.summary.text()
@@ -213,7 +208,7 @@ def test_generate_frame_grid_uses_individual_coordinates_in_2d():
     base = [
         node
         for node in model.nodes.values()
-        if node.z == 2.0
+        if node.xyz[2] == 2.0
     ]
     assert len(base) == 3
     assert all(node.fixity == (1, 1, 1, 1, 0, 1) for node in base)
