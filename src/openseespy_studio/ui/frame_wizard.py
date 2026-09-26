@@ -4611,6 +4611,7 @@ class FrameWizard(QWizard):
         definition_errors = self._review_validation_errors(
             include_replacement_ack=False
         )
+        dry_run_error = ""
         if definition_errors:
             self.review_build.setText(
                 "<b>Dry-run unavailable</b><br>"
@@ -4646,12 +4647,14 @@ class FrameWizard(QWizard):
                     )
                 )
             except (TypeError, ValueError) as exc:
-                definition_errors.append(str(exc))
+                dry_run_error = str(exc)
                 self.review_build.setText(
-                    "<b>Dry-run failed</b><br>" + str(exc)
+                    "<b>Dry-run failed</b><br>" + dry_run_error
                 )
 
         errors = self._review_validation_errors()
+        if dry_run_error and dry_run_error not in errors:
+            errors.append(dry_run_error)
         finish = self.button(QWizard.FinishButton)
         if errors:
             self.review_validation_status.setText(
