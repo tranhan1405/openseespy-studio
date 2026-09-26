@@ -2067,3 +2067,177 @@ def test_unified_wall_wizard_enables_mvlem_3d_controls():
         wizard.close()
         wizard.deleteLater()
 
+def test_wall_macro_wizard_is_ready_on_fresh_project_without_dependencies():
+    project = ProjectDatabase()
+    wizard = RCWallWizard(project)
+    try:
+        for formulation in ("MVLEM", "SFI_MVLEM", "MVLEM_3D"):
+            wizard.formulation.setCurrentIndex(
+                wizard.formulation.findData(formulation)
+            )
+            wizard._update_review()
+            _APP.processEvents()
+
+            assert wizard._preview_validation_items() == []
+            finish = wizard.button(QWizard.WizardButton.FinishButton)
+            assert finish is not None
+            assert finish.isEnabled()
+            assert "Ready to create wall" in (
+                wizard.preview_validation_status.text()
+            )
+
+        wizard.formulation.setCurrentIndex(
+            wizard.formulation.findData("MVLEM")
+        )
+        assert wizard.macro_shear_material.currentData() is None
+        assert "Auto" in wizard.macro_shear_material.currentText()
+
+        wizard.formulation.setCurrentIndex(
+            wizard.formulation.findData("SFI_MVLEM")
+        )
+        assert wizard.macro_web_fsam.currentData() is None
+        assert wizard.macro_boundary_fsam.currentData() is None
+        assert "Auto" in wizard.macro_web_fsam.currentText()
+        assert "Auto" in wizard.macro_boundary_fsam.currentText()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_mvlem_builder_auto_creates_dimensionally_correct_shear_spring():
+    project = ProjectDatabase()
+    project.units = {
+        "length": "mm",
+        "force": "N",
+        "time": "s",
+    }
+    spec = RCWallSpec(
+        width=1200.0,
+        height=3000.0,
+        thickness=200.0,
+        boundary_width=200.0,
+        vertical_elements=3,
+        macro_fibers=6,
+        formulation="MVLEM",
+        macro_shear_material_tag=None,
+        boundary_unconfined_thickness=50.0,
+        boundary_confined_thickness=150.0,
+        replace_geometry=True,
+        name="Auto MVLEM",
+    )
+
+    result = build_rc_wall_macro_2d(project, spec)
+    first = project.model.elements[result.element_tags[0]]
+    shear_tag = int(first.wall_shear_tag)
+    shear = project.materials[shear_tag]
+
+    assert shear.material_type == "Elastic"
+    assert shear.source["role"] == "mvlem_shear"
+    assert shear.source["parameter_dimensions"]["E"] == "force_per_length"
+    assert shear_tag in result.material_tags
+
+    ec = 2.0 * abs(spec.concrete_fc_web) / abs(spec.concrete_eps_web)
+    g = ec / (2.0 * (1.0 + spec.macro_poisson))
+    expected_si = g * (1.2 * 0.2) / 1.0
+    assert shear.parameters["E"] == pytest.approx(expected_si)
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    expected_n_per_mm = expected_si * 0.001
+    assert (
+        f"ops.uniaxialMaterial('Elastic', {shear_tag}, "
+        f"{expected_n_per_mm:g})"
+    ) in script
+    assert "ops.element('MVLEM'" in script
+
+
+def test_sfi_mvlem_builder_auto_creates_fsam_dependencies():
+    project = ProjectDatabase()
+    spec = RCWallSpec(
+        width=1.20,
+        height=3.00,
+        thickness=0.20,
+        boundary_width=0.20,
+        vertical_elements=2,
+        macro_fibers=5,
+        formulation="SFI_MVLEM",
+        macro_web_fsam_tag=None,
+        macro_boundary_fsam_tag=None,
+        boundary_unconfined_thickness=0.05,
+        boundary_confined_thickness=0.15,
+        replace_geometry=True,
+        name="Auto SFI",
+    )
+
+    result = build_rc_wall_macro_2d(project, spec)
+
+    assert len(result.material_tags) == 5
+    assert len(result.nd_material_tags) == 2
+    assert {
+        project.nd_materials[tag].material_type
+        for tag in result.nd_material_tags
+    } == {"FSAM"}
+    assert {
+        project.materials[tag].material_type
+        for tag in result.material_tags
+    } == {"Steel02", "ConcreteCM"}
+
+    first = project.model.elements[result.element_tags[0]]
+    assert first.element_type == "SFI_MVLEM"
+    assert first.wall_nd_material_tags[0] != first.wall_nd_material_tags[1]
+    assert first.wall_nd_material_tags[0] == first.wall_nd_material_tags[-1]
+
+    script = to_openseespy(
+        project.model,
+        materials=project.materials,
+        sections=project.sections,
+        transformations=project.transformations,
+        constraints=project.constraints,
+        connections=project.connections,
+        units=project.units,
+        nd_materials=project.nd_materials,
+    )
+    assert "ops.nDMaterial('FSAM'" in script
+    assert "ops.element('SFI_MVLEM'" in script
+    assert "# ERROR:" not in script
+
+
+def test_mvlem_3d_builder_auto_creates_shear_spring():
+    project = ProjectDatabase()
+    spec = RCWallSpec(
+        width=1.20,
+        height=3.00,
+        thickness=0.20,
+        boundary_width=0.20,
+        vertical_elements=2,
+        macro_fibers=6,
+        formulation="MVLEM_3D",
+        macro_shear_material_tag=None,
+        boundary_unconfined_thickness=0.05,
+        boundary_confined_thickness=0.15,
+        replace_geometry=True,
+        name="Auto MVLEM3D",
+    )
+
+    result = build_rc_wall_macro_3d(project, spec)
+    first = project.model.elements[result.element_tags[0]]
+    shear_tag = int(first.wall_shear_tag)
+
+    assert project.materials[shear_tag].source["role"] == "mvlem_shear"
+    assert shear_tag in result.material_tags
+    assert len(result.material_tags) == 5
+    assert not [
+        issue
+        for issue in validate_project(project)
+        if issue.severity == "ERROR"
+    ]
+
