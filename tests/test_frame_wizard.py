@@ -995,10 +995,10 @@ def test_frame_wizard_exposes_task3_macro_joint_controls():
             wizard.joint_material.findData(21)
         )
         _APP.processEvents()
-        assert wizard.joint_panel_group.isVisible()
-        assert wizard.joint2d_group.isVisible()
-        assert not wizard.bcj_group.isVisible()
-        assert not wizard.kraw_group.isVisible()
+        assert not wizard.joint_panel_group.isHidden()
+        assert not wizard.joint2d_group.isHidden()
+        assert wizard.bcj_group.isHidden()
+        assert wizard.kraw_group.isHidden()
 
         wizard.joint_model.setCurrentIndex(
             wizard.joint_model.findData("BeamColumnJoint")
@@ -1006,7 +1006,7 @@ def test_frame_wizard_exposes_task3_macro_joint_controls():
         for index, combo in enumerate(wizard.bcj_materials):
             combo.setCurrentIndex(combo.findData(21 + index))
         _APP.processEvents()
-        assert wizard.bcj_group.isVisible()
+        assert not wizard.bcj_group.isHidden()
         assert not wizard.joint_material.isEnabled()
         assert wizard.spec().joint_component_material_tags == tuple(
             range(21, 34)
@@ -1137,6 +1137,7 @@ def test_generate_krawinkler_native_2d_uses_rotational_dof_three():
         joint_rigid_e=2.0e12,
         joint_rigid_i=1000.0,
     )
+    prepare_frame_grid(project, spec)
     generate_frame_project(project, spec)
     source = to_openseespy(
         project.model,
