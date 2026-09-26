@@ -83,7 +83,7 @@ def validate_masonry_wall_spec(spec: MasonryWallSpec) -> None:
     if float(spec.L) <= 0.0:
         raise ValueError("Masonry material L must be positive.")
     if float(spec.a1) <= 0.0 or float(spec.a2) < 0.0:
-        raise ValueError("Masonry area ratios a1/a2 must be non-negative, with a1 > 0.")
+        raise ValueError("Masonry Area1/Area2 factors must be non-negative, with Area1 > 0.")
     if float(spec.D1) >= 0.0 or float(spec.D2) >= 0.0:
         raise ValueError("Masonry degradation strains D1/D2 must be negative.")
     if int(spec.IENV) not in {0, 1}:
@@ -124,8 +124,8 @@ def _material_parameters(spec: MasonryWallSpec) -> dict[str, float]:
         "Ucl": float(spec.Ucl),
         "Emo": float(spec.Emo),
         "L": float(spec.L),
-        "a1": float(spec.a1),
-        "a2": float(spec.a2),
+        "A1": float(spec.a1),
+        "A2": float(spec.a2),
         "D1": float(spec.D1),
         "D2": float(spec.D2),
         "Ach": float(spec.Ach),
