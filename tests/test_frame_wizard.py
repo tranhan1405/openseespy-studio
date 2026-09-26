@@ -3408,7 +3408,8 @@ def test_frame_wizard_final_review_updates_3d_system_summary():
         wizard._refresh_brace_scope_tables()
         _APP.processEvents()
 
-        wizard.setCurrentId(wizard.review_page_id)
+        assert wizard.dimension.currentData() == "3D"
+        wizard._update_review_page()
         _APP.processEvents()
 
         assert "3D frame" in wizard.review_geometry.text()
