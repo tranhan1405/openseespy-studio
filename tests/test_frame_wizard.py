@@ -13,6 +13,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QComboBox, QWizard
 
 from openseespy_studio.frame_setup import prepare_frame_grid
+from openseespy_studio.frame_management import (
+    frame_regeneration_plan,
+    managed_frame_conflicts,
+    managed_frame_snapshot,
+)
 from openseespy_studio.frame_presets import (
     frame_spec_from_preset,
     frame_spec_to_preset,
@@ -4121,3 +4126,222 @@ def test_frame_wizard_managed_tree_and_context_menu_hooks_are_exposed():
     assert "managed_edit=True" in edit_source
     assert "Frame Wizard · Regenerate 2D frame" in generate_source
     assert "Frame Wizard · Regenerate 3D frame" in generate_source
+
+
+
+def test_frame_wizard_managed_review_shows_diff_and_compatible_mode():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=2,
+        ny=1,
+        nz=2,
+        planar_2d=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+    )
+    harness = _FrameWizardMainWindowHarness(project)
+    MainWindow._generate_frame_grid(
+        harness,
+        spec,
+        managed_by_frame_wizard=True,
+        recipe_name="Managed",
+    )
+
+    wizard = FrameWizard(
+        project,
+        initial_preset=project.frame_wizard_recipe,
+        managed_edit=True,
+    )
+    try:
+        _APP.processEvents()
+        wizard.x_spacing.setValue(6.0)
+        wizard._update_review_page()
+        _APP.processEvents()
+
+        assert wizard.review_regen_group.isVisible()
+        assert "Generated-object diff:" in wizard.review_regen_diff.text()
+        assert "all generated object tags will be retained" in (
+            wizard.review_regen_diff.text()
+        )
+        assert "managed FE domain matches" in wizard.review_regen_diff.text()
+
+        compatible_index = wizard.review_regen_mode.findData("compatible")
+        assert compatible_index >= 0
+        item = wizard.review_regen_mode.model().item(compatible_index)
+        assert item is not None and item.isEnabled()
+        wizard.review_regen_mode.setCurrentIndex(compatible_index)
+        _APP.processEvents()
+        assert wizard.regeneration_mode() == "compatible"
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_managed_review_detects_manual_conflict_and_requires_ack():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+    )
+    harness = _FrameWizardMainWindowHarness(project)
+    MainWindow._generate_frame_grid(
+        harness,
+        spec,
+        managed_by_frame_wizard=True,
+        recipe_name="Managed",
+    )
+    tag = min(project.model.nodes)
+    project.model.set_fixity(tag, (0, 0, 0, 0, 0, 0))
+
+    wizard = FrameWizard(
+        project,
+        initial_preset=project.frame_wizard_recipe,
+        managed_edit=True,
+    )
+    try:
+        wizard.show()
+        _APP.processEvents()
+        wizard.review_replace_ack.setChecked(True)
+        wizard._update_review_page()
+        _APP.processEvents()
+
+        text = wizard.review_regen_diff.text()
+        assert "Manual edit conflict:" in text
+        assert "nodes" in text
+        assert wizard.review_conflict_ack.isVisible()
+
+        compatible_index = wizard.review_regen_mode.findData("compatible")
+        item = wizard.review_regen_mode.model().item(compatible_index)
+        assert item is not None and not item.isEnabled()
+
+        assert not wizard.validateCurrentPage() or (
+            "Confirm overwrite" in wizard.review_validation_status.text()
+        )
+        wizard.review_conflict_ack.setChecked(True)
+        _APP.processEvents()
+        assert "Confirm overwrite" not in wizard.review_validation_status.text()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_frame_wizard_topology_change_disables_compatible_update():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+    )
+    harness = _FrameWizardMainWindowHarness(project)
+    MainWindow._generate_frame_grid(
+        harness,
+        spec,
+        managed_by_frame_wizard=True,
+        recipe_name="Managed",
+    )
+
+    wizard = FrameWizard(
+        project,
+        initial_preset=project.frame_wizard_recipe,
+        managed_edit=True,
+    )
+    try:
+        wizard.x_bays.setValue(3)
+        wizard._update_review_page()
+        _APP.processEvents()
+
+        assert "Tag-set changes:" in wizard.review_regen_diff.text()
+        compatible_index = wizard.review_regen_mode.findData("compatible")
+        item = wizard.review_regen_mode.model().item(compatible_index)
+        assert item is not None and not item.isEnabled()
+        assert wizard.regeneration_mode() == "all"
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
+
+
+def test_main_window_compatible_regeneration_preserves_generated_tags():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=2,
+        ny=1,
+        nz=2,
+        planar_2d=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+    )
+    harness = _FrameWizardMainWindowHarness(project)
+    MainWindow._generate_frame_grid(
+        harness,
+        spec,
+        managed_by_frame_wizard=True,
+        recipe_name="Managed",
+    )
+    node_tags = tuple(sorted(project.model.nodes))
+    element_tags = tuple(sorted(project.model.elements))
+
+    revised = frame_spec_from_preset(project.frame_wizard_recipe)
+    revised.dx = 6.5
+    MainWindow._generate_frame_grid(
+        harness,
+        revised,
+        managed_by_frame_wizard=True,
+        recipe_name="Managed",
+        regenerating=True,
+        regeneration_mode="compatible",
+    )
+
+    assert tuple(sorted(project.model.nodes)) == node_tags
+    assert tuple(sorted(project.model.elements)) == element_tags
+    assert harness.history[-1][0] == (
+        "Frame Wizard · Compatible update 3D frame"
+    )
+    assert project.frame_wizard_recipe["last_regeneration_mode"] == (
+        "compatible"
+    )
+    assert "stable tags preserved" in harness.messages[-1]
+
+
+def test_main_window_managed_generation_stores_snapshot_for_conflict_detection():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+    )
+    harness = _FrameWizardMainWindowHarness(project)
+    MainWindow._generate_frame_grid(
+        harness,
+        spec,
+        managed_by_frame_wizard=True,
+        recipe_name="Managed",
+    )
+
+    recipe = project.frame_wizard_recipe
+    assert "managed_snapshot" in recipe
+    assert recipe["managed_snapshot"]["version"] == 1
+    assert managed_frame_conflicts(project, recipe) == []
+
+
+def test_frame_wizard_source_wires_regeneration_mode_to_main_window():
+    edit_source = inspect.getsource(MainWindow._edit_frame_wizard)
+    generate_source = inspect.getsource(MainWindow._generate_frame_grid)
+
+    assert "regeneration_mode=dialog.regeneration_mode()" in edit_source
+    assert "frame_regeneration_plan(" in generate_source
+    assert "managed_frame_snapshot(" in generate_source
+    assert "Compatible update 2D frame" in generate_source
+    assert "Compatible update 3D frame" in generate_source
