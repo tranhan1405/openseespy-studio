@@ -2867,4 +2867,118 @@ def test_main_window_frame_wizard_reports_automatic_loads():
     source = inspect.getsource(MainWindow._generate_frame_grid)
     assert '"self_weight_loads"' in source
     assert '"beam_udl_loads"' in source
+    assert '"floor_area_loads"' in source
     assert "beam UDL(s)" in source
+    assert "floor-area beam load(s)" in source
+
+
+def test_frame_floor_area_load_distributes_by_tributary_width():
+    project = _member_project()
+    spec = FrameGridSpec(
+        nx=1,
+        ny=2,
+        nz=1,
+        dx=6.0,
+        dy=4.0,
+        y_bay_widths=(4.0, 6.0),
+        dz=3.5,
+        planar_2d=False,
+        create_columns=True,
+        create_beams_x=True,
+        create_beams_y=False,
+        column_section_tag=1,
+        beam_section_tag=1,
+        load_mode="Static",
+        load_floor_area=True,
+        load_floor_area_pressure=5.0,
+        load_floor_area_direction="X",
+        load_storeys=(1,),
+    )
+    prepare_frame_grid(project, spec)
+    result = generate_frame_project(project, spec)
+
+    assert result["floor_area_loads"] == 3
+    floor_loads = [
+        load
+        for load in project.element_loads.values()
+        if load.name.startswith("Frame floor area load")
+    ]
+    assert len(floor_loads) == 3
+    assert sorted(-float(load.wz) for load in floor_loads) == pytest.approx(
+        [10.0, 15.0, 25.0]
+    )
+
+    total = 0.0
+    for load in floor_loads:
+        element = project.model.elements[int(load.element_tag)]
+        ni = project.model.nodes[int(element.i)]
+        nj = project.model.nodes[int(element.j)]
+        length = math.dist(ni.xyz, nj.xyz)
+        total += -float(load.wz) * length
+
+    # 6 m x (4 + 6) m floor at 5 force/area.
+    assert total == pytest.approx(300.0)
+
+
+def test_frame_floor_area_load_validation_requires_3d_and_positive_pressure():
+    planar = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=True,
+        load_mode="Static",
+        load_floor_area=True,
+        load_floor_area_pressure=5.0,
+        load_floor_area_direction="X",
+    )
+    with pytest.raises(ValueError, match="requires a 3D"):
+        validate_frame_grid_spec(planar)
+
+    zero_pressure = FrameGridSpec(
+        nx=1,
+        ny=1,
+        nz=1,
+        planar_2d=False,
+        create_beams_x=True,
+        load_mode="Static",
+        load_floor_area=True,
+        load_floor_area_pressure=0.0,
+        load_floor_area_direction="X",
+    )
+    with pytest.raises(ValueError, match="must be positive"):
+        validate_frame_grid_spec(zero_pressure)
+
+
+def test_frame_wizard_floor_area_load_maps_to_spec_and_clears_in_2d():
+    wizard = FrameWizard(_member_project())
+    try:
+        wizard.dimension.setCurrentIndex(
+            wizard.dimension.findData("3D")
+        )
+        wizard.load_mode.setCurrentIndex(
+            wizard.load_mode.findData("Static")
+        )
+        wizard.load_floor_area.setChecked(True)
+        wizard.load_floor_area_pressure.setValue(4.5)
+        wizard.load_floor_area_direction.setCurrentIndex(
+            wizard.load_floor_area_direction.findData("Y")
+        )
+        _APP.processEvents()
+
+        spec = wizard.spec()
+        assert spec.load_floor_area
+        assert spec.load_floor_area_pressure == pytest.approx(4.5)
+        assert spec.load_floor_area_direction == "Y"
+        assert "Floor area gravity" in wizard.load_summary.text()
+        assert wizard.load_floor_area_group.isEnabled()
+
+        wizard.dimension.setCurrentIndex(
+            wizard.dimension.findData("2D")
+        )
+        _APP.processEvents()
+        assert not wizard.load_floor_area.isChecked()
+        assert not wizard.load_floor_area_group.isEnabled()
+    finally:
+        wizard.close()
+        wizard.deleteLater()
+        _APP.processEvents()
