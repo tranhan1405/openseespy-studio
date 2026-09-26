@@ -992,8 +992,10 @@ class FrameWizard(QWizard):
         )
         panel_hint = QLabel(
             "Macro models use a native 2D/3DOF core. FEWIZ shortens adjacent "
-            "beam/column centerlines to four external nodes ordered "
-            "Left → Top → Right → Bottom."
+            "beam/column centerlines to four external nodes. Joint2D and "
+            "Krawinkler use Left → Top → Right → Bottom; BeamColumnJoint "
+            "uses Top → Right → Bottom → Left so opposite chords align with "
+            "the global 2D axes."
         )
         panel_hint.setWordWrap(True)
         panel_form.addRow(panel_hint)
