@@ -2217,7 +2217,7 @@ def connection_to_openseespy(
         rigid_i = float(connection.parameters["rigid_I"])
         p = f"_sare_pz_{connection.tag}"
         rayleigh = 1 if connection.do_rayleigh else 0
-        rotation_dof = 3 if int(ndm) == 2 and int(ndf) == 3 else 6
+        rotation_dof = 6
 
         # The macro follows the Gupta-Krawinkler topology used by the
         # OpenSees panel-zone example: eight very-stiff elastic frame
