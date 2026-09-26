@@ -1186,15 +1186,16 @@ class FrameWizard(QWizard):
                 finish.setEnabled(True)
 
     def validateCurrentPage(self) -> bool:  # noqa: N802
-        if self.currentId() == self.geometry_page_id:
-            try:
-                validate_frame_grid_spec(self.spec())
-            except (TypeError, ValueError) as exc:
-                self.validation_status.setText(
-                    "<b>Geometry needs attention</b><br>" + str(exc)
-                )
-                return False
-            return True
+        # Geometry is a prerequisite for every later page. Validate it even
+        # when currentId() is -1 (possible before an offscreen wizard is
+        # shown), so programmatic callers cannot bypass topology checks.
+        try:
+            validate_frame_grid_spec(self.spec())
+        except (TypeError, ValueError) as exc:
+            self.validation_status.setText(
+                "<b>Geometry needs attention</b><br>" + str(exc)
+            )
+            return False
 
         if self.currentId() == self.members_page_id:
             error = self._member_validation_error()
@@ -1203,15 +1204,6 @@ class FrameWizard(QWizard):
                     "<b>Member definition needs attention</b><br>" + error
                 )
                 return False
-            try:
-                validate_frame_grid_spec(self.spec())
-            except (TypeError, ValueError) as exc:
-                self.member_validation_status.setText(
-                    "<b>Member definition needs attention</b><br>"
-                    + str(exc)
-                )
-                return False
-            return True
         return True
 
     def initializePage(self, page_id: int) -> None:  # noqa: N802
